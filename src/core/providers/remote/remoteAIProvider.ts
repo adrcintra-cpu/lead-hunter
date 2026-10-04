@@ -20,5 +20,7 @@ export function createRemoteAIProvider(client: SupabaseClient): AIProvider {
     summarizeCompany: (company) => call('summarizeCompany', { company }),
     adjustScore: (company, ruleScore, icp) => call('adjustScore', { company, ruleScore, icp }),
     generateApproach: (company, channel, options) => call('generateApproach', { company, channel, options }),
+    classifyReply: (text) => call('classifyReply', { text }),
+    summarizeResults: (snapshot) => call('summarizeResults', { snapshot }),
   };
 }

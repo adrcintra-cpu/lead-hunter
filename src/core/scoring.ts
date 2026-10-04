@@ -94,64 +94,105 @@ export function applyCompanyData(base: Company, data: Partial<RawCompany>, provi
   return out;
 }
 
-export const tierOf = (score: number): ScoreTier => (score >= 75 ? 'alta' : score >= 50 ? 'media' : 'baixa');
+/** Faixas de temperatura. 80–100 quente, 50–79 morno, 0–49 frio. */
+export const TIER_THRESHOLDS = { hot: 80, warm: 50 };
+
+export const tierOf = (score: number): ScoreTier => (score >= TIER_THRESHOLDS.hot ? 'alta' : score >= TIER_THRESHOLDS.warm ? 'media' : 'baixa');
 
 export const TIER_LABEL: Record<ScoreTier, string> = {
-  alta: 'Alta oportunidade',
-  media: 'Média oportunidade',
-  baixa: 'Baixa oportunidade',
+  alta: 'Lead quente',
+  media: 'Lead morno',
+  baixa: 'Lead frio',
 };
 
 /**
- * Base determinística do score (0–100). Usa SOMENTE dados encontrados.
+ * Peso máximo de cada critério (soma 100). Ficam num lugar só para que,
+ * no futuro, o usuário possa configurar os critérios sem mexer na lógica.
+ */
+export const SCORE_WEIGHTS = {
+  icp_segment: 20,
+  icp_region: 15,
+  size: 10,
+  contact: 10,
+  channels: 15,
+  digital: 10,
+  engagement: 20,
+};
+
+export type Engagement = 'nenhum' | 'respondeu' | 'interessado' | 'reuniao' | 'nao_interessado';
+
+export interface ScoreExtras {
+  contactName?: string;
+  contactRole?: string;
+  email?: string;
+  engagement?: Engagement;
+}
+
+const DECISION_ROLES = /(dono|socio|proprietari|diretor|ceo|gerente|gestor|coordenador|comprador|compras|head)/;
+
+/**
+ * Base determinística do score (0–100). Usa SOMENTE dados encontrados e o engajamento real.
  * A IA só pode ajustar ±15 pontos sobre esta base (ver aiService).
  */
-export function ruleScore(c: Company, profile: Pick<Profile, 'icpSegments' | 'icpRegions'>): { total: number; rules: ScoreRule[] } {
+export function ruleScore(c: Company, profile: Pick<Profile, 'icpSegments' | 'icpRegions'>, extras: ScoreExtras = {}): { total: number; rules: ScoreRule[] } {
+  const W = SCORE_WEIGHTS;
   const segOk = profile.icpSegments.some((s) => normalize(s) === normalize(c.segment));
   const regionOk = profile.icpRegions.some((r) => normalize(r) === normalize(c.city));
-  const waPts = c.whatsappStatus === 'confirmado' ? 10 : c.whatsappStatus === 'provavel' ? 5 : 0;
+  const waPts = c.whatsappStatus === 'confirmado' ? 6 : c.whatsappStatus === 'provavel' ? 3 : 0;
   const social = (c.instagram ? 1 : 0) + (c.linkedin ? 1 : 0);
   const inactive = !!c.registrationStatus && c.registrationStatus.toUpperCase() !== 'ATIVA';
+  const sizeKnown = c.employeesRange || c.companySize;
+  const bigger = (c.employeesMin ?? 0) >= 50 || /demais|pequeno porte/i.test(c.companySize ?? '');
+  const decisionRole = extras.contactRole && DECISION_ROLES.test(normalize(extras.contactRole));
+  const eng = extras.engagement ?? 'nenhum';
+  const engPts = { nenhum: 6, respondeu: 13, interessado: 18, reuniao: 20, nao_interessado: 0 }[eng];
+  const engText = { nenhum: 'ainda sem interação', respondeu: 'respondeu às mensagens', interessado: 'demonstrou interesse', reuniao: 'pediu reunião', nao_interessado: 'disse que não tem interesse' }[eng];
   const rules: ScoreRule[] = [
     {
       key: 'icp_segment',
       label: 'Segmento no ICP',
-      max: 25,
-      points: profile.icpSegments.length === 0 ? 15 : segOk ? 25 : 8,
+      max: W.icp_segment,
+      points: profile.icpSegments.length === 0 ? 12 : segOk ? W.icp_segment : 6,
       evidence: profile.icpSegments.length === 0 ? 'ICP sem segmentos definidos' : segOk ? `${c.segment} está no ICP` : `${c.segment} fora do ICP`,
     },
     {
       key: 'icp_region',
-      label: 'Região no ICP',
-      max: 20,
-      points: profile.icpRegions.length === 0 ? 12 : regionOk ? 20 : 6,
+      label: 'Localização',
+      max: W.icp_region,
+      points: profile.icpRegions.length === 0 ? 9 : regionOk ? W.icp_region : 4,
       evidence: profile.icpRegions.length === 0 ? 'ICP sem regiões definidas' : regionOk ? `${c.city} está no ICP` : `${c.city} fora do ICP`,
+    },
+    {
+      key: 'size',
+      label: 'Porte',
+      max: W.size,
+      points: inactive ? 0 : !sizeKnown ? 3 : bigger ? W.size : 6,
+      evidence: inactive ? `CNPJ com situação ${c.registrationStatus}` : sizeKnown ? `${c.employeesRange ? `${c.employeesRange} funcionários` : c.companySize}` : 'porte não informado',
+    },
+    {
+      key: 'contact',
+      label: 'Contato e cargo',
+      max: W.contact,
+      points: Math.min(W.contact, (extras.contactName ? 3 : 0) + (extras.email ? 3 : 0) + (decisionRole ? 4 : extras.contactRole ? 2 : 0)),
+      evidence: [extras.contactName && `contato ${extras.contactName}`, extras.contactRole && `cargo ${extras.contactRole}`, extras.email && 'e-mail'].filter(Boolean).join(', ') || 'sem contato direto',
     },
     {
       key: 'channels',
       label: 'Canais de contato',
-      max: 20,
-      points: Math.min(20, (c.phone ? 6 : 0) + waPts + social * 2),
+      max: W.channels,
+      points: Math.min(W.channels, (c.phone ? 5 : 0) + waPts + social * 2),
       evidence: [c.phone && 'telefone', waPts && `WhatsApp ${c.whatsappStatus === 'confirmado' ? 'confirmado' : 'provável'}`, social && 'rede social']
         .filter(Boolean)
         .join(', ') || 'nenhum canal encontrado',
     },
     {
       key: 'digital',
-      label: 'Presença digital',
-      max: 15,
-      points: Math.min(15, (c.website ? 9 : 0) + social * 3),
-      evidence: c.website ? `site ${c.website}${social ? ' e redes' : ''}` : social ? 'só redes sociais' : 'sem site ou redes',
+      label: 'Site e informações',
+      max: W.digital,
+      points: Math.min(W.digital, (c.website ? 5 : 0) + (c.cnpj ? 3 : 0) + (c.address ? 2 : 0)),
+      evidence: [c.website && `site ${c.website}`, c.cnpj && 'CNPJ', c.address && 'endereço'].filter(Boolean).join(', ') || 'poucas informações encontradas',
     },
-    {
-      key: 'company_data',
-      label: 'Dados empresariais',
-      max: 20,
-      points: inactive ? 0 : (c.cnpj ? 8 : 0) + (c.employeesRange || c.companySize ? 7 : 0) + (c.address ? 5 : 0),
-      evidence: inactive
-        ? `CNPJ com situação ${c.registrationStatus}`
-        : [c.cnpj && 'CNPJ', (c.employeesRange || c.companySize) && 'porte', c.address && 'endereço'].filter(Boolean).join(', ') || 'sem CNPJ, porte ou endereço',
-    },
+    { key: 'engagement', label: 'Engajamento', max: W.engagement, points: engPts, evidence: engText },
   ];
   return { total: rules.reduce((s, r) => s + r.points, 0), rules };
 }

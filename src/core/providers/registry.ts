@@ -1,7 +1,7 @@
 import { dataMode, searchProviderMode, supabase } from '@/lib/supabase';
 import type { ProviderSet } from './types';
 import { mockAIProvider } from './mock/mockAIProvider';
-import { mockCompanyDataProvider, mockCompanySearchProvider, mockPlacesProvider, waLinkProvider } from './mock/mockProviders';
+import { mockCompanyDataProvider, mockCompanySearchProvider, mockEmailSender, mockPlacesProvider, mockWhatsappSender, waLinkProvider } from './mock/mockProviders';
 import { createRemoteAIProvider } from './remote/remoteAIProvider';
 import { createBrasilApiProvider, createGooglePlacesProvider } from './remote/remoteProviders';
 
@@ -22,6 +22,9 @@ export function createProviders(): ProviderSet {
       companyData: realSearch ? createBrasilApiProvider(supabase) : mockCompanyDataProvider,
       ai: createRemoteAIProvider(supabase),
       whatsapp: waLinkProvider,
+      // Envios reais acontecem no servidor (Edge Function cadence-runner).
+      whatsappSender: null,
+      emailSender: null,
     };
   }
   return {
@@ -30,6 +33,8 @@ export function createProviders(): ProviderSet {
     companyData: mockCompanyDataProvider,
     ai: mockAIProvider,
     whatsapp: waLinkProvider,
+    whatsappSender: mockWhatsappSender,
+    emailSender: mockEmailSender,
   };
 }
 

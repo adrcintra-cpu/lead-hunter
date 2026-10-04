@@ -9,6 +9,7 @@ import { formatDate, formatDateTime } from '@/core/utils';
 import { channelLabel } from '@/services/leadHunterService';
 import { cx, EmptyState, ErrorBox, ProvenanceTag, Skeleton, Spinner, type ProvenanceKind } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
+import { CadencePanel, ConversationPanel, CrmPanel, LeadTasks, Timeline } from './LeadCrmPanels';
 
 export function LeadDrawer({ leadId }: { leadId: string }) {
   const { close } = useLeadDrawer();
@@ -46,7 +47,17 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
       <header className={cx('z-10 flex items-start justify-between gap-3 border-b border-line bg-surface px-6 py-4', !standalone && 'sticky top-0')}>
         <div className="min-w-0">
           <h2 className="text-xl font-extrabold tracking-tight">{name}</h2>
-          <p className="mt-0.5 text-[13px] text-ink-faint">{c.segment} · {c.city}/{c.state}</p>
+          <p className="mt-0.5 text-[13px] text-ink-faint">
+            {c.segment} · {c.city}/{c.state}
+            {lead.contactName && ` · ${lead.contactName}${lead.contactRole ? ` (${lead.contactRole})` : ''}`}
+            {lead.ownerName && ` · resp. ${lead.ownerName}`}
+          </p>
+          {(lead.tags?.length || lead.nextAction) && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {(lead.tags ?? []).map((t) => <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-ink-soft">#{t}</span>)}
+              {lead.nextAction && <span className="rounded bg-warn-soft px-1.5 py-0.5 text-[11px] font-semibold text-warn">Próxima ação: {lead.nextAction}{lead.nextActionAt ? ` · ${formatDateTime(lead.nextActionAt)}` : ''}</span>}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <label htmlFor="stage" className="sr-only">Etapa</label>
@@ -76,11 +87,16 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
           <ProvenanceTag kind="unavailable" />
         </div>
 
+        <CadencePanel leadId={lead.id} />
+        <LeadTasks leadId={lead.id} />
+        <ConversationPanel row={row} />
+        <CrmPanel row={row} />
         <CompanyFacts row={row} />
         <AnalysisPanel row={row} />
         <ApproachPanel row={row} />
         <ListsPanel leadId={lead.id} />
         <NotesAndHistory leadId={lead.id} />
+        <Timeline leadId={lead.id} />
       </div>
     </>
   );
@@ -526,7 +542,6 @@ function NotesAndHistory({ leadId }: { leadId: string }) {
   const service = useService();
   const [note, setNote] = useState('');
   const notes = db.notes.filter((n) => n.leadId === leadId);
-  const history = db.activities.filter((a) => a.leadId === leadId);
   return (
     <>
       <section>
@@ -553,17 +568,6 @@ function NotesAndHistory({ leadId }: { leadId: string }) {
             ))}
           </ul>
         )}
-      </section>
-      <section>
-        <h3 className="mb-1 text-sm font-extrabold">Histórico</h3>
-        <ul>
-          {history.map((a) => (
-            <li key={a.id} className="flex justify-between gap-3 border-t border-line py-2 text-[13px]">
-              <span>{a.description}</span>
-              <span className="shrink-0 font-mono text-xs text-ink-faint">{formatDateTime(a.createdAt)}</span>
-            </li>
-          ))}
-        </ul>
       </section>
     </>
   );

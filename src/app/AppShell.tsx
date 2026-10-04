@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useSearchParams } from 'react-router-dom';
-import { Bookmark, Kanban, LayoutDashboard, List, LogOut, Rows3, Settings, Sparkles } from 'lucide-react';
-import { useApp } from '@/store/AppStore';
+import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow } from 'lucide-react';
+import { SimClock } from './SimClock';
+import { useApp, useDb } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { cx, ThemeSwitcher, Toasts } from '@/components/ui';
 import { LeadDrawer } from '@/features/leads/LeadDrawer';
@@ -10,6 +11,9 @@ const NAV = [
   { to: '/buscar', label: 'Buscar Leads', icon: Sparkles },
   { to: '/leads', label: 'Leads', icon: Rows3 },
   { to: '/pipeline', label: 'Pipeline', icon: Kanban },
+  { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
+  { to: '/cadencias', label: 'Cadências', icon: Workflow },
+  { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
   { to: '/listas', label: 'Listas', icon: List },
   { to: '/buscas', label: 'Buscas', icon: Bookmark },
   { to: '/configuracoes', label: 'Configurações', icon: Settings },
@@ -19,10 +23,11 @@ export function AppShell() {
   const { session, signOut } = useApp();
   const [params] = useSearchParams();
   const leadId = params.get('lead');
+  const openTasks = useDb().tasks.filter((t) => t.status === 'aberta').length;
 
   return (
     <div className="min-h-screen md:grid md:grid-cols-[236px_minmax(0,1fr)]">
-      <aside className="border-b border-line bg-subtle md:sticky md:top-0 md:flex md:h-screen md:flex-col md:border-b-0 md:border-r">
+      <aside className="border-b border-line bg-subtle md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
         <div className="flex items-center gap-2.5 px-5 pb-3 pt-5">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-ink">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
@@ -43,17 +48,21 @@ export function AppShell() {
               end={end}
               className={({ isActive }) =>
                 cx(
-                  'flex min-h-[40px] shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 text-sm transition-colors',
+                  'flex min-h-[38px] shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 text-sm transition-colors',
                   isActive ? 'bg-muted font-bold text-ink' : 'font-medium text-ink-soft hover:bg-muted hover:text-ink',
                 )
               }
             >
               <Icon className="h-[18px] w-[18px]" aria-hidden />
               {label}
+              {to === '/tarefas' && openTasks > 0 && (
+                <span className="ml-auto rounded-full bg-warn-soft px-1.5 text-[11px] font-bold text-warn">{openTasks}</span>
+              )}
             </NavLink>
           ))}
         </nav>
         <div className="mt-auto hidden flex-col gap-3 p-3 md:flex">
+          <SimClock />
           {dataMode === 'mock' && (
             <div className="rounded-lg border border-line bg-surface p-3">
               <div className="flex items-center gap-2 text-xs font-bold">

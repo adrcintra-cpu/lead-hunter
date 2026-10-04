@@ -3,6 +3,7 @@ import { ShieldOff, Trash2 } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { formatDateTime } from '@/core/utils';
+import { DEFAULT_SEND_WINDOW } from '@/core/types';
 import { ConfirmDialog, PageHeader, ThemeSwitcher } from '@/components/ui';
 
 const splitList = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
@@ -86,6 +87,8 @@ export function SettingsPage() {
           </div>
         </form>
       </section>
+
+      <SendingSettings />
 
       <section className="card px-5 py-5">
         <h2 className="text-[15px] font-extrabold">Providers</h2>
@@ -175,5 +178,75 @@ export function SettingsPage() {
         </ConfirmDialog>
       )}
     </div>
+  );
+}
+
+/** Remetente, assinatura e janela de envio das campanhas. */
+function SendingSettings() {
+  const db = useDb();
+  const service = useService();
+  const { toast } = useApp();
+  const p = db.profile!;
+  const w = p.sendWindow ?? DEFAULT_SEND_WINDOW;
+  const [f, setF] = useState({ senderEmail: p.senderEmail ?? '', signature: p.signature ?? '', start: w.startHour, end: w.endHour, weekdays: w.weekdaysOnly });
+  const valid = f.start < f.end && f.start >= 0 && f.end <= 24 && (!f.senderEmail || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.senderEmail));
+  return (
+    <section className="card px-5 py-5">
+      <h2 className="text-[15px] font-extrabold">Envio das campanhas</h2>
+      <p className="mt-1 text-[13px] text-ink-faint">
+        WhatsApp automático só para leads com opt-in registrado; os demais viram tarefa com o link pronto. Todo envio respeita a lista de supressão.
+      </p>
+      <form
+        className="mt-4 grid gap-3.5 sm:grid-cols-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!valid) return;
+          service.updateProfile({
+            senderEmail: f.senderEmail.trim() || undefined,
+            signature: f.signature.trim() || undefined,
+            sendWindow: { startHour: Number(f.start), endHour: Number(f.end), weekdaysOnly: f.weekdays },
+          });
+          toast('Configurações de envio salvas.', 'success');
+        }}
+      >
+        <div>
+          <label htmlFor="snd-email" className="label">E-mail remetente</label>
+          <input id="snd-email" type="email" className="input" value={f.senderEmail} placeholder="voce@suaempresa.com.br" onChange={(e) => setF({ ...f, senderEmail: e.target.value })} />
+          <p className="mt-1 text-xs text-ink-faint">No modo real, o domínio precisa estar verificado no Resend.</p>
+        </div>
+        <div>
+          <label htmlFor="snd-sig" className="label">Assinatura dos e-mails</label>
+          <textarea id="snd-sig" rows={3} className="input py-2" value={f.signature} placeholder={'André Cintra\nSua Empresa · (19) 0000-0000'} onChange={(e) => setF({ ...f, signature: e.target.value })} />
+        </div>
+        <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+          <div>
+            <label htmlFor="snd-start" className="label">Enviar das</label>
+            <input id="snd-start" type="number" min={0} max={23} className="input w-24" value={f.start} onChange={(e) => setF({ ...f, start: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label htmlFor="snd-end" className="label">às (hora de Brasília)</label>
+            <input id="snd-end" type="number" min={1} max={24} className="input w-24" value={f.end} onChange={(e) => setF({ ...f, end: Number(e.target.value) })} />
+          </div>
+          <label className="mb-2.5 flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={f.weekdays} onChange={(e) => setF({ ...f, weekdays: e.target.checked })} className="h-4 w-4 accent-[rgb(var(--accent))]" />
+            Só em dias úteis
+          </label>
+        </div>
+        {!valid && <p className="text-xs text-bad sm:col-span-2">Confira o e-mail e o horário (início antes do fim).</p>}
+        <div className="sm:col-span-2">
+          <button type="submit" className="btn-primary" disabled={!valid}>Salvar envio</button>
+        </div>
+      </form>
+      <div className="mt-5 grid gap-2 text-[13px] sm:grid-cols-2">
+        <div className="rounded-lg border border-line px-3 py-2.5">
+          <div className="font-bold">WhatsApp</div>
+          <div className="text-ink-faint">{service.automation.runsLocally ? 'Simulado no modo de teste' : 'WhatsApp Business Platform (API oficial), via servidor'}</div>
+        </div>
+        <div className="rounded-lg border border-line px-3 py-2.5">
+          <div className="font-bold">E-mail</div>
+          <div className="text-ink-faint">{service.automation.runsLocally ? 'Simulado no modo de teste' : 'Resend, via servidor'}</div>
+        </div>
+      </div>
+    </section>
   );
 }

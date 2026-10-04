@@ -6,6 +6,7 @@ import type {
   RawCompany,
   SearchCriteria,
   CriteriaField,
+  ReplyClass,
 } from '../types';
 
 /** O que um provider de busca consegue filtrar de verdade. */
@@ -39,6 +40,31 @@ export interface ApproachOptions {
   senderName: string;
   senderCompany: string;
   offer: string;
+  /** Pessoa de contato, quando cadastrada. */
+  contactName?: string;
+  contactRole?: string;
+  /** Posição na cadência: primeira mensagem, acompanhamento ou último contato. */
+  stage?: 'primeira' | 'acompanhamento' | 'ultimo';
+  /** Instruções extras do usuário para esta etapa. */
+  instructions?: string;
+}
+
+/** Números consolidados para a "leitura inteligente" do dashboard. */
+export interface ResultsSnapshot {
+  leads: number;
+  inCadence: number;
+  sent: number;
+  delivered: number;
+  read: number;
+  replies: number;
+  interested: number;
+  meetings: number;
+  optOuts: number;
+  failed: number;
+  openTasks: number;
+  bySegment: { segment: string; sent: number; replies: number }[];
+  byChannel: { channel: string; sent: number; replies: number }[];
+  campaigns: { name: string; status: string; sent: number; replies: number }[];
 }
 
 export interface ScoreAdjustment {
@@ -59,15 +85,38 @@ export interface AIProvider {
   summarizeCompany(company: Company): Promise<string>;
   adjustScore(company: Company, ruleScore: number, icp: string): Promise<ScoreAdjustment>;
   generateApproach(company: Company, channel: Channel, options: ApproachOptions): Promise<string>;
+  classifyReply(text: string): Promise<{ classification: ReplyClass; confidence: number; summary: string }>;
+  summarizeResults(snapshot: ResultsSnapshot): Promise<string[]>;
 }
 
 export interface WhatsappProvider {
   id: string;
   label: string;
-  /** MVP: link wa.me. Nunca envia sozinho. */
+  /** Link wa.me para envio manual (sempre disponível). */
   buildLink(phone: string, text: string): string | null;
-  /** Fase 3: WhatsApp Business Platform, com template aprovado e opt-in. */
-  send?: (phone: string, templateId: string, params: string[]) => Promise<{ id: string }>;
+}
+
+/** Resultado de um envio feito por um provedor de canal. */
+export interface SendResult {
+  externalId: string;
+  provider: string;
+}
+
+/**
+ * Envio automático de WhatsApp. Real: WhatsApp Business Platform (API oficial da Meta),
+ * executado no servidor. Só é chamado para leads com opt-in registrado.
+ */
+export interface WhatsappSender {
+  id: string;
+  label: string;
+  send(input: { to: string; text: string; templateName?: string; templateParams?: string[] }): Promise<SendResult>;
+}
+
+/** Envio de e-mail. Real: Resend, executado no servidor. */
+export interface EmailSender {
+  id: string;
+  label: string;
+  send(input: { from: string; fromName: string; to: string; subject: string; text: string; replyTo?: string }): Promise<SendResult>;
 }
 
 export interface ProviderSet {
@@ -76,6 +125,9 @@ export interface ProviderSet {
   companyData: CompanyDataProvider | null;
   ai: AIProvider;
   whatsapp: WhatsappProvider;
+  /** Envio automático. No modo supabase o envio acontece no servidor e estes ficam nulos. */
+  whatsappSender: WhatsappSender | null;
+  emailSender: EmailSender | null;
 }
 
 const criteriaCapability: Partial<Record<CriteriaField, Capability>> = {

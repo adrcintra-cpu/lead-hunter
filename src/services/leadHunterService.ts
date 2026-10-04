@@ -4,6 +4,9 @@ import { unsupportedCriteria } from '@/core/providers/types';
 import { MOCK_SUPPRESSED_PHONE } from '@/core/providers/mock/mockCompanies';
 import { applyCompanyData, mergeInto, toCompany } from '@/core/scoring';
 import { formatCnpj, isValidCnpj } from '@/core/cnpj';
+import type { Engagement, ScoreExtras } from '@/core/scoring';
+import { DEFAULT_CADENCE } from '@/services/automation/defaultCadence';
+import { AutomationService } from '@/services/automation/automationService';
 import {
   stageLabel,
   type ActivityType,
@@ -44,6 +47,8 @@ function identityKeys(c: Pick<RawCompany, 'cnpj' | 'website' | 'phone' | 'city'>
  */
 export class LeadHunterService {
   readonly ai: AIService;
+  /** Campanhas, cadências, envios, respostas e tarefas. */
+  readonly automation: AutomationService;
 
   constructor(
     readonly repo: Repository,
@@ -52,6 +57,7 @@ export class LeadHunterService {
     this.ai = new AIService(providers.ai, (run) =>
       this.repo.insert('aiRuns', { id: uid('ai'), createdAt: nowIso(), ...run }),
     );
+    this.automation = new AutomationService(this);
   }
 
   get db() {
@@ -95,14 +101,27 @@ export class LeadHunterService {
     });
   }
 
+  /** Garante que exista ao menos uma cadência (a do exemplo da especificação), como ponto de partida. */
+  ensureDefaultCadence() {
+    if (this.db.cadences.length > 0) return;
+    const at = nowIso();
+    this.repo.insert('cadences', { ...DEFAULT_CADENCE(), id: uid('cad'), createdAt: at, updatedAt: at });
+  }
+
   updateProfile(patch: Partial<Profile>) {
     this.repo.setProfile({ ...this.profile, ...patch, updatedAt: nowIso() });
   }
 
   // ---------- Auditoria ----------
 
-  private log(leadId: string, type: ActivityType, description: string, payload: Record<string, unknown> = {}) {
-    const at = nowIso();
+  /** Hora atual do sistema. No modo de teste inclui o relógio simulado. */
+  now(): Date {
+    return new Date(Date.now() + (this.db.clockOffsetMs ?? 0));
+  }
+
+  /** Registra uma atividade na linha do tempo do lead (auditoria). */
+  log(leadId: string, type: ActivityType, description: string, payload: Record<string, unknown> = {}) {
+    const at = this.now().toISOString();
     this.repo.insert('activities', { id: uid('act'), leadId, type, description, payload, createdAt: at });
     const lead = this.db.leads.find((l) => l.id === leadId);
     if (lead) this.repo.update('leads', leadId, { lastActivityAt: at });
@@ -351,16 +370,77 @@ export class LeadHunterService {
     return row;
   }
 
+  /** Contato e engajamento do lead, usados no score. */
+  scoreExtras(lead: Lead): ScoreExtras {
+    const replies = this.db.inbound.filter((r) => r.leadId === lead.id && r.classification !== 'ausente');
+    const has = (c: string) => replies.some((r) => r.classification === c);
+    const engagement: Engagement =
+      lead.stage === 'reuniao' || has('reuniao')
+        ? 'reuniao'
+        : lead.stage === 'interessado' || has('interessado')
+          ? 'interessado'
+          : lead.stage === 'nao_interessado' || has('nao_interessado') || has('opt_out')
+            ? 'nao_interessado'
+            : replies.length
+              ? 'respondeu'
+              : 'nenhum';
+    return { contactName: lead.contactName, contactRole: lead.contactRole, email: lead.email, engagement };
+  }
+
+  /** Edita os dados de CRM do lead e registra o que mudou. */
+  updateLead(leadId: string, patch: Partial<Pick<Lead, 'contactName' | 'contactRole' | 'email' | 'tags' | 'ownerName' | 'nextAction' | 'nextActionAt'>>) {
+    const lead = this.db.leads.find((l) => l.id === leadId);
+    if (!lead) return;
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      const value = Array.isArray(v) ? v.map((t) => String(t).trim()).filter(Boolean) : typeof v === 'string' ? v.trim() || undefined : v;
+      if (JSON.stringify(value) !== JSON.stringify((lead as unknown as Record<string, unknown>)[k])) clean[k] = value;
+    }
+    if (!Object.keys(clean).length) return;
+    const LABELS: Record<string, string> = { contactName: 'contato', contactRole: 'cargo', email: 'e-mail', tags: 'tags', ownerName: 'responsável', nextAction: 'próxima ação', nextActionAt: 'data da próxima ação' };
+    this.repo.batch(() => {
+      this.repo.update('leads', leadId, clean as Partial<Lead>);
+      this.log(leadId, 'lead_updated', `Dados atualizados: ${Object.keys(clean).map((k) => LABELS[k] ?? k).join(', ')}`, { fields: Object.keys(clean) });
+    });
+  }
+
+  /** Registra (ou remove) o opt-in de WhatsApp, com a origem do consentimento. */
+  setWhatsappConsent(leadId: string, source: string | null) {
+    const lead = this.db.leads.find((l) => l.id === leadId);
+    if (!lead) return;
+    this.repo.batch(() => {
+      if (source) {
+        this.repo.update('leads', leadId, { whatsappConsentAt: this.now().toISOString(), whatsappConsentSource: source.trim() });
+        this.log(leadId, 'consent_recorded', `Opt-in de WhatsApp registrado: ${source.trim()}`, { source });
+      } else {
+        this.repo.update('leads', leadId, { whatsappConsentAt: undefined, whatsappConsentSource: undefined });
+        this.log(leadId, 'consent_recorded', 'Opt-in de WhatsApp removido', {});
+      }
+    });
+  }
+
   async rescore(leadId: string) {
     const lead = this.db.leads.find((l) => l.id === leadId);
     const company = lead && this.db.companies.find((c) => c.id === lead.companyId);
     if (!lead || !company) return;
-    const score = await this.ai.scoreLead(company, this.profile, leadId);
+    const score = await this.ai.scoreLead(company, this.profile, leadId, this.scoreExtras(lead));
     this.repo.batch(() => {
       this.repo.insert('leadScores', score);
       this.repo.update('leads', leadId, { currentScore: score.score, scoreTier: score.tier });
       this.log(leadId, 'scored', `Score recalculado: ${score.score}/100`, { score: score.score });
     });
+  }
+
+  /**
+   * Modo Supabase: as respostas chegam pelos webhooks no servidor, que não roda o score do app.
+   * Depois de recarregar, recalcula o score de quem respondeu desde o último cálculo (no máx. 5 por vez).
+   */
+  async rescoreAfterReplies() {
+    const lastScore = new Map<string, string>();
+    for (const sc of this.db.leadScores) if ((lastScore.get(sc.leadId) ?? '') < sc.createdAt) lastScore.set(sc.leadId, sc.createdAt);
+    const pending = new Set<string>();
+    for (const r of this.db.inbound) if (r.receivedAt > (lastScore.get(r.leadId) ?? '')) pending.add(r.leadId);
+    for (const id of [...pending].slice(0, 5)) await this.rescore(id);
   }
 
   addNote(leadId: string, body: string) {
@@ -403,10 +483,12 @@ export class LeadHunterService {
 
   // ---------- Opt-out ----------
 
-  suppressionFor(company: Company) {
-    const values = [company.phone, company.whatsapp].filter(Boolean).map((v) => digits(v!));
+  /** Opt-out que atinge a empresa ou o contato (telefone, WhatsApp, CNPJ ou e-mail). */
+  suppressionFor(company: Company, lead?: Lead) {
+    const values = [company.phone, company.whatsapp].filter(Boolean).map((v) => digits(v!)).filter(Boolean);
     if (company.cnpj) values.push(digits(company.cnpj));
-    return this.db.suppression.find((s) => values.includes(digits(s.value)) || values.includes(s.value));
+    const email = (lead ?? this.db.leads.find((l) => l.companyId === company.id))?.email?.trim().toLowerCase();
+    return this.db.suppression.find((s) => (s.kind === 'email' ? !!email && s.value === email : values.includes(digits(s.value))));
   }
 
   addSuppression(kind: 'phone' | 'email' | 'cnpj', value: string, reason: string) {
@@ -425,13 +507,16 @@ export class LeadHunterService {
     const lead = this.db.leads.find((l) => l.id === leadId);
     const company = lead && this.db.companies.find((c) => c.id === lead.companyId);
     if (!lead || !company) throw new Error('Lead não encontrado.');
-    if (this.suppressionFor(company)) throw new Error('Contato na lista de supressão: abordagem bloqueada.');
+    if (this.suppressionFor(company, lead)) throw new Error('Contato na lista de supressão: abordagem bloqueada.');
     const p = this.profile;
     const text = await this.ai.generateApproach(company, channel, {
       variant,
       senderName: p.fullName,
       senderCompany: p.companyName,
       offer: p.offer,
+      contactName: lead.contactName,
+      contactRole: lead.contactRole,
+      stage: 'primeira',
     });
     const at = nowIso();
     const msg: Message = {
@@ -443,13 +528,15 @@ export class LeadHunterService {
       status: 'draft',
       model: this.ai.model,
       promptVersion: this.providers.ai.promptVersion,
+      template: 'IA — abordagem inicial',
+      context: leadContext(company, lead),
       createdAt: at,
       updatedAt: at,
     };
     this.repo.batch(() => {
       this.repo.insert('messages', msg);
       this.log(leadId, 'message_generated', `Abordagem gerada (${channelLabel(channel)})`, { messageId: msg.id, channel });
-      if (lead.stage === 'novo' || lead.stage === 'qualificado') this.changeStage(leadId, 'contato_preparado');
+      if (lead.stage === 'novo') this.changeStage(leadId, 'qualificado');
     });
     return msg;
   }
@@ -483,7 +570,8 @@ export class LeadHunterService {
     this.repo.batch(() => {
       this.repo.update('messages', messageId, { status: 'opened_whatsapp' });
       this.log(lead.id, 'whatsapp_opened', 'Conversa aberta no WhatsApp (wa.me)', { messageId });
-      const order: LeadStage[] = ['novo', 'qualificado', 'contato_preparado'];
+      this.repo.update('leads', lead.id, { lastContactAt: this.now().toISOString() });
+      const order: LeadStage[] = ['novo', 'qualificado', 'em_cadencia'];
       if (order.includes(lead.stage)) this.changeStage(lead.id, 'contatado');
     });
   }
@@ -562,11 +650,53 @@ export class LeadHunterService {
     });
     const ag = this.db.searches.find((s) => s.rawQuery.startsWith('Empresas de máquinas'));
     if (ag?.confirmedCriteria) this.saveSearch('Agro Campinas', ag.rawQuery, ag.confirmedCriteria);
+
+    // Contatos fictícios para testar o CRM e as cadências (dois com opt-in de WhatsApp).
+    const owner = this.profile.fullName || 'Você';
+    const contacts: [string, Partial<Lead>, string | null][] = [
+      ['Agromaq', { contactName: 'Carlos Menezes', contactRole: 'Diretor comercial', email: 'carlos@agromaqvaleverde.com.br', tags: ['agro', 'prioridade'] }, 'Formulário do site (exemplo)'],
+      ['Polímeros', { contactName: 'Juliana Prado', contactRole: 'Gerente de compras', email: 'compras@polimerosipe.com.br', tags: ['indústria'] }, null],
+      ['Fundição', { contactName: 'Roberto Alves', contactRole: 'Sócio', email: 'roberto@fundicaoserraazul.com.br', tags: ['indústria'] }, null],
+      ['Metalúrgica', { email: 'contato@metalurgicatambore.com.br', tags: ['indústria'] }, null],
+      ['Sorriso', { contactName: 'Renata Lima', contactRole: 'Sócia', email: 'contato@sorrisopiracicabano.com.br', tags: ['saúde'] }, 'Pediu contato na feira (exemplo)'],
+    ];
+    for (const [n, patch, consent] of contacts) {
+      const l = byName(n);
+      if (!l) continue;
+      this.updateLead(l.id, { ...patch, ownerName: owner });
+      if (consent) this.setWhatsappConsent(l.id, consent);
+      await this.rescore(l.id);
+    }
+    const cad = this.db.cadences[0];
+    if (cad && !this.db.campaigns.length) {
+      this.automation.createCampaign({
+        name: 'Agro e indústria — outubro',
+        objective: 'Agendar conversas com empresas de máquinas, agronegócio e indústria da região.',
+        audience: { segments: ['Máquinas agrícolas', 'Agronegócio', 'Indústria'], cities: [], minScore: 50, stages: ['novo', 'qualificado'], tags: [] },
+        channel: 'multicanal',
+        cadenceId: cad.id,
+        ownerName: owner,
+      });
+    }
   }
 
   resetAll() {
     this.repo.reset();
+    this.ensureDefaultCadence();
   }
+}
+
+/** Campos reais do lead que a IA pode usar para personalizar ("contexto utilizado"). */
+export function leadContext(c: Company, lead?: Lead) {
+  const out: { field: string; label: string; value: string }[] = [];
+  const add = (field: string, label: string, value?: string) => value && out.push({ field, label, value });
+  add('empresa', 'Empresa', c.tradeName ?? c.legalName);
+  add('nome', 'Nome do contato', lead?.contactName);
+  add('cargo', 'Cargo', lead?.contactRole);
+  add('segmento', 'Segmento', c.segment);
+  add('cidade', 'Cidade', c.city && `${c.city}/${c.state}`);
+  add('site', 'Site', c.website);
+  return out;
 }
 
 export const channelLabel = (c: Channel) => (c === 'whatsapp' ? 'WhatsApp' : c === 'email' ? 'E-mail' : 'LinkedIn');

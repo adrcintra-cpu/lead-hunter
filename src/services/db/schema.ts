@@ -1,5 +1,10 @@
 import type {
   AIRun,
+  Cadence,
+  Campaign,
+  Enrollment,
+  InboundMessage,
+  Task,
   Company,
   CompanyAnalysis,
   Lead,
@@ -34,11 +39,21 @@ export interface Tables {
   messages: Message;
   suppression: SuppressionEntry;
   aiRuns: AIRun;
+  campaigns: Campaign;
+  cadences: Cadence;
+  enrollments: Enrollment;
+  inbound: InboundMessage;
+  tasks: Task;
 }
 
 export type TableName = keyof Tables;
 
-export type DbState = { [K in TableName]: Tables[K][] } & { profile: Profile | null; version: number };
+export type DbState = { [K in TableName]: Tables[K][] } & {
+  profile: Profile | null;
+  version: number;
+  /** Relógio simulado do modo de teste (ms somados ao horário real). */
+  clockOffsetMs: number;
+};
 
 /** Tabelas de auditoria: só aceitam inserção (espelha a RLS do Supabase). */
 export const APPEND_ONLY: TableName[] = ['activities', 'aiRuns'];
@@ -57,10 +72,13 @@ export interface Repository {
   setProfile(profile: Profile): void;
   batch(fn: () => void): void;
   reset(): void;
+  /** Só no modo de teste: avança o relógio simulado. */
+  setClockOffset?(ms: number): void;
 }
 
 export const emptyDb = (): DbState => ({
-  version: 1,
+  version: 2,
+  clockOffsetMs: 0,
   profile: null,
   companies: [],
   leadSources: [],
@@ -77,4 +95,9 @@ export const emptyDb = (): DbState => ({
   messages: [],
   suppression: [],
   aiRuns: [],
+  campaigns: [],
+  cadences: [],
+  enrollments: [],
+  inbound: [],
+  tasks: [],
 });

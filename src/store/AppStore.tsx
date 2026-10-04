@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 import { providers } from '@/core/providers/registry';
 import { auth, type Session } from '@/services/auth';
 import { LocalRepository } from '@/services/db/localRepository';
-import { SupabaseRepository } from '@/services/db/supabaseRepository';
+import { REMOTE_REFRESH_MS, SupabaseRepository } from '@/services/db/supabaseRepository';
 import { dataMode, supabase } from '@/lib/supabase';
 import type { DbState } from '@/services/db/schema';
 import { LeadHunterService } from '@/services/leadHunterService';
@@ -69,6 +69,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         const svc = new LeadHunterService(repo, providers);
         svc.ensureProfile({ id: session.userId, email: session.email, name: session.name }, { seedExamples: dataMode === 'mock' });
+        svc.ensureDefaultCadence();
         if (!cancelled) setService(svc);
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Falha ao carregar seus dados.');
@@ -80,6 +81,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [session]);
+
+  // Modo de teste: a automação roda neste navegador a cada 30 s.
+  // Modo Supabase: o servidor envia; o app recarrega os dados a cada minuto e ao voltar para a aba.
+  useEffect(() => {
+    if (!service) return;
+    const repo = service.repo as { refresh?: () => Promise<void> };
+    const run = () => {
+      if (service.automation.runsLocally) service.automation.tick().catch(() => {});
+      else repo.refresh?.().then(() => service.rescoreAfterReplies()).catch(() => {});
+    };
+    const id = window.setInterval(run, service.automation.runsLocally ? 30_000 : REMOTE_REFRESH_MS);
+    const onFocus = () => !service.automation.runsLocally && run();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [service]);
 
   const dismissToast = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
   const toast = useCallback(

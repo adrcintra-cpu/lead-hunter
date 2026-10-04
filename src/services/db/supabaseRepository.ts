@@ -26,7 +26,7 @@ const DEFS: Record<TableName, TableDef> = {
   leadSources: { sql: 'lead_sources', cols: ['id', 'company_id', 'search_id', 'provider', 'external_id', 'fetched_at', 'expires_at'], order: 'fetched_at' },
   leads: {
     sql: 'leads',
-    cols: ['id', 'company_id', 'stage', 'current_score', 'score_tier', 'first_search_id', 'origin', 'discovered_at', 'last_activity_at', 'created_at', 'updated_at'],
+    cols: ['id', 'company_id', 'stage', 'current_score', 'score_tier', 'first_search_id', 'origin', 'discovered_at', 'last_activity_at', 'contact_name', 'contact_role', 'email', 'tags', 'owner_name', 'next_action', 'next_action_at', 'last_contact_at', 'whatsapp_consent_at', 'whatsapp_consent_source', 'created_at', 'updated_at'],
     order: 'created_at',
   },
   leadScores: {
@@ -48,11 +48,32 @@ const DEFS: Record<TableName, TableDef> = {
   searchResults: { sql: 'search_results', cols: ['id', 'search_id', 'company_id', 'lead_id', 'rank', 'provider', 'was_duplicate'], order: 'rank' },
   messages: {
     sql: 'messages',
-    cols: ['id', 'lead_id', 'channel', 'generated_content', 'final_content', 'status', 'model', 'prompt_version', 'created_at', 'updated_at'],
+    cols: ['id', 'lead_id', 'channel', 'generated_content', 'final_content', 'status', 'model', 'prompt_version', 'campaign_id', 'enrollment_id', 'step_index', 'subject', 'sender', 'recipient', 'template', 'context', 'provider', 'external_id', 'sent_at', 'delivered_at', 'read_at', 'replied_at', 'failed_at', 'failure_reason', 'created_at', 'updated_at'],
     order: 'created_at',
   },
   suppression: { sql: 'suppression_list', cols: ['id', 'kind', 'value', 'reason', 'created_at'], order: 'created_at' },
   aiRuns: { sql: 'ai_runs', cols: ['id', 'fn', 'model', 'prompt_version', 'latency_ms', 'status', 'created_at'], order: 'created_at' },
+  campaigns: {
+    sql: 'campaigns',
+    cols: ['id', 'name', 'objective', 'audience', 'channel', 'cadence_id', 'owner_name', 'status', 'scheduled_at', 'started_at', 'finished_at', 'created_at', 'updated_at'],
+    order: 'created_at',
+  },
+  cadences: { sql: 'cadences', cols: ['id', 'name', 'description', 'stop_on_reply', 'steps', 'created_at', 'updated_at'], order: 'created_at' },
+  enrollments: {
+    sql: 'enrollments',
+    cols: ['id', 'campaign_id', 'cadence_id', 'lead_id', 'step_index', 'status', 'next_run_at', 'started_at', 'last_step_at', 'stop_reason', 'draft', 'created_at', 'updated_at'],
+    order: 'created_at',
+  },
+  inbound: {
+    sql: 'inbound_messages',
+    cols: ['id', 'lead_id', 'channel', 'from_address', 'body', 'received_at', 'external_id', 'campaign_id', 'enrollment_id', 'classification', 'confidence', 'summary'],
+    order: 'received_at',
+  },
+  tasks: {
+    sql: 'tasks',
+    cols: ['id', 'lead_id', 'campaign_id', 'title', 'description', 'owner_name', 'due_at', 'status', 'source', 'action_url', 'created_at', 'done_at'],
+    order: 'created_at',
+  },
 };
 
 const toSnake = (k: string) => k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
@@ -93,6 +114,9 @@ export function fromRow(table: TableName, row: Record<string, unknown>): Record<
 function serverOwned(table: TableName, row: Record<string, unknown>): boolean {
   return table === 'aiRuns' || (table === 'activities' && row.type === 'stage_changed');
 }
+
+/** Recarrega do servidor a cada minuto: os envios e respostas acontecem lá. */
+export const REMOTE_REFRESH_MS = 60_000;
 
 export class SupabaseRepository implements Repository {
   private state: DbState = emptyDb();
@@ -138,12 +162,21 @@ export class SupabaseRepository implements Repository {
         offer: p.offer ?? '',
         icpSegments: p.icp_segments ?? [],
         icpRegions: p.icp_regions ?? [],
+        senderEmail: p.sender_email ?? undefined,
+        signature: p.signature ?? undefined,
+        sendWindow: p.send_window ?? undefined,
         createdAt: p.created_at,
         updatedAt: p.updated_at,
       };
     }
     this.state = next;
     this.emit();
+  }
+
+  /** Recarrega do servidor depois de gravar o que está pendente. Falhas são silenciosas (tenta de novo depois). */
+  async refresh(): Promise<void> {
+    await this.flush();
+    await this.load();
   }
 
   /** Espera todas as gravações pendentes (útil antes de sair). */
@@ -233,6 +266,9 @@ export class SupabaseRepository implements Repository {
         offer: profile.offer,
         icp_segments: profile.icpSegments,
         icp_regions: profile.icpRegions,
+        sender_email: profile.senderEmail ?? null,
+        signature: profile.signature ?? null,
+        send_window: profile.sendWindow ?? null,
       }),
     );
     this.emit();

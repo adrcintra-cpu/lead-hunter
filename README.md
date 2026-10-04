@@ -26,12 +26,19 @@ No modo mock tudo fica no `localStorage` do navegador, separado por usuário. Em
 | Área | Situação |
 | --- | --- |
 | Login | Mock local; Supabase Auth quando `VITE_DATA_MODE=supabase` |
-| Dashboard | KPIs, buscas recentes, últimos leads, atividade, demonstração |
+| Dashboard | KPIs de prospecção e campanhas, temperatura dos leads, leitura inteligente da IA, tarefas, atividade |
 | Busca | Linguagem natural → critérios editáveis → providers → deduplicação → score |
 | Leads | Tabela com 8 filtros, ordenação, seleção em massa para listas |
 | Perfil | Proveniência por campo, análise da IA (fato × inferência × indisponível), score detalhado |
 | Abordagem | WhatsApp, e-mail, LinkedIn; copiar, regenerar, editar; abre `wa.me` sem enviar nada |
-| Pipeline | 9 etapas com arrastar e soltar (e seletor acessível por teclado) |
+| Pipeline | 11 etapas (Novo → Qualificado → Em cadência → Contatado → Respondeu → Interessado → Reunião → Proposta → Cliente, Não interessado, Sem resposta) com arrastar e soltar |
+| CRM e perfil 360° | Contato, cargo, e-mail, tags, responsável, próxima ação, opt-in de WhatsApp, conversa, cadência e linha do tempo completa |
+| Score | 0–100 por regras + ajuste da IA (±15). Quente 80+, morno 50–79, frio abaixo de 50; respostas mudam o score |
+| Campanhas | Nome, objetivo, público (segmento, cidade, score, etapa, tags, lista), canal, cadência, responsável, status, métricas |
+| Cadências | Editor visual de etapas: enviar (IA ou template), esperar, condição, tarefa, mudar etapa; nada fixo no código |
+| Personalização | Mensagem preparada pela IA com dados reais, revisável e editável antes de ativar; contexto, data e modelo guardados |
+| Respostas | Classificação pela IA (interesse, reunião, dúvida, recusa, opt-out, ausência) com ações automáticas |
+| Tarefas | Atendimento humano: responder interessados, WhatsApp manual (sem opt-in), tarefas das cadências |
 | Listas e buscas salvas | Criar, editar, excluir; reexecução manual |
 | Opt-out | Lista de supressão bloqueia abordagem e link de WhatsApp |
 | Auditoria | Toda ação vira atividade; atividades são somente inserção |
@@ -128,16 +135,67 @@ No modo `supabase` o app usa:
 
 `SupabaseRepository` carrega os dados do usuário ao entrar e grava cada mudança no banco, em ordem. A interface continua instantânea; se uma gravação falhar, aparece um aviso. A mudança de etapa é registrada pelo trigger do banco, e as chamadas de IA pela Edge Function, para que nenhum caminho escape da auditoria.
 
+## Automação: campanhas, cadências e respostas (Fase 3)
+
+### Modo de teste (sem nenhuma conta)
+
+Com `VITE_DATA_MODE=mock`, a automação roda no navegador com envios simulados. Carregue a demonstração no Dashboard, abra **Campanhas → Agro e indústria — outubro**, clique em **Preparar mensagens**, revise e **Ativar**. Use o relógio simulado na barra lateral (**+1 dia**, **+7 dias**) para ver as esperas, a janela de envio, os follow-ups e a cadência concluindo. No perfil do lead, a caixa **Simular** (em Conversa) testa a classificação e as ações (pausar, tarefa, opt-out).
+
+### Produção
+
+O navegador não envia nada. O envio, a leitura de status e as respostas acontecem no Supabase:
+
+| Peça | O que faz |
+| --- | --- |
+| `cadence-runner` | Executa as etapas vencidas (agendado a cada 5 min). Usa o mesmo planejador do modo de teste (`_shared/automation/planner.ts`) |
+| `whatsapp-webhook` | Recebe status (enviada, entregue, lida, falhou) e mensagens da Meta, com assinatura `X-Hub-Signature-256` |
+| `email-webhook` | Recebe eventos do Resend (entregue, devolvido, spam, resposta), com assinatura svix |
+| `_shared/automation/replies.ts` | Regras de reação às respostas, comuns ao app e ao servidor |
+
+Passo a passo:
+
+1. Aplique as migrations: `supabase db push` (inclui `…_automacao_enums.sql` e `…_automacao.sql`; nada é apagado — as etapas antigas viram Qualificado e Não interessado).
+2. **WhatsApp (Meta):** crie um app no Meta for Developers com o produto WhatsApp, um número na WhatsApp Business Platform e um token de usuário do sistema. Aprove templates de marketing/utilidade com **uma variável no corpo** (`{{1}}`) — é onde entra o texto personalizado. Informe o nome do template em cada etapa de WhatsApp da cadência.
+3. **E-mail (Resend):** verifique o domínio do remetente no Resend; o e-mail em Configurações → Envio precisa ser desse domínio. Para receber respostas, configure o recebimento (Inbound) do Resend no domínio usado no Reply-To.
+4. Secrets (nunca no frontend):
+
+   ```bash
+   supabase secrets set WHATSAPP_TOKEN=... WHATSAPP_PHONE_NUMBER_ID=... \
+     WHATSAPP_VERIFY_TOKEN=<texto que você escolhe> WHATSAPP_APP_SECRET=... \
+     RESEND_API_KEY=... RESEND_WEBHOOK_SECRET=whsec_... \
+     CRON_SECRET=<texto aleatório longo>
+   # opcionais: WHATSAPP_TEMPLATE_LANG=pt_BR  EMAIL_FROM_FALLBACK=contato@seudominio.com.br
+   ```
+
+5. Publique as funções (os webhooks e o runner usam a própria verificação, não o JWT do usuário):
+
+   ```bash
+   supabase functions deploy ai
+   supabase functions deploy cadence-runner --no-verify-jwt
+   supabase functions deploy whatsapp-webhook --no-verify-jwt
+   supabase functions deploy email-webhook --no-verify-jwt
+   ```
+
+6. Webhooks:
+   - Meta → WhatsApp → Configuração: URL `https://<PROJECT_REF>.supabase.co/functions/v1/whatsapp-webhook`, token de verificação = `WHATSAPP_VERIFY_TOKEN`, assine o campo `messages`.
+   - Resend → Webhooks: URL `https://<PROJECT_REF>.supabase.co/functions/v1/email-webhook`, eventos `email.delivered`, `email.bounced`, `email.complained`, `email.opened`, `email.received`.
+7. Agende o runner: veja `supabase/cron_cadence_runner.example.sql` (pg_cron + pg_net, segredo no Vault).
+
+Regras da Meta aplicadas pelo código: mensagem iniciada pela empresa só com template aprovado; texto livre apenas dentro de 24 h da última mensagem do contato (fora disso, o envio falha com o motivo registrado). Respostas automáticas de ausência não interrompem a cadência.
+
 ## Segurança e LGPD
 
 - Nenhuma chave secreta no frontend: só `VITE_SUPABASE_URL` e a anon key (pública).
 - RLS em todas as tabelas (`owner_id = auth.uid()`); `lead_activities` e `ai_runs` só aceitam leitura e inserção.
-- Sem scraping, sem robôs de navegador e sem envio automático. WhatsApp no MVP é apenas o link `wa.me`.
+- Sem scraping e sem automação de WhatsApp Web. Envio automático de WhatsApp só pela API oficial da Meta, só com template aprovado e só para leads com **opt-in registrado** (data e origem). Sem opt-in, a cadência cria uma tarefa com o link `wa.me` para envio manual.
+- Todo e-mail automático leva o rodapé "Para não receber mais mensagens, responda PARAR." e o cabeçalho `List-Unsubscribe`. Responder PARAR, pedir para sair ou marcar como spam põe o contato na lista de supressão e encerra as cadências.
+- Envios só dentro da janela configurada (padrão: dias úteis, 9h–18h, horário de Brasília).
 - `lead_sources.expires_at` existe para respeitar limites de cache de providers como o Google Places.
 
 ## Fases
 
 - **MVP:** fluxo completo com mocks, Claude opcional via Edge Function.
-- **Fase 2 — núcleo (este código):** Google Places, CNPJ via BrasilAPI, dados no Supabase, reexecução com só empresas novas.
+- **Fase 2 — núcleo:** Google Places, CNPJ via BrasilAPI, dados no Supabase, reexecução com só empresas novas.
 - **Fase 2 — restante:** exportação CSV, webhooks para n8n/CRM, análise do site da empresa, lembretes de follow-up.
-- **Fase 3:** WhatsApp Business Platform oficial (templates + opt-in), integrações de CRM, equipes, planos e cobrança.
+- **Fase 3 — automação (este código):** CRM, pipeline novo, campanhas, cadências visuais, WhatsApp oficial com opt-in, e-mail via Resend, classificação de respostas, tarefas, dashboard com leitura da IA.
+- **Próximas:** exportação CSV, integrações de CRM, equipes com permissões, planos e cobrança.

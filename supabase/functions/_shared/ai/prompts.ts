@@ -105,9 +105,46 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
     schema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
     user: (input) => {
       const { company, channel, options } = input as { company: Json; channel: string; options: Json };
-      return `Canal: ${channel}\nVariação: ${options.variant}\nRemetente: ${options.senderName || '[SEU NOME]'}, empresa ${options.senderCompany || '[SUA EMPRESA]'}, oferta: ${options.offer || '[SEU SERVIÇO]'}\nEmpresa alvo: ${JSON.stringify(stripInternal(company))}`;
+      const stage = { primeira: 'primeira mensagem', acompanhamento: 'acompanhamento (o lead não respondeu a mensagem anterior)', ultimo: 'último contato, educado, sem insistir' }[String(options.stage ?? 'primeira')] ?? 'primeira mensagem';
+      return [
+        `Canal: ${channel}`,
+        `Momento da cadência: ${stage}`,
+        `Variação: ${options.variant}`,
+        `Remetente: ${options.senderName || '[SEU NOME]'}, empresa ${options.senderCompany || '[SUA EMPRESA]'}, oferta: ${options.offer || '[SEU SERVIÇO]'}`,
+        options.contactName ? `Contato: ${options.contactName}${options.contactRole ? `, ${options.contactRole}` : ''} (use o primeiro nome)` : 'Contato: não informado (cumprimente a equipe da empresa)',
+        options.instructions ? `Instruções do usuário: ${options.instructions}` : '',
+        `Empresa alvo (dados reais encontrados): ${JSON.stringify(stripInternal(company))}`,
+        'Nunca use só "Olá {nome}, tudo bem?": cite pelo menos um dado real da empresa (segmento, cidade ou site).',
+      ]
+        .filter(Boolean)
+        .join('\n');
     },
     output: (raw) => raw.message,
+  },
+
+  classifyReply: {
+    system: `Você classifica respostas de leads a mensagens comerciais B2B. ${RULES}
+Categorias: interessado (quer saber mais, pediu valores), reuniao (pediu reunião ou ligação), duvida (fez uma pergunta), nao_interessado (recusou), opt_out (pediu para não receber mais mensagens), ausente (resposta automática de férias/ausência), outro.
+Na dúvida entre nao_interessado e opt_out, prefira opt_out se houver pedido para parar de receber.`,
+    schema: {
+      type: 'object',
+      properties: {
+        classification: { type: 'string', enum: ['interessado', 'reuniao', 'duvida', 'nao_interessado', 'opt_out', 'ausente', 'outro'] },
+        confidence: { type: 'number' },
+        summary: { type: 'string', description: 'Resumo em até 20 palavras.' },
+      },
+      required: ['classification', 'confidence', 'summary'],
+    },
+    user: (input) => `Resposta do lead:\n${(input as { text: string }).text}`,
+    output: (raw) => raw,
+  },
+
+  summarizeResults: {
+    system: `Você é um analista comercial. Leia os números de prospecção e escreva de 3 a 6 observações curtas e acionáveis em português do Brasil. ${RULES}
+Use somente os números fornecidos; não invente percentuais nem causas. Quando não houver dados suficientes, diga isso.`,
+    schema: { type: 'object', properties: { insights: { type: 'array', items: { type: 'string' } } }, required: ['insights'] },
+    user: (input) => `Números:\n${JSON.stringify((input as { snapshot: Json }).snapshot, null, 2)}`,
+    output: (raw) => raw.insights,
   },
 } satisfies Record<string, Task>;
 

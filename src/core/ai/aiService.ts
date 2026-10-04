@@ -1,7 +1,10 @@
 import type { AnalysisSections, Channel, Company, CompanyField, LeadScore, ParsedCriteria, Profile } from '../types';
 import { nowIso, uid } from '../utils';
 import type { AIProvider, ApproachOptions } from '../providers/types';
-import { ruleScore, tierOf } from '../scoring';
+import { ruleScore, tierOf, type ScoreExtras } from '../scoring';
+import { classifyReplyRules } from '../../../supabase/functions/_shared/automation/replies.ts';
+import type { ReplyClass } from '../types';
+import type { ResultsSnapshot } from '../providers/types';
 import { ruleBasedParse } from '../providers/mock/mockAIProvider';
 
 export interface AIRunLog {
@@ -52,8 +55,8 @@ export class AIService {
     }
   }
 
-  async scoreLead(company: Company, profile: Profile, leadId: string): Promise<LeadScore> {
-    const base = ruleScore(company, profile);
+  async scoreLead(company: Company, profile: Profile, leadId: string, extras: ScoreExtras = {}): Promise<LeadScore> {
+    const base = ruleScore(company, profile, extras);
     let adjustment = 0;
     let reason = 'sem ajuste da IA';
     try {
@@ -92,6 +95,20 @@ export class AIService {
 
   generateApproach(company: Company, channel: Channel, options: ApproachOptions): Promise<string> {
     return this.run('generateApproach', () => this.provider.generateApproach(company, channel, options));
+  }
+
+  /** Classifica a resposta do lead. Se a IA falhar, usa regras (nunca deixa a resposta sem classificação). */
+  async classifyReply(text: string): Promise<{ classification: ReplyClass; confidence: number; summary: string }> {
+    try {
+      return await this.run('classifyReply', () => this.provider.classifyReply(text));
+    } catch {
+      return classifyReplyRules(text);
+    }
+  }
+
+  /** Leitura em linguagem natural dos números (só usa os números fornecidos). */
+  summarizeResults(snapshot: ResultsSnapshot): Promise<string[]> {
+    return this.run('summarizeResults', () => this.provider.summarizeResults(snapshot));
   }
 }
 

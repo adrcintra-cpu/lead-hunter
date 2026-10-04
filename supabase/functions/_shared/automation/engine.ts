@@ -1,0 +1,488 @@
+// Motor de automação no servidor (service role). Usado por cadence-runner, whatsapp-webhook e email-webhook.
+// As decisões (o que fazer em cada etapa, como reagir a uma resposta) vêm dos mesmos módulos puros
+// que o app usa no modo de teste: planner.ts e replies.ts.
+
+import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { PROMPT_VERSION } from '../ai/prompts.ts';
+import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
+import { sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
+import { sendEmail } from '../channels/resend.ts';
+import { plan, type Effect, type PlanContext } from './planner.ts';
+import { ADVANCED_STAGES, classifyReplyRules, messageStage, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
+import { DEFAULT_SEND_WINDOW, REPLY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyClass, type SendChannel, type SendWindow } from './types.ts';
+
+// deno-lint-ignore no-explicit-any
+export type Db = any;
+// deno-lint-ignore no-explicit-any
+type Row = Record<string, any>;
+
+export function adminClient(): Db {
+  const url = Deno.env.get('SUPABASE_URL');
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) throw new Error('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY ausentes.');
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+const digits = (s?: string | null) => (s ?? '').replace(/\D/g, '');
+const sameDigits = (a?: string | null, b?: string | null) => {
+  const x = digits(a);
+  const y = digits(b);
+  return !!x && !!y && (x === y || x.endsWith(y) || y.endsWith(x)) && Math.min(x.length, y.length) >= 10;
+};
+const nameOf = (c: Row) => c.trade_name ?? c.legal_name;
+
+async function must<T>(p: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
+  const { data, error } = await p;
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function log(db: Db, ownerId: string, leadId: string, type: string, description: string, payload: Row = {}) {
+  await db.from('lead_activities').insert({ owner_id: ownerId, lead_id: leadId, type, description, payload, actor_id: null });
+}
+
+async function createTask(db: Db, ownerId: string, t: { leadId?: string; campaignId?: string; title: string; description?: string; ownerName?: string; dueAt?: string; source: string; actionUrl?: string }) {
+  await db.from('tasks').insert({
+    owner_id: ownerId,
+    lead_id: t.leadId ?? null,
+    campaign_id: t.campaignId ?? null,
+    title: t.title,
+    description: t.description ?? null,
+    owner_name: t.ownerName ?? null,
+    due_at: t.dueAt ?? null,
+    source: t.source,
+    action_url: t.actionUrl ?? null,
+  });
+  if (t.leadId) await log(db, ownerId, t.leadId, 'task_created', `Tarefa criada: ${t.title}${t.ownerName ? ` (para ${t.ownerName})` : ''}`);
+}
+
+async function setStage(db: Db, leadId: string, stage: string) {
+  // O trigger log_stage_change grava a atividade.
+  await db.from('leads').update({ stage }).eq('id', leadId);
+}
+
+function isSuppressed(supp: Row[], company: Row, lead: Row): boolean {
+  return supp.some(
+    (s) =>
+      (s.kind === 'phone' && (sameDigits(s.value, company.whatsapp) || sameDigits(s.value, company.phone))) ||
+      (s.kind === 'email' && lead.email && s.value.toLowerCase() === String(lead.email).toLowerCase()) ||
+      (s.kind === 'cnpj' && company.cnpj && digits(s.value) === digits(company.cnpj)),
+  );
+}
+
+function companyForAI(c: Row) {
+  return {
+    legalName: c.legal_name,
+    tradeName: c.trade_name,
+    segment: c.segment,
+    city: c.city,
+    state: c.state,
+    website: c.website,
+    instagram: c.instagram,
+    linkedin: c.linkedin,
+    employeesRange: c.employees_range,
+    companySize: c.company_size,
+    cnae: c.cnae,
+    fieldProvenance: c.field_provenance,
+  };
+}
+
+function leadContext(c: Row, lead: Row): ContextField[] {
+  const f: ContextField[] = [];
+  const add = (field: string, label: string, value?: string | null) => value && f.push({ field, label, value: String(value) });
+  add('empresa', 'Empresa', nameOf(c));
+  add('segmento', 'Segmento', c.segment);
+  add('cidade', 'Cidade', c.city && `${c.city}/${c.state}`);
+  add('site', 'Site', c.website);
+  add('nome', 'Contato', lead.contact_name);
+  add('cargo', 'Cargo', lead.contact_role);
+  return f;
+}
+
+function templateData(lead: Row, c: Row, p: Row): TemplateData {
+  return {
+    empresa: nameOf(c),
+    nome: lead.contact_name?.split(' ')[0] || undefined,
+    cargo: lead.contact_role || undefined,
+    cidade: c.city,
+    estado: c.state,
+    segmento: String(c.segment ?? '').toLowerCase(),
+    site: c.website || undefined,
+    remetente: p.full_name || undefined,
+    minha_empresa: p.company_name || undefined,
+    oferta: p.offer || undefined,
+  };
+}
+
+/** Mesmo comportamento de AutomationService.compose no app. */
+async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: Cadence, stepIndex: number): Promise<MessageDraft> {
+  const step = cad.steps[stepIndex] as Extract<CadenceStep, { type: 'send' }>;
+  const stage = messageStage(cad.steps, stepIndex);
+  const at = new Date().toISOString();
+  const data = templateData(lead, c, p);
+  if (step.mode === 'template' && step.template.trim()) {
+    const body = renderTemplate(step.template, data);
+    return {
+      channel: step.channel,
+      subject: step.subject ? renderTemplate(step.subject, data).text : undefined,
+      body: step.channel === 'email' ? withOptOutFooter(body.text) : body.text,
+      context: body.context,
+      model: 'template',
+      template: step.whatsappTemplate || step.label || 'Template',
+      editedByUser: false,
+      generatedAt: at,
+    };
+  }
+  if (!hasClaude()) throw new Error('Etapa com IA, mas ANTHROPIC_API_KEY não está configurada.');
+  const started = Date.now();
+  let raw: string;
+  try {
+    const run = await runTask<string>('generateApproach', {
+      company: companyForAI(c),
+      channel: step.channel,
+      options: { variant: 0, senderName: p.full_name, senderCompany: p.company_name, offer: p.offer, contactName: lead.contact_name, contactRole: lead.contact_role, stage, instructions: step.template || undefined },
+    });
+    raw = run.output;
+    await logRun(db, ownerId, 'generateApproach', started, 'ok', run.usage);
+  } catch (e) {
+    await logRun(db, ownerId, 'generateApproach', started, 'error', {});
+    throw e;
+  }
+  const parsed = parseSubject(raw);
+  let body = parsed.body;
+  if (step.channel === 'email') {
+    if (p.signature && !body.includes(p.signature)) body = `${body}\n\n${p.signature}`;
+    body = withOptOutFooter(body);
+  }
+  return {
+    channel: step.channel,
+    subject: parsed.subject ?? (step.subject ? renderTemplate(step.subject, data).text : undefined),
+    body,
+    context: leadContext(c, lead),
+    model: MODEL,
+    template: step.whatsappTemplate ? `IA + template Meta “${step.whatsappTemplate}”` : `IA — ${stage === 'primeira' ? 'mensagem inicial' : stage === 'ultimo' ? 'último contato' : 'acompanhamento'}`,
+    editedByUser: false,
+    generatedAt: at,
+  };
+}
+
+// ---------- Executor de cadências ----------
+
+export interface RunSummary {
+  activated: number;
+  processed: number;
+  sent: number;
+  failed: number;
+  finished: number;
+  errors: string[];
+}
+
+export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
+  const now = new Date();
+  const sum: RunSummary = { activated: 0, processed: 0, sent: 0, failed: 0, finished: 0, errors: [] };
+
+  // Campanhas agendadas que chegaram na hora.
+  const scheduled: Row[] = await must(db.from('campaigns').select('id').eq('status', 'agendada').lte('scheduled_at', now.toISOString()));
+  for (const c of scheduled) {
+    await db.from('campaigns').update({ status: 'ativa', started_at: now.toISOString() }).eq('id', c.id);
+    sum.activated++;
+  }
+
+  const due: Row[] = await must(
+    db
+      .from('enrollments')
+      .select('*, campaigns!inner(id, name, status, owner_name)')
+      .eq('status', 'ativa')
+      .eq('campaigns.status', 'ativa')
+      .lte('next_run_at', now.toISOString())
+      .order('next_run_at')
+      .limit(limit),
+  );
+
+  const touched = new Set<string>();
+  for (const e of due) {
+    // Trava otimista: só uma execução pega cada inscrição.
+    const claimed: Row[] = await must(db.from('enrollments').update({ next_run_at: null }).eq('id', e.id).eq('next_run_at', e.next_run_at).select('id'));
+    if (!claimed.length) continue;
+    touched.add(e.campaign_id);
+    try {
+      const r = await runEnrollment(db, e, e.campaigns);
+      sum.sent += r.sent;
+      sum.failed += r.failed;
+      sum.processed++;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      sum.errors.push(`${e.id}: ${msg}`);
+      // Tenta de novo em 1 h, sem perder a etapa.
+      await db.from('enrollments').update({ next_run_at: new Date(Date.now() + 3600_000).toISOString() }).eq('id', e.id);
+    }
+  }
+
+  // Campanha sem ninguém ativo termina sozinha.
+  for (const id of touched) {
+    const es: Row[] = await must(db.from('enrollments').select('status').eq('campaign_id', id));
+    if (es.length && es.every((x) => x.status === 'concluida' || x.status === 'interrompida')) {
+      await db.from('campaigns').update({ status: 'finalizada', finished_at: new Date().toISOString() }).eq('id', id);
+      sum.finished++;
+    }
+  }
+  return sum;
+}
+
+async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number; failed: number }> {
+  const owner = e.owner_id as string;
+  const [lead, cadRow, profile] = await Promise.all([
+    must<Row | null>(db.from('leads').select('*').eq('id', e.lead_id).maybeSingle()),
+    must<Row | null>(db.from('cadences').select('*').eq('id', e.cadence_id).maybeSingle()),
+    must<Row | null>(db.from('profiles').select('*').eq('id', owner).maybeSingle()),
+  ]);
+  const company: Row | null = lead ? await must(db.from('companies').select('*').eq('id', lead.company_id).maybeSingle()) : null;
+  if (!lead || !cadRow || !company) {
+    await db.from('enrollments').update({ status: 'interrompida', stop_reason: 'Lead ou cadência não existe mais.' }).eq('id', e.id);
+    return { sent: 0, failed: 0 };
+  }
+  const cad: Cadence = { id: cadRow.id, name: cadRow.name, stopOnReply: cadRow.stop_on_reply, steps: cadRow.steps ?? [], createdAt: cadRow.created_at, updatedAt: cadRow.updated_at };
+  const p = profile ?? {};
+
+  const [supp, replies, msgs] = await Promise.all([
+    must<Row[]>(db.from('suppression_list').select('kind, value').eq('owner_id', owner)),
+    must<Row[]>(db.from('inbound_messages').select('classification, received_at').eq('lead_id', lead.id).gte('received_at', e.started_at ?? e.created_at)),
+    must<Row[]>(db.from('messages').select('status').eq('enrollment_id', e.id)),
+  ]);
+  const real = replies.filter((r) => r.classification !== 'ausente');
+  const ctx: PlanContext = {
+    now: new Date(),
+    replied: real.length > 0,
+    interested: real.some((r) => r.classification === 'interessado' || r.classification === 'reuniao'),
+    read: msgs.some((m) => m.status === 'read' || m.status === 'replied'),
+    suppressed: isSuppressed(supp, company, lead),
+    hasWhatsapp: !!company.whatsapp,
+    hasWhatsappConsent: !!lead.whatsapp_consent_at,
+    hasEmail: !!lead.email,
+    window: (p.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW,
+  };
+
+  const result = plan(cad, e.step_index, ctx);
+  let sent = 0;
+  let failed = 0;
+  for (const eff of result.effects) {
+    const r = await applyEffect(db, eff, e, camp, lead, company, p, cad);
+    if (r === 'sent') sent++;
+    if (r === 'failed') failed++;
+  }
+
+  await db
+    .from('enrollments')
+    .update({ step_index: result.stepIndex, status: result.status, next_run_at: result.nextRunAt?.toISOString() ?? null, last_step_at: new Date().toISOString(), stop_reason: result.stopReason ?? null })
+    .eq('id', e.id);
+
+  if (result.status === 'concluida') {
+    await log(db, owner, lead.id, 'cadence_completed', 'Cadência concluída sem resposta', { enrollmentId: e.id });
+    const { data: fresh } = await db.from('leads').select('stage').eq('id', lead.id).maybeSingle();
+    if (fresh && (fresh.stage === 'em_cadencia' || fresh.stage === 'contatado')) await setStage(db, lead.id, 'sem_resposta');
+  } else if (result.status === 'interrompida' && result.stopReason) {
+    await log(db, owner, lead.id, 'cadence_stopped', `Cadência encerrada: ${result.stopReason}`, { enrollmentId: e.id });
+  } else if (result.nextRunAt) {
+    const when = result.nextRunAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    await log(db, owner, lead.id, 'cadence_step', `Próxima etapa em ${when}`, { enrollmentId: e.id, stepIndex: result.stepIndex });
+  }
+  return { sent, failed };
+}
+
+async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c: Row, p: Row, cad: Cadence): Promise<'sent' | 'failed' | 'other'> {
+  const owner = e.owner_id as string;
+  if (eff.kind === 'skipped') {
+    await log(db, owner, lead.id, 'cadence_step', `Etapa ${eff.stepIndex + 1} pulada: ${eff.reason}`, { enrollmentId: e.id });
+    return 'other';
+  }
+  if (eff.kind === 'task') {
+    await createTask(db, owner, { leadId: lead.id, campaignId: e.campaign_id, title: eff.title, source: 'cadencia', ownerName: camp?.owner_name });
+    return 'other';
+  }
+  if (eff.kind === 'stage') {
+    await setStage(db, lead.id, eff.stage);
+    return 'other';
+  }
+
+  // Envio: usa a mensagem revisada na preparação (primeiro envio) ou compõe agora.
+  const firstSend = cad.steps.findIndex((s) => s.type === 'send');
+  const draft: MessageDraft =
+    eff.stepIndex === firstSend && e.draft && e.draft.channel === eff.step.channel ? e.draft : await compose(db, owner, lead, c, p, cad, eff.stepIndex);
+  const channel: SendChannel = eff.step.channel;
+  const sender = channel === 'email' ? p.sender_email || Deno.env.get('EMAIL_FROM_FALLBACK') || null : null;
+  const recipient = channel === 'email' ? lead.email : toE164Digits(c.whatsapp ?? '');
+  const base = {
+    owner_id: owner,
+    lead_id: lead.id,
+    channel,
+    generated_content: draft.body,
+    final_content: draft.body,
+    model: draft.model,
+    prompt_version: PROMPT_VERSION,
+    campaign_id: e.campaign_id,
+    enrollment_id: e.id,
+    step_index: eff.stepIndex,
+    subject: draft.subject ?? null,
+    sender,
+    recipient,
+    template: draft.template,
+    context: draft.context,
+  };
+
+  if (eff.kind === 'manual_whatsapp') {
+    await db.from('messages').insert({ ...base, status: 'draft', template: `${draft.template} (envio manual)` });
+    await createTask(db, owner, {
+      leadId: lead.id,
+      campaignId: e.campaign_id,
+      title: `Enviar WhatsApp para ${nameOf(c)}`,
+      description: 'Sem opt-in registrado: a automação não envia WhatsApp. Revise a mensagem e envie pelo link.',
+      source: 'cadencia',
+      ownerName: camp?.owner_name,
+      actionUrl: waMeLink(c.whatsapp, draft.body),
+    });
+    return 'other';
+  }
+
+  const msg: Row = await must(db.from('messages').insert({ ...base, status: 'queued' }).select('id').single());
+  try {
+    let r: { externalId: string; provider: string };
+    if (channel === 'whatsapp') {
+      // Texto livre só dentro de 24 h da última mensagem do contato; fora disso, template aprovado.
+      if (!eff.step.whatsappTemplate) {
+        const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+        const { data: recent } = await db.from('inbound_messages').select('id').eq('lead_id', lead.id).eq('channel', 'whatsapp').gte('received_at', since).limit(1);
+        if (!recent?.length) throw new Error('Fora da janela de 24 h do WhatsApp: informe na etapa um template aprovado pela Meta.');
+      }
+      r = await sendWhatsapp({ to: c.whatsapp, text: draft.body, templateName: eff.step.whatsappTemplate });
+    } else {
+      if (!sender) throw new Error('Remetente de e-mail não configurado (Configurações → Envio).');
+      r = await sendEmail({ from: sender, fromName: p.full_name || p.company_name || undefined, to: lead.email, subject: draft.subject || `Contato — ${p.company_name ?? ''}`.trim(), text: draft.body });
+    }
+    const sentAt = new Date().toISOString();
+    await db.from('messages').update({ status: 'sent', external_id: r.externalId, provider: r.provider, sent_at: sentAt }).eq('id', msg.id);
+    await db.from('leads').update({ last_contact_at: sentAt }).eq('id', lead.id);
+    await log(db, owner, lead.id, 'message_sent', `${channel === 'whatsapp' ? 'WhatsApp' : 'E-mail'} enviado${camp?.name ? ` (${camp.name})` : ''}`, { messageId: msg.id, channel, provider: r.provider });
+    return 'sent';
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    await db.from('messages').update({ status: 'failed', failed_at: new Date().toISOString(), failure_reason: reason }).eq('id', msg.id);
+    await log(db, owner, lead.id, 'message_failed', `Falha no envio de ${channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'}: ${reason}`, { messageId: msg.id });
+    return 'failed';
+  }
+}
+
+// ---------- Status de entrega (webhooks) ----------
+
+const ORDER = ['queued', 'sent', 'delivered', 'read', 'replied'];
+
+/** Atualiza o status de uma mensagem pelo ID do provedor, sem regredir (lido não volta a entregue). */
+export async function updateDelivery(db: Db, provider: string, externalId: string, status: 'sent' | 'delivered' | 'read' | 'failed', at: string, reason?: string) {
+  const { data: m } = await db.from('messages').select('id, owner_id, lead_id, channel, status').eq('provider', provider).eq('external_id', externalId).maybeSingle();
+  if (!m) return false;
+  if (status === 'failed') {
+    await db.from('messages').update({ status: 'failed', failed_at: at, failure_reason: reason ?? 'Falha informada pelo provedor' }).eq('id', m.id);
+    await log(db, m.owner_id, m.lead_id, 'message_failed', `${m.channel === 'whatsapp' ? 'WhatsApp' : 'E-mail'} não entregue: ${reason ?? 'falha no provedor'}`, { messageId: m.id });
+    return true;
+  }
+  if (m.status === 'failed' || ORDER.indexOf(status) <= ORDER.indexOf(m.status)) return true;
+  const patch: Row = { status };
+  if (status === 'delivered') patch.delivered_at = at;
+  if (status === 'read') patch.read_at = at;
+  await db.from('messages').update(patch).eq('id', m.id);
+  return true;
+}
+
+// ---------- Respostas recebidas ----------
+
+/** Encontra o lead pelo destinatário da última mensagem enviada (é quem está respondendo). */
+export async function findLeadByRecipient(db: Db, channel: SendChannel, address: string): Promise<{ ownerId: string; leadId: string } | null> {
+  const key = channel === 'email' ? address.trim().toLowerCase() : toE164Digits(address);
+  const q = db.from('messages').select('owner_id, lead_id').eq('channel', channel).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(1);
+  const { data } = channel === 'email' ? await q.ilike('recipient', key) : await q.eq('recipient', key);
+  if (data?.[0]) return { ownerId: data[0].owner_id, leadId: data[0].lead_id };
+  if (channel === 'email') {
+    const { data: leads } = await db.from('leads').select('id, owner_id').ilike('email', key).limit(1);
+    if (leads?.[0]) return { ownerId: leads[0].owner_id, leadId: leads[0].id };
+  }
+  return null;
+}
+
+/** Mesmo comportamento de AutomationService.receiveReply no app. */
+export async function handleInbound(db: Db, i: { ownerId: string; leadId: string; channel: SendChannel; from: string; body: string; externalId?: string; receivedAt?: string }) {
+  const text = i.body.trim();
+  if (!text) return null;
+  if (i.externalId) {
+    const { data: dup } = await db.from('inbound_messages').select('id').eq('owner_id', i.ownerId).eq('channel', i.channel).eq('external_id', i.externalId).maybeSingle();
+    if (dup) return dup; // webhook repetido
+  }
+  const lead: Row = await must(db.from('leads').select('*').eq('id', i.leadId).single());
+  const company: Row = await must(db.from('companies').select('*').eq('id', lead.company_id).single());
+  const name = nameOf(company);
+
+  let cls: { classification: ReplyClass; confidence: number; summary: string } = classifyReplyRules(text);
+  if (hasClaude()) {
+    const started = Date.now();
+    try {
+      const run = await runTask<typeof cls>('classifyReply', { text });
+      cls = run.output;
+      await logRun(db, i.ownerId, 'classifyReply', started, 'ok', run.usage);
+    } catch {
+      await logRun(db, i.ownerId, 'classifyReply', started, 'error', {});
+    }
+  }
+
+  const active: Row[] = await must(db.from('enrollments').select('id, status, campaign_id').eq('lead_id', lead.id).in('status', ['ativa', 'pausada']));
+  const enr = active[0];
+  const camp: Row | null = enr ? await must(db.from('campaigns').select('id, owner_name').eq('id', enr.campaign_id).maybeSingle()) : null;
+  const at = i.receivedAt ?? new Date().toISOString();
+
+  const inbound = await must(
+    db
+      .from('inbound_messages')
+      .insert({
+        owner_id: i.ownerId,
+        lead_id: lead.id,
+        channel: i.channel,
+        from_address: i.from,
+        body: text,
+        received_at: at,
+        external_id: i.externalId ?? null,
+        campaign_id: enr?.campaign_id ?? null,
+        enrollment_id: enr?.id ?? null,
+        classification: cls.classification,
+        confidence: cls.confidence,
+        summary: cls.summary,
+      })
+      .select('id')
+      .single(),
+  );
+
+  const { data: last } = await db.from('messages').select('id').eq('lead_id', lead.id).eq('channel', i.channel).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(1);
+  if (last?.[0]) await db.from('messages').update({ status: 'replied', replied_at: at }).eq('id', last[0].id);
+  await db.from('leads').update({ last_contact_at: at }).eq('id', lead.id);
+  await log(db, i.ownerId, lead.id, 'reply_received', `Lead respondeu por ${i.channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'}`, { inboundId: (inbound as Row).id });
+  await log(db, i.ownerId, lead.id, 'reply_classified', `IA classificou como “${REPLY_LABEL[cls.classification]}”`, { classification: cls.classification, confidence: cls.confidence });
+
+  const d = replyDecision(cls.classification, name);
+  if (d.suppress) {
+    const reason = `Pediu para não receber mensagens (${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })})`;
+    const rows: Row[] = [];
+    if (company.whatsapp) rows.push({ owner_id: i.ownerId, kind: 'phone', value: company.whatsapp, reason });
+    if (company.phone && !sameDigits(company.phone, company.whatsapp)) rows.push({ owner_id: i.ownerId, kind: 'phone', value: company.phone, reason });
+    if (lead.email && i.channel === 'email') rows.push({ owner_id: i.ownerId, kind: 'email', value: String(lead.email).toLowerCase(), reason });
+    if (rows.length) await db.from('suppression_list').upsert(rows, { onConflict: 'owner_id,kind,value', ignoreDuplicates: true });
+  }
+  for (const e of active) {
+    if (d.enrollments === 'stop') await db.from('enrollments').update({ status: 'interrompida', stop_reason: d.reason, next_run_at: null }).eq('id', e.id);
+    if (d.enrollments === 'pause' && e.status === 'ativa') await db.from('enrollments').update({ status: 'pausada', stop_reason: d.reason }).eq('id', e.id);
+    if (d.enrollments !== 'none') {
+      const verb = d.enrollments === 'stop' ? 'cadence_stopped' : 'cadence_paused';
+      await log(db, i.ownerId, lead.id, verb, `Cadência ${d.enrollments === 'stop' ? 'encerrada' : 'pausada'}: ${d.reason}`, { enrollmentId: e.id });
+    }
+  }
+  if (d.stage && lead.stage !== d.stage.to && (d.stage.force || !ADVANCED_STAGES.includes(lead.stage))) await setStage(db, lead.id, d.stage.to);
+  if (d.task) {
+    await createTask(db, i.ownerId, { leadId: lead.id, campaignId: camp?.id, title: d.task.title, description: d.task.description, source: 'resposta', ownerName: camp?.owner_name ?? lead.owner_name, dueAt: at });
+  }
+  return inbound;
+}

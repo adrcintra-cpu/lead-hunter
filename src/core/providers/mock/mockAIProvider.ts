@@ -2,6 +2,7 @@ import type { AnalysisItem, AnalysisSections, Company, ParsedCriteria, SearchCri
 import { normalize, sleep } from '../../utils';
 import type { AIProvider } from '../types';
 import { MOCK_CITIES } from './mockCompanies';
+import { classifyReplyRules } from '../../../../supabase/functions/_shared/automation/replies.ts';
 
 const SEGMENT_HINTS: [string, string][] = [
   ['maquinas agricolas', 'Máquinas agrícolas'],
@@ -159,14 +160,34 @@ export const mockAIProvider: AIProvider = {
     const offer = o.offer || '[SEU SERVIÇO]';
     const me = o.senderName || '[SEU NOME]';
     const myCo = o.senderCompany || '[SUA EMPRESA]';
+    const first = o.contactName ? o.contactName.split(' ')[0] : '';
+    const hello = first ? `Olá, ${first}` : `Olá, equipe ${who}`;
+    // Só cita o que existe: cargo, cidade, segmento e site vêm da base.
+    const role = o.contactRole ? ` Como ${o.contactRole.toLowerCase()} da ${who}, imagino que isso passe por você.` : '';
+    const site = c.website ? ` Dei uma olhada no site ${c.website}.` : '';
     const v = o.variant % 2;
+    const stage = o.stage ?? 'primeira';
+
+    if (stage === 'acompanhamento') {
+      if (channel === 'email') {
+        return [`Assunto: Sobre ${offer} para a ${who}`, '', `${hello},`, '', `Mandei uma mensagem há alguns dias sobre ${offer} para empresas de ${seg} em ${c.city}.`, 'Faz sentido conversarmos 15 minutos? Se não for prioridade agora, é só me avisar.', '', 'Abraço,', me, myCo].join('\n');
+      }
+      return `${hello}, tudo bem? Retomando minha mensagem sobre ${offer} para empresas de ${seg} em ${c.city}. Faz sentido uma conversa rápida esta semana?`;
+    }
+    if (stage === 'ultimo') {
+      if (channel === 'email') {
+        return [`Assunto: Último contato — ${who}`, '', `${hello},`, '', `Não quero tomar seu tempo: este é meu último contato sobre ${offer}.`, 'Se em algum momento fizer sentido, é só responder este e-mail.', '', 'Abraço,', me, myCo].join('\n');
+      }
+      return `${hello}! Último contato da minha parte sobre ${offer}. Se em outro momento fizer sentido, fico à disposição. Obrigado!`;
+    }
+
     if (channel === 'email') {
       return [
         `Assunto: ${who} + ${myCo}`,
         '',
-        `Olá, equipe ${who},`,
+        `${hello},`,
         '',
-        `Encontrei vocês ao pesquisar empresas de ${seg} em ${c.city}/${c.state}${c.website ? ` e conheci o site ${c.website}` : ''}.`,
+        `Vi que a ${who} atua com ${seg} na região de ${c.city}/${c.state}.${site}${role}`,
         `Trabalho na ${myCo} com ${offer} para empresas do setor.`,
         '',
         v === 0 ? 'Faria sentido uma conversa de 20 minutos nas próximas semanas?' : 'Posso enviar um material curto mostrando como funciona?',
@@ -177,11 +198,33 @@ export const mockAIProvider: AIProvider = {
     }
     if (channel === 'linkedin') {
       return v === 0
-        ? `Olá! Vi que a ${who} atua com ${seg} em ${c.city}. Trabalho com ${offer} para empresas do setor e gostaria de me conectar.`
-        : `Olá! Acompanho empresas de ${seg} no interior de SP e encontrei a ${who}. Trabalho com ${offer}; acho que temos assunto em comum.`;
+        ? `${hello}! Vi que a ${who} atua com ${seg} em ${c.city}. Trabalho com ${offer} para empresas do setor e gostaria de me conectar.`
+        : `${hello}! Acompanho empresas de ${seg} no interior de SP e encontrei a ${who}. Trabalho com ${offer}; acho que temos assunto em comum.`;
     }
     return v === 0
-      ? `Olá, equipe ${who}! Aqui é ${me}, da ${myCo}. Vi que vocês atuam com ${seg} em ${c.city}. Trabalho com ${offer} para empresas do setor e queria entender se faz sentido uma conversa rápida. Posso enviar mais detalhes por aqui?`
-      : `Oi, tudo bem? Sou ${me}, da ${myCo}. Encontrei a ${who} pesquisando empresas de ${seg} em ${c.city}. Ajudo negócios do setor com ${offer}. Topa uma conversa de 15 minutos esta semana?`;
+      ? `${hello}! Aqui é ${me}, da ${myCo}. Vi que a ${who} atua com ${seg} na região de ${c.city}.${role} Trabalho com ${offer} para empresas do setor e queria entender se faz sentido uma conversa rápida. Posso enviar mais detalhes por aqui?`
+      : `${hello}, tudo bem? Sou ${me}, da ${myCo}. Encontrei a ${who} pesquisando empresas de ${seg} em ${c.city}. Ajudo negócios do setor com ${offer}. Topa uma conversa de 15 minutos esta semana?`;
+  },
+
+  async classifyReply(text) {
+    await sleep(150);
+    return classifyReplyRules(text);
+  },
+
+  async summarizeResults(s) {
+    await sleep(300);
+    const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
+    const out: string[] = [];
+    if (s.sent === 0) return ['Ainda não há envios. Crie uma campanha e ative uma cadência para começar a medir resultados.'];
+    out.push(`Foram ${s.sent} mensagens enviadas e ${s.replies} respostas, uma taxa de resposta de ${pct(s.replies, s.sent)}%.`);
+    if (s.interested || s.meetings) out.push(`${s.interested} leads demonstraram interesse e ${s.meetings} pediram reunião.`);
+    const bestSeg = [...s.bySegment].filter((x) => x.sent >= 2).sort((a, b) => b.replies / b.sent - a.replies / a.sent)[0];
+    if (bestSeg && bestSeg.replies > 0) out.push(`O segmento com melhor resposta é ${bestSeg.segment}: ${bestSeg.replies} de ${bestSeg.sent} (${pct(bestSeg.replies, bestSeg.sent)}%).`);
+    const ch = [...s.byChannel].filter((x) => x.sent > 0).sort((a, b) => b.replies / b.sent - a.replies / a.sent);
+    if (ch.length > 1) out.push(`${ch[0].channel} responde melhor que ${ch[ch.length - 1].channel} (${pct(ch[0].replies, ch[0].sent)}% contra ${pct(ch[ch.length - 1].replies, ch[ch.length - 1].sent)}%).`);
+    if (s.failed) out.push(`${s.failed} envios falharam: confira os números e e-mails desses leads.`);
+    if (s.optOuts) out.push(`${s.optOuts} contatos pediram para não receber mais mensagens e já estão na lista de supressão.`);
+    if (s.openTasks) out.push(`Há ${s.openTasks} tarefas abertas aguardando atendimento humano.`);
+    return out;
   },
 };

@@ -12,6 +12,9 @@ import { ListsPage } from '@/features/lists/ListsPage';
 import { ListDetailPage } from '@/features/lists/ListDetailPage';
 import { SavedSearchesPage } from '@/features/saved-searches/SavedSearchesPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
+import { CampaignDetailPage, CampaignsPage } from '@/features/campaigns/CampaignsPage';
+import { CadenceEditorPage, CadencesPage } from '@/features/cadences/CadencesPage';
+import { TasksPage } from '@/features/tasks/TasksPage';
 
 export function App() {
   const { session, loading, loadError, service, signOut } = useApp();
@@ -57,6 +60,11 @@ export function App() {
         <Route path="listas" element={<ListsPage />} />
         <Route path="listas/:listId" element={<ListDetailPage />} />
         <Route path="buscas" element={<SavedSearchesPage />} />
+        <Route path="campanhas" element={<CampaignsPage />} />
+        <Route path="campanhas/:campaignId" element={<CampaignDetailPage />} />
+        <Route path="cadencias" element={<CadencesPage />} />
+        <Route path="cadencias/:cadenceId" element={<CadenceEditorPage />} />
+        <Route path="tarefas" element={<TasksPage />} />
         <Route path="configuracoes" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

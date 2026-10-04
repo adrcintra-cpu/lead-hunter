@@ -1,6 +1,6 @@
 import type { RawCompany, SearchCriteria } from '../../types';
 import { distanceKm, normalize, sleep } from '../../utils';
-import type { CompanyDataProvider, CompanySearchProvider, PlacesProvider, WhatsappProvider } from '../types';
+import type { CompanyDataProvider, CompanySearchProvider, EmailSender, PlacesProvider, WhatsappProvider, WhatsappSender } from '../types';
 import { CITY_COORDS, MOCK_COMPANIES } from './mockCompanies';
 
 /** Sinônimos de segmento → segmentos do catálogo. */
@@ -100,5 +100,30 @@ export const waLinkProvider: WhatsappProvider = {
     if (d.length < 10) return null;
     if (!d.startsWith('55')) d = `55${d}`;
     return `https://wa.me/${d}?text=${encodeURIComponent(text)}`;
+  },
+};
+
+let mockSeq = 0;
+const mockId = (p: string) => `${p}_${Date.now().toString(36)}_${(mockSeq++).toString(36)}`;
+
+/** Simula a API oficial do WhatsApp: aceita o envio e devolve um id. Nada sai do navegador. */
+export const mockWhatsappSender: WhatsappSender = {
+  id: 'mock_whatsapp',
+  label: 'WhatsApp simulado',
+  async send({ to }) {
+    await sleep(80);
+    if (to.replace(/\D/g, '').length < 10) throw new Error('Número inválido para WhatsApp.');
+    return { externalId: mockId('wamid'), provider: 'mock_whatsapp' };
+  },
+};
+
+/** Simula o Resend. Nada é enviado de verdade. */
+export const mockEmailSender: EmailSender = {
+  id: 'mock_email',
+  label: 'E-mail simulado',
+  async send({ to }) {
+    await sleep(80);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error('Endereço de e-mail inválido.');
+    return { externalId: mockId('email'), provider: 'mock_email' };
   },
 };

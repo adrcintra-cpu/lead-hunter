@@ -49,7 +49,7 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
   const filtered = useMemo(() => {
     const t = normalize(f.text);
     const out = rows.filter(({ lead, company: c }) => {
-      if (t && !normalize(`${c.legalName} ${c.tradeName ?? ''} ${c.website ?? ''}`).includes(t)) return false;
+      if (t && !normalize(`${c.legalName} ${c.tradeName ?? ''} ${c.website ?? ''} ${lead.contactName ?? ''} ${lead.email ?? ''} ${(lead.tags ?? []).join(' ')}`).includes(t)) return false;
       if (f.city && c.city !== f.city) return false;
       if (f.state && c.state !== f.state) return false;
       if (f.segment && c.segment !== f.segment) return false;
@@ -104,7 +104,7 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
         <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <label htmlFor="lt-text" className="sr-only">Buscar empresa</label>
-          <input id="lt-text" className="input min-h-[38px] pl-9 text-[13px]" placeholder="Buscar empresa ou site" value={f.text} onChange={(e) => set('text', e.target.value)} />
+          <input id="lt-text" className="input min-h-[38px] pl-9 text-[13px]" placeholder="Buscar empresa, contato ou tag" value={f.text} onChange={(e) => set('text', e.target.value)} />
         </div>
         <select aria-label="Cidade" className={select} value={f.city} onChange={(e) => set('city', e.target.value)}>
           <option value="">Cidade</option>
@@ -120,8 +120,8 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
         </select>
         <select aria-label="Score mínimo" className={select} value={f.minScore} onChange={(e) => set('minScore', e.target.value)}>
           <option value="">Score</option>
-          <option value="75">75+ (alta)</option>
-          <option value="50">50+ (média)</option>
+          <option value="80">80+ (quente)</option>
+          <option value="50">50+ (morno ou quente)</option>
         </select>
         <select aria-label="Status" className={select} value={f.stage} onChange={(e) => set('stage', e.target.value)}>
           <option value="">Status</option>
@@ -173,7 +173,7 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
       )}
 
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[1180px] border-collapse text-[13.5px]">
+        <table className="w-full min-w-[1280px] border-collapse text-[13.5px]">
           <thead className="border-b border-line">
             <tr>
               <th scope="col" className="w-10 px-3">
@@ -194,6 +194,7 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
               <th scope="col" className="px-3 text-left text-[11.5px] font-bold uppercase tracking-wide text-ink-soft">WhatsApp</th>
               <Th k="score">Score</Th>
               <Th k="status">Status</Th>
+              <th scope="col" className="px-3 text-left text-[11.5px] font-bold uppercase tracking-wide text-ink-soft">Responsável</th>
               <Th k="origem">Origem</Th>
               <Th k="data">Descoberta</Th>
             </tr>
@@ -221,6 +222,12 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
                   <button type="button" onClick={() => drawer.open(lead.id)} className="text-left font-bold underline decoration-line-strong underline-offset-[3px] hover:text-accent">
                     {c.tradeName ?? c.legalName}
                   </button>
+                  {(lead.contactName || lead.tags?.length) && (
+                    <div className="mt-0.5 flex flex-wrap gap-1 text-[11px] text-ink-faint">
+                      {lead.contactName && <span>{lead.contactName}{lead.contactRole ? ` · ${lead.contactRole}` : ''}</span>}
+                      {(lead.tags ?? []).map((t) => <span key={t} className="rounded bg-muted px-1 font-semibold">#{t}</span>)}
+                    </div>
+                  )}
                 </td>
                 <td className="whitespace-nowrap px-3">{c.segment}</td>
                 <td className="px-3">{c.city}</td>
@@ -230,6 +237,7 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
                 <td className="px-3"><WhatsappBadge status={c.whatsappStatus} hasNumber={!!c.whatsapp} /></td>
                 <td className="px-3"><ScoreBadge score={lead.currentScore} tier={lead.scoreTier} /></td>
                 <td className="whitespace-nowrap px-3">{stageLabel(lead.stage as LeadStage)}</td>
+                <td className="whitespace-nowrap px-3 text-[12.5px] text-ink-soft">{lead.ownerName ?? '—'}</td>
                 <td className="whitespace-nowrap px-3 text-[12.5px] text-ink-soft">{lead.origin}</td>
                 <td className="px-3 font-mono text-[12.5px] text-ink-soft">{formatDate(lead.discoveredAt)}</td>
               </tr>

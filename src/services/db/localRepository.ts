@@ -1,10 +1,16 @@
-import type { Profile } from '@/core/types';
+import { LEGACY_STAGES, type Profile } from '@/core/types';
 import { APPEND_ONLY, emptyDb, type DbState, type Repository, type TableName, type Tables } from './schema';
 
 /**
  * Persistência local, por usuário, no localStorage.
  * Cada usuário tem sua própria chave — o equivalente local da RLS.
  */
+/** Converte dados salvos por versões anteriores. */
+function migrate(db: DbState): DbState {
+  const leads = db.leads.map((l) => (LEGACY_STAGES[l.stage as string] ? { ...l, stage: LEGACY_STAGES[l.stage as string] } : l));
+  return { ...db, leads, version: 2, clockOffsetMs: db.clockOffsetMs ?? 0 };
+}
+
 export class LocalRepository implements Repository {
   private state: DbState;
   private listeners = new Set<() => void>();
@@ -18,7 +24,7 @@ export class LocalRepository implements Repository {
   private load(): DbState {
     try {
       const raw = localStorage.getItem(this.storageKey);
-      if (raw) return { ...emptyDb(), ...(JSON.parse(raw) as DbState) };
+      if (raw) return migrate({ ...emptyDb(), ...(JSON.parse(raw) as DbState) });
     } catch {
       /* dados corrompidos ou storage bloqueado: começa vazio */
     }
@@ -90,6 +96,11 @@ export class LocalRepository implements Repository {
         this.commit();
       }
     }
+  }
+
+  setClockOffset(ms: number) {
+    this.state = { ...this.state, clockOffsetMs: ms };
+    this.commit();
   }
 
   reset() {
