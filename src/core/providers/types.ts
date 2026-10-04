@@ -1,0 +1,106 @@
+import type {
+  AnalysisSections,
+  Channel,
+  Company,
+  ParsedCriteria,
+  RawCompany,
+  SearchCriteria,
+  CriteriaField,
+} from '../types';
+
+/** O que um provider de busca consegue filtrar de verdade. */
+export type Capability = 'segment' | 'city' | 'geo_radius' | 'state' | 'website' | 'phone' | 'whatsapp' | 'employees';
+
+export interface CompanySearchProvider {
+  id: string;
+  label: string;
+  capabilities: Capability[];
+  search(criteria: SearchCriteria): Promise<RawCompany[]>;
+}
+
+/** Fase 2: Google Places. Busca por nome/região e devolve dados públicos de estabelecimento. */
+export interface PlacesProvider {
+  id: string;
+  label: string;
+  lookup(query: { name: string; city: string; state: string }): Promise<RawCompany | null>;
+}
+
+/** Fase 2: dados de CNPJ por provedor autorizado. */
+export interface CompanyDataProvider {
+  id: string;
+  label: string;
+  capabilities: Capability[];
+  /** Devolve null quando o CNPJ não existe; lança erro quando é inválido ou a fonte falha. */
+  enrichByCnpj(cnpj: string): Promise<Partial<RawCompany> | null>;
+}
+
+export interface ApproachOptions {
+  variant: number;
+  senderName: string;
+  senderCompany: string;
+  offer: string;
+}
+
+export interface ScoreAdjustment {
+  adjustment: number;
+  reason: string;
+}
+
+/**
+ * Provider de IA. Nunca é chamado direto pelos componentes:
+ * sempre passa por core/ai/aiService.ts, que valida e audita.
+ */
+export interface AIProvider {
+  id: string;
+  model: string;
+  promptVersion: string;
+  parseSearchQuery(text: string): Promise<ParsedCriteria>;
+  analyzeCompany(company: Company, icp: string): Promise<AnalysisSections>;
+  summarizeCompany(company: Company): Promise<string>;
+  adjustScore(company: Company, ruleScore: number, icp: string): Promise<ScoreAdjustment>;
+  generateApproach(company: Company, channel: Channel, options: ApproachOptions): Promise<string>;
+}
+
+export interface WhatsappProvider {
+  id: string;
+  label: string;
+  /** MVP: link wa.me. Nunca envia sozinho. */
+  buildLink(phone: string, text: string): string | null;
+  /** Fase 3: WhatsApp Business Platform, com template aprovado e opt-in. */
+  send?: (phone: string, templateId: string, params: string[]) => Promise<{ id: string }>;
+}
+
+export interface ProviderSet {
+  companySearch: CompanySearchProvider[];
+  places: PlacesProvider | null;
+  companyData: CompanyDataProvider | null;
+  ai: AIProvider;
+  whatsapp: WhatsappProvider;
+}
+
+const criteriaCapability: Partial<Record<CriteriaField, Capability>> = {
+  segment: 'segment',
+  city: 'city',
+  radiusKm: 'geo_radius',
+  requireWebsite: 'website',
+  requirePhone: 'phone',
+  whatsapp: 'whatsapp',
+  minEmployees: 'employees',
+};
+
+/** Critérios preenchidos que nenhum provider ativo consegue aplicar. */
+export function unsupportedCriteria(criteria: SearchCriteria, providers: ProviderSet): CriteriaField[] {
+  const caps = new Set<Capability>([
+    ...providers.companySearch.flatMap((p) => p.capabilities),
+    ...(providers.companyData?.capabilities ?? []),
+  ]);
+  const active: CriteriaField[] = [];
+  if (criteria.minEmployees) active.push('minEmployees');
+  if (criteria.radiusKm) active.push('radiusKm');
+  if (criteria.requireWebsite === 'sim') active.push('requireWebsite');
+  if (criteria.whatsapp !== 'indiferente') active.push('whatsapp');
+  return active.filter((f) => {
+    const cap = criteriaCapability[f];
+    return cap ? !caps.has(cap) : false;
+  });
+}
