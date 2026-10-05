@@ -30,7 +30,7 @@ export const config = {
   /** Modelo que transcreve os áudios recebidos dos leads. */
   sttModel: (process.env.OPENAI_STT_MODEL ?? 'gpt-4o-mini-transcribe').trim(),
   /** Espera mínima antes da resposta automática (segundos). */
-  autoMinDelaySeconds: Number(process.env.AUTO_REPLY_MIN_DELAY_SECONDS ?? 15),
+  autoMinDelaySeconds: Number(process.env.AUTO_REPLY_MIN_DELAY_SECONDS ?? 5),
 };
 
 if (!/^[0-9a-f]{64}$/i.test(config.encryptionKey)) {

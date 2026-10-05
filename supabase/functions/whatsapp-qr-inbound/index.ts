@@ -108,7 +108,7 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     format: cfg?.reply_format === 'audio' ? 'audio' : 'texto',
     voice: typeof cfg?.voice === 'string' ? cfg.voice : 'ash',
     // Atraso natural, como alguém que leu e respondeu.
-    delaySec: 45 + Math.floor(Math.random() * 75),
+    delaySec: 10 + Math.floor(Math.random() * 16),
   };
 }
 

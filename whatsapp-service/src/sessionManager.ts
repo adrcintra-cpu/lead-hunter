@@ -324,7 +324,7 @@ export class SessionManager {
       const audio = opts.audio ? await textToSpeech(text, opts.voice) : null;
       if (opts.typing) {
         await s.sock.sendPresenceUpdate(audio ? 'recording' : 'composing', jid).catch(() => undefined);
-        await new Promise((r) => setTimeout(r, Math.min(8000, 1500 + text.length * 35)));
+        await new Promise((r) => setTimeout(r, Math.min(5000, 1000 + text.length * 25)));
         await s.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
       }
       const sent = audio
