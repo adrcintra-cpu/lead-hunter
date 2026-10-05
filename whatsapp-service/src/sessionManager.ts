@@ -2,6 +2,7 @@ import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, ty
 import type { SupabaseClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import { clearAuthState, useDatabaseAuthState } from './authState.js';
+import { InboundRelay } from './inbound.js';
 import { config } from './config.js';
 import { libLogger, log, maskPhone, maskUser } from './log.js';
 import { formatPhone, normalizePhone, toJid } from './phone.js';
@@ -46,7 +47,11 @@ const MAX_RETRIES = 6;
 export class SessionManager {
   private sessions = new Map<string, Session>();
 
-  constructor(private db: SupabaseClient) {}
+  private inbound: InboundRelay;
+
+  constructor(private db: SupabaseClient) {
+    this.inbound = new InboundRelay(db);
+  }
 
   private get(userId: string): Session {
     let s = this.sessions.get(userId);
@@ -137,6 +142,12 @@ export class SessionManager {
       log.info({ user: maskUser(userId), restoring: !!opts.restoring }, 'sessão iniciada');
 
       sock.ev.on('creds.update', auth.saveCreds);
+
+      // Respostas recebidas: só as de leads seguem (ver inbound.ts). 'notify' = mensagem nova, não histórico.
+      sock.ev.on('messages.upsert', ({ messages, type }) => {
+        if (s.sock !== sock || type !== 'notify') return;
+        for (const m of messages) void this.inbound.handle(userId, m);
+      });
 
       sock.ev.on('connection.update', async (u) => {
         if (s.sock !== sock) return; // evento de um socket antigo

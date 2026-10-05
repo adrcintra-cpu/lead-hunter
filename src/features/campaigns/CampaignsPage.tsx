@@ -8,6 +8,7 @@ import { CAMPAIGN_STATUS_LABEL, ENROLLMENT_STATUS_LABEL } from '@/services/autom
 import { formatDateTime } from '@/core/utils';
 import { ConfirmDialog, EmptyState, PageHeader, Spinner, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
+import { CampaignProgress } from './CampaignProgress';
 
 const STATUS_TONE: Record<Campaign['status'], string> = {
   rascunho: 'bg-muted text-ink-soft',
@@ -202,6 +203,8 @@ export function CampaignDetailPage() {
         <Metric label="Falhas" value={m.failed} />
         <Metric label="Envio manual" value={m.manual} hint="WhatsApp via wa.me" />
       </section>
+
+      {camp.status !== 'rascunho' && <CampaignProgress campaignId={camp.id} />}
 
       <section className="card px-5 py-5">
         <h2 className="text-[15px] font-extrabold">Configuração</h2>

@@ -17,6 +17,9 @@
   --accent-ink: 255 255 255;
   --accent-soft: 236 231 255;
   --accent-strong: 46 0 190;
+  /* Séries de gráfico (validadas para daltonismo e contraste). */
+  --viz-1: 62 0 255;
+  --viz-2: 235 104 52;
   --good: 11 90 74;
   --good-soft: 227 241 236;
   --warn: 122 72 0;
@@ -44,6 +47,8 @@
   --accent-ink: 255 255 255;
   --accent-soft: 30 14 82;
   --accent-strong: 176 160 255;
+  --viz-1: 124 92 255;
+  --viz-2: 217 89 38;
   --good: 120 214 186;
   --good-soft: 18 52 44;
   --warn: 240 190 110;

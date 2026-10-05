@@ -1,6 +1,6 @@
 /** Configuração lida das variáveis de ambiente. Falha cedo se faltar algo obrigatório. */
 function required(name: string): string {
-  const v = process.env[name];
+  const v = process.env[name]?.trim();
   if (!v) throw new Error(`Variável de ambiente obrigatória ausente: ${name}`);
   return v;
 }
@@ -18,6 +18,12 @@ export const config = {
   sendMinIntervalSeconds: Number(process.env.SEND_MIN_INTERVAL_SECONDS ?? 8),
   /** Máximo de envios por usuário por dia. */
   sendDailyLimit: Number(process.env.SEND_DAILY_LIMIT ?? 60),
+  /**
+   * Respostas recebidas: segredo compartilhado com a Edge Function whatsapp-qr-inbound.
+   * Sem ele, as respostas não são encaminhadas (o envio continua funcionando).
+   */
+  inboundSecret: (process.env.WHATSAPP_INBOUND_SECRET ?? '').trim(),
+  inboundUrl: (process.env.INBOUND_FUNCTION_URL ?? '').trim(),
 };
 
 if (!/^[0-9a-f]{64}$/i.test(config.encryptionKey)) {

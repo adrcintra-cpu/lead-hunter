@@ -92,6 +92,19 @@ npm run dev
   - Respeite os pedidos de descadastro (a lista de supressão do Lead Hunter bloqueia o envio).
 - O WhatsApp muda o protocolo de tempos em tempos. Se a conexão parar de funcionar, atualize a biblioteca (`npm install @whiskeysockets/baileys@latest`) e publique de novo.
 
+## Respostas recebidas
+
+Quando um lead responde no WhatsApp conectado, a resposta entra sozinha no Lead Hunter: fica no histórico do lead, a IA classifica e a cadência para. Isso usa o mesmo processamento das outras respostas.
+
+- Só mensagens de números que são leads do próprio usuário seguem adiante (o WhatsApp e o telefone da empresa). Conversas pessoais, grupos e status são ignorados no serviço: não são gravados, registrados nem enviados.
+- O serviço chama a Edge Function `whatsapp-qr-inbound` com um segredo compartilhado.
+
+Para ligar:
+1. Gere um segredo: `openssl rand -hex 32`.
+2. No Supabase: `npx supabase secrets set WHATSAPP_INBOUND_SECRET=<segredo>`.
+3. Publique a função: `npx supabase functions deploy whatsapp-qr-inbound --no-verify-jwt --use-api`.
+4. No Railway, adicione a variável `WHATSAPP_INBOUND_SECRET` com o mesmo valor e faça o deploy.
+
 ## Próximos passos (estrutura já preparada)
 
 O `SessionManager.sendMessage` é o único ponto de envio. Uma fila futura (agendamentos, follow-ups, campanhas) deve chamar esse método, um envio por vez, respeitando o intervalo e o limite diário, com pausa e cancelamento por campanha. Não deve haver disparos simultâneos.
