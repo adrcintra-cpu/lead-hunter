@@ -13,10 +13,10 @@
   --ink: 23 25 28;
   --ink-soft: 74 78 84;
   --ink-faint: 95 99 104;
-  --accent: 11 110 90;
+  --accent: 62 0 255;
   --accent-ink: 255 255 255;
-  --accent-soft: 227 241 236;
-  --accent-strong: 11 90 74;
+  --accent-soft: 236 231 255;
+  --accent-strong: 46 0 190;
   --good: 11 90 74;
   --good-soft: 227 241 236;
   --warn: 122 72 0;
@@ -40,10 +40,10 @@
   --ink: 236 237 233;
   --ink-soft: 190 193 196;
   --ink-faint: 154 158 163;
-  --accent: 47 168 138;
-  --accent-ink: 8 22 18;
-  --accent-soft: 18 52 44;
-  --accent-strong: 120 214 186;
+  --accent: 150 130 255;
+  --accent-ink: 12 6 36;
+  --accent-soft: 36 24 84;
+  --accent-strong: 196 184 255;
   --good: 120 214 186;
   --good-soft: 18 52 44;
   --warn: 240 190 110;
