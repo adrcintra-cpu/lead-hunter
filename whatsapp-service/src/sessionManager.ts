@@ -255,7 +255,8 @@ export class SessionManager {
     if (waitMs > 0) return { ok: false, error: `Aguarde ${Math.ceil(waitMs / 1000)} s antes do próximo envio.` };
 
     try {
-      const [check] = await s.sock.onWhatsApp(phone);
+      const found = await s.sock.onWhatsApp(phone);
+      const check = found?.[0];
       if (!check?.exists) return { ok: false, error: 'Este número não tem WhatsApp.' };
       s.lastSendAt = Date.now();
       const sent = await s.sock.sendMessage(check.jid ?? toJid(phone), { text });
