@@ -73,7 +73,15 @@ async function authenticate(req: IncomingMessage): Promise<string> {
   const cached = tokenCache.get(token);
   if (cached && cached.until > Date.now()) return cached.userId;
   const { data, error } = await db.auth.getUser(token);
-  if (error || !data.user) throw new HttpError(401, 'Sessão expirada. Entre de novo no Lead Hunter.');
+  if (error || !data.user) {
+    // Motivo técnico no log (sem o token), para diferenciar login expirado de configuração errada.
+    const status = (error as { status?: number } | null)?.status;
+    log.warn({ status, err: error?.message ?? 'sem usuário' }, 'token recusado');
+    if (status === undefined || status >= 500 || /fetch|network|ENOTFOUND|Invalid API key|apikey/i.test(error?.message ?? '')) {
+      throw new HttpError(503, 'O serviço de WhatsApp não conseguiu validar seu login. Confira SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no Railway.');
+    }
+    throw new HttpError(401, 'Sessão expirada. Entre de novo no Lead Hunter.');
+  }
   tokenCache.set(token, { userId: data.user.id, until: Date.now() + 60_000 });
   if (tokenCache.size > 2000) {
     for (const [k, v] of tokenCache) if (v.until < Date.now()) tokenCache.delete(k);

@@ -147,7 +147,7 @@ export function WhatsAppConnectionCard() {
 
       {status === 'reconectando' && <p className="mt-3 text-[13px] text-warn">Restabelecendo a sessão salva. Não é preciso ler o QR code de novo.</p>}
       {conn?.error && status !== 'conectado' && <div className="mt-3"><ErrorBox>{conn.error}</ErrorBox></div>}
-      {error && <div className="mt-3"><ErrorBox>{error}</ErrorBox></div>}
+      {error && error !== conn?.error && <div className="mt-3"><ErrorBox>{error}</ErrorBox></div>}
       {testResult && (
         <p className={cx('mt-3 text-[13px] font-semibold', testResult.ok ? 'text-good' : 'text-bad')}>{testResult.message}</p>
       )}
