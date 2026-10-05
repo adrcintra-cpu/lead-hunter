@@ -207,6 +207,15 @@ export class SessionManager {
             this.set(s, { status: 'desconectado', qr: null, phone: null, error: 'O WhatsApp foi desconectado pelo celular. Conecte de novo.' });
             return;
           }
+          if (code === DisconnectReason.connectionReplaced) {
+            // Outra instância do serviço abriu a mesma sessão (deploy sobreposto). Esta sai de cena
+            // sem reconectar e sem gravar status: duas instâncias brigando corrompem as chaves de
+            // criptografia e o celular do contato passa a mostrar "Aguardando mensagem".
+            log.warn({ user: maskUser(userId) }, 'sessão assumida por outra instância do serviço: esta para');
+            s.closing = true;
+            await s.flush?.().catch(() => undefined);
+            return;
+          }
           if (code === DisconnectReason.restartRequired) {
             // Normal logo após a leitura do QR: a biblioteca pede para abrir um socket novo.
             this.set(s, { status: 'conectando', qr: null });
