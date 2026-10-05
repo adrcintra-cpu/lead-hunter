@@ -107,6 +107,8 @@ export interface ReplySuggestionInput {
   company: Company;
   /** Conversa em ordem cronológica; a última mensagem é do lead. */
   conversation: { from: 'vendedor' | 'lead'; date: string; text: string }[];
+  /** Persona, base de conhecimento e playbooks do atendimento. */
+  assistant?: { name: string; persona: string; knowledge: string; playbooks: string };
 }
 
 export type ReplyIntent = 'continuar' | 'propor_conversa' | 'confirmar_conversa' | 'encerrar' | 'passar_para_vendedor';

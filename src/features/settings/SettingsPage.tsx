@@ -6,6 +6,7 @@ import { formatDateTime } from '@/core/utils';
 import { DEFAULT_SEND_WINDOW } from '@/core/types';
 import { ConfirmDialog, PageHeader, ThemeSwitcher } from '@/components/ui';
 import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
+import { AssistantCard } from './AssistantCard';
 
 const splitList = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
@@ -90,6 +91,8 @@ export function SettingsPage() {
       </section>
 
       <WhatsAppConnectionCard />
+
+      <AssistantCard />
 
       <SendingSettings />
 

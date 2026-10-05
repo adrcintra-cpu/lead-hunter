@@ -4,6 +4,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { PROMPT_VERSION } from '../ai/prompts.ts';
+import { withDefaults } from '../ai/assistantDefaults.ts';
 import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { sendEmail } from '../channels/resend.ts';
@@ -473,6 +474,12 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
     db.from('inbound_messages').select('body, received_at').eq('lead_id', lead.id).eq('channel', channel).order('received_at', { ascending: false }).limit(10),
     db.from('profiles').select('full_name, company_name, offer').eq('id', ownerId).maybeSingle(),
   ]);
+  // Persona e base de conhecimento do usuário; sem tabela ou sem linha, usa o padrão.
+  const { data: cfg } = await db.from('assistant_settings').select('name, persona, knowledge, playbooks').eq('owner_id', ownerId).maybeSingle().then(
+    (r: { data: Row | null }) => r,
+    () => ({ data: null }),
+  );
+  const assistant = withDefaults(cfg);
   const day = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   const out = ((sent ?? []) as Row[])
     .filter((m) => m.sent_at || m.status === 'opened_whatsapp')
@@ -490,6 +497,7 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       contact: { name: lead.contact_name, role: lead.contact_role },
       company: companyForAI(company),
       conversation,
+      assistant,
     });
     await logRun(db, ownerId, 'suggestReply', started, 'ok', run.usage);
     const body = run.output.message?.trim();

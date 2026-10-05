@@ -23,6 +23,7 @@ import type { ResultsSnapshot } from '@/core/providers/types';
 import { digits, normalize, uid } from '@/core/utils';
 import { leadContext, type LeadHunterService } from '../leadHunterService';
 import { WhatsAppService } from '../whatsapp/whatsAppService';
+import { DEFAULT_ASSISTANT, loadAssistant } from '@/services/assistant/assistantSettings';
 
 type SendStep = Extract<CadenceStep, { type: 'send' }>;
 
@@ -582,7 +583,11 @@ export class AutomationService {
     const conv = [...out, ...ins].sort((a, b) => a.at.localeCompare(b.at)).slice(-12);
     if (!conv.length || conv[conv.length - 1].from !== 'lead') return null;
     const p = this.svc.profile;
+    const assistant = await loadAssistant()
+      .then((r) => r.settings)
+      .catch(() => DEFAULT_ASSISTANT);
     const s = await this.svc.ai.suggestReply({
+      assistant,
       channel,
       category,
       sender: { name: p.fullName, company: p.companyName, offer: p.offer },

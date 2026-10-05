@@ -252,7 +252,8 @@ export const mockAIProvider: AIProvider = {
     const hi = first ? `${first}, ` : '';
     const me = i.sender.name ? i.sender.name.split(' ')[0] : 'o responsável';
     if (/\b(robo|bot|ia|inteligencia artificial|automatic)/.test(last) || last.includes('e uma pessoa') || last.includes('voce e real')) {
-      return { message: `${hi}aqui é o assistente do ${me}. Ele mesmo continua a conversa com você em seguida, tudo bem?`, intent: 'passar_para_vendedor', note: 'O lead perguntou se fala com uma pessoa: assuma a conversa.' };
+      const who = i.assistant?.name ? `a ${i.assistant.name}, assistente digital${i.sender.company ? ` da ${i.sender.company}` : ''}` : `o assistente do ${me}`;
+      return { message: `${hi}aqui é ${who}. O ${me} continua a conversa com você em seguida, tudo bem?`, intent: 'passar_para_vendedor', note: 'O lead perguntou se fala com uma pessoa: assuma a conversa.' };
     }
     switch (i.category) {
       case 'nao_interessado':

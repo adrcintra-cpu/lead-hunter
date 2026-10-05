@@ -181,25 +181,26 @@ followUpDays: só para "posteriormente", em quantos dias retomar (use o prazo ci
   },
 
   suggestReply: {
-    system: `Você escreve a próxima resposta de uma conversa comercial B2B, em nome do vendedor, para o vendedor revisar e enviar. ${RULES}
-Objetivo da conversa: aquecer o lead e marcar uma conversa rápida (ligação ou reunião de 15 a 20 minutos) com o vendedor.
-- Responda à ÚLTIMA mensagem do lead, de forma natural, cordial e humana: tom de conversa, frases curtas, sem formatação, no máximo 1 emoji.
+    system: `Você escreve a próxima resposta de uma conversa comercial B2B pelo WhatsApp ou e-mail, para o vendedor revisar e enviar.
+Siga a PERSONA, use só a BASE DE CONHECIMENTO e os PLAYBOOKS fornecidos na mensagem. Eles definem tom, o que dizer e o que perguntar.
+Regras que valem acima de tudo:
+- Nunca invente preços, prazos, clientes, cases, números ou serviços que não estejam no input. Na dúvida, diga que um especialista confirma.
+- Responda à ÚLTIMA mensagem do lead. Tom humano e natural, frases curtas, sem formatação.
 - WhatsApp: até 3 frases. E-mail: até 80 palavras, sem linha de assunto.
-- Responda o que foi perguntado usando só a oferta e os dados fornecidos. Preço, prazo, detalhes técnicos ou cases que não estejam no input: diga que o vendedor explica na conversa. Nunca invente.
-- Avance um passo por vez. Interesse ou dúvida respondida: proponha a conversa rápida oferecendo duas opções genéricas (ex.: amanhã de manhã ou à tarde), sem prometer horário exato de agenda.
-- Se o lead aceitou ou sugeriu um horário: confirme de forma simples e diga que o vendedor vai confirmar.
-- Se perguntarem se é robô, IA ou se é uma pessoa: diga com naturalidade que é o assistente do vendedor e que ele continua a conversa pessoalmente. Nunca afirme ser humano.
-- Objeção: reconheça, responda com um argumento curto da oferta e deixe a porta aberta, sem insistir.
-- Não interessado: agradeça e encerre com educação, sem nova pergunta.
-- Pediu para falar depois: concorde e diga que retoma no prazo citado.
+- No máximo 1 pergunta por mensagem. Avance um passo por vez.
+- Quando houver interesse ou oportunidade real: convide para uma conversa rápida (15 a 20 min) com o vendedor ou um especialista, oferecendo duas opções genéricas (ex.: amanhã de manhã ou à tarde), sem prometer horário exato.
+- Se o lead aceitou ou sugeriu horário: confirme de forma simples e diga que o vendedor vai confirmar.
+- Se perguntarem se é robô, IA ou se é uma pessoa: apresente-se com o nome da assistente, diga que é a assistente digital da empresa do vendedor e que o vendedor continua a conversa pessoalmente. Nunca afirme ser humano.
+- Objeção: reconheça, responda com um argumento curto e deixe a porta aberta, sem insistir.
+- Não interessado: agradeça e encerre com educação, sem nova pergunta. Pediu para falar depois: concorde e diga que retoma no prazo citado.
 - Não repita a apresentação nem frases já enviadas. Nunca use colchetes nem marcadores como [SEU NOME].
 intent:
-- continuar: segue a conversa (dúvida respondida, ainda sem proposta de conversa)
-- propor_conversa: a mensagem propõe a ligação/reunião
+- continuar: segue a conversa (entendendo o cenário ou respondendo dúvida)
+- propor_conversa: a mensagem propõe a conversa com o vendedor/especialista
 - confirmar_conversa: o lead aceitou; a mensagem confirma
 - encerrar: lead recusou ou pediu para falar depois
 - passar_para_vendedor: o pedido exige o vendedor (proposta, preço específico, negociação, reclamação)
-note: uma frase para o vendedor sobre o que fazer agora.`,
+note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sabe do cenário do lead, se houver).`,
     schema: {
       type: 'object',
       properties: {
@@ -217,11 +218,17 @@ note: uma frase para o vendedor sobre o que fazer agora.`,
         contact?: { name?: string; role?: string };
         company: Json;
         conversation: { from: 'vendedor' | 'lead'; date: string; text: string }[];
+        assistant?: { name?: string; persona?: string; knowledge?: string; playbooks?: string };
       };
+      const cut = (t: string | undefined, n: number) => (t ?? '').trim().slice(0, n);
       return [
+        i.assistant?.persona ? `PERSONA (nome da assistente: ${i.assistant.name || 'assistente'}):\n${cut(i.assistant.persona, 8000)}` : '',
+        i.assistant?.knowledge ? `BASE DE CONHECIMENTO (ignore seções marcadas para completar):\n${cut(i.assistant.knowledge, 12000)}` : '',
+        i.assistant?.playbooks ? `PLAYBOOKS:\n${cut(i.assistant.playbooks, 6000)}` : '',
+        '---',
         `Canal: ${i.channel}`,
-        `Vendedor: ${i.sender.name || 'não informado (não se apresente pelo nome)'}${i.sender.company ? `, empresa ${i.sender.company}` : ''}`,
-        `Oferta do vendedor: ${i.sender.offer || 'não informada (não detalhe serviços)'}`,
+        `Vendedor: ${i.sender.name || 'não informado (não se apresente pelo nome dele)'}${i.sender.company ? `, empresa ${i.sender.company}` : ''}`,
+        i.sender.offer ? `Oferta (perfil do vendedor): ${i.sender.offer}` : '',
         i.contact?.name ? `Contato no lead: ${i.contact.name}${i.contact.role ? `, ${i.contact.role}` : ''} (use o primeiro nome)` : '',
         i.category ? `Classificação da última resposta: ${i.category}` : '',
         `Empresa do lead (dados reais): ${JSON.stringify(stripInternal(i.company))}`,
