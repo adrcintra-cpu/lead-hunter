@@ -118,6 +118,9 @@ export class InboundRelay {
   constructor(
     private db: SupabaseClient,
     private send?: AutoSender,
+    /** Transcreve um áudio recebido (baixa a mídia pela sessão do usuário). Sem ele, o áudio vira um aviso. */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private transcriber?: (userId: string, raw: any) => Promise<string | null>,
   ) {}
 
   get enabled() {
@@ -230,6 +233,23 @@ export class InboundRelay {
     log.info({ user: maskUser(userId), to: maskPhone(phone), inSec: Math.round(delay / 1000) }, 'resposta automática agendada');
   }
 
+  /** Áudio de lead: tenta transcrever. Devolve null quando não é áudio ou não deu para transcrever. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async audioText(userId: string, raw: any): Promise<string | null> {
+    const msg = raw?.message;
+    const audio = (msg?.ephemeralMessage?.message ?? msg?.viewOnceMessage?.message ?? msg)?.audioMessage;
+    if (!audio || !this.transcriber) return null;
+    try {
+      const text = await this.transcriber(userId, raw);
+      if (!text) return null;
+      log.info({ user: maskUser(userId), seconds: Number(audio.seconds) || undefined }, 'áudio de lead transcrito');
+      return `[Áudio transcrito] ${text}`.slice(0, 4000);
+    } catch (err) {
+      log.warn({ user: maskUser(userId), err: err instanceof Error ? err.message : String(err) }, 'áudio de lead não transcrito');
+      return null;
+    }
+  }
+
   /** Processa uma mensagem recebida: se for de um lead, encaminha (e agenda a resposta automática, se houver). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async handle(userId: string, raw: any): Promise<'forwarded' | 'ignored' | 'error'> {
@@ -250,7 +270,8 @@ export class InboundRelay {
         log.info({ user: maskUser(userId) }, 'mensagem de contato que não é lead (ignorada)');
         return 'ignored'; // conversa pessoal: não sai daqui
       }
-      const res = await this.post({ ownerId: userId, leadId, from: m.phone, body: m.text, externalId: m.id, receivedAt: m.at });
+      const body = (await this.audioText(userId, raw)) ?? m.text;
+      const res = await this.post({ ownerId: userId, leadId, from: m.phone, body, externalId: m.id, receivedAt: m.at });
       if (!res.ok) throw new Error(`função respondeu ${res.status}`);
       log.info({ user: maskUser(userId), from: maskPhone(m.phone) }, 'resposta de lead registrada');
       const data = (await res.json().catch(() => ({}))) as { auto?: AutoReply | null };

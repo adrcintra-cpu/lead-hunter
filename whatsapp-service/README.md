@@ -67,7 +67,7 @@ Site (Vercel) ──HTTPS + token de login──▶ este serviço ──▶ Sess
    | `SEND_MIN_INTERVAL_SECONDS` | `8` (opcional) |
    | `SEND_DAILY_LIMIT` | `60` (opcional) |
    | `WHATSAPP_INBOUND_SECRET` | o mesmo valor salvo nas Secrets das Edge Functions do Supabase |
-   | `OPENAI_API_KEY` | chave da OpenAI, só para responder em áudio (opcional) |
+   | `OPENAI_API_KEY` | chave da OpenAI: responder em áudio e transcrever os áudios dos leads (opcional) |
    | `RAILWAY_DEPLOYMENT_OVERLAP_SECONDS` | `0`: o servidor antigo desliga antes do novo conectar. Duas instâncias com a mesma sessão corrompem a criptografia ("Aguardando mensagem" no celular do contato). |
 
 6. **Gere o endereço público:** Settings → Networking → Generate Domain. Teste abrindo `https://<endereço>/health`; deve aparecer `{"ok":true}`.

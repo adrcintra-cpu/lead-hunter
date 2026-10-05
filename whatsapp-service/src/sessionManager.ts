@@ -1,9 +1,9 @@
-import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, type WASocket, type proto } from '@whiskeysockets/baileys';
+import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, type WASocket, type proto } from '@whiskeysockets/baileys';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import { clearAuthState, useDatabaseAuthState } from './authState.js';
 import { InboundRelay } from './inbound.js';
-import { textToSpeech } from './tts.js';
+import { MAX_TRANSCRIBE_SECONDS, textToSpeech, transcribe, ttsAvailable } from './tts.js';
 import { config } from './config.js';
 import { libLogger, log, maskPhone, maskUser } from './log.js';
 import { formatPhone, normalizePhone, toJid } from './phone.js';
@@ -67,7 +67,11 @@ export class SessionManager {
   private inbound: InboundRelay;
 
   constructor(private db: SupabaseClient) {
-    this.inbound = new InboundRelay(db, (userId, phone, text, o) => this.sendMessage(userId, phone, text, { ...o, typing: true }));
+    this.inbound = new InboundRelay(
+      db,
+      (userId, phone, text, o) => this.sendMessage(userId, phone, text, { ...o, typing: true }),
+      (userId, raw) => this.transcribeIncoming(userId, raw),
+    );
   }
 
   private get(userId: string): Session {
@@ -336,6 +340,20 @@ export class SessionManager {
       log.error({ user: maskUser(userId), to: maskPhone(phone), err: msg }, 'erro de envio');
       return { ok: false, error: `Falha no envio: ${msg}` };
     }
+  }
+
+  /** Baixa o áudio recebido pela sessão do usuário e transcreve. Só é chamado para mensagens de leads. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async transcribeIncoming(userId: string, raw: any): Promise<string | null> {
+    const s = this.sessions.get(userId);
+    if (!s?.sock || !ttsAvailable()) return null;
+    const msg = raw?.message;
+    const audio = (msg?.ephemeralMessage?.message ?? msg?.viewOnceMessage?.message ?? msg)?.audioMessage;
+    if (!audio) return null;
+    if (Number(audio.seconds) > MAX_TRANSCRIBE_SECONDS) throw new Error(`áudio com mais de ${MAX_TRANSCRIBE_SECONDS / 60} min`);
+    const sock = s.sock;
+    const buf = (await downloadMediaMessage(raw, 'buffer', {}, { logger: libLogger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
+    return transcribe(buf, audio.mimetype ?? 'audio/ogg');
   }
 
   /** Ao subir o serviço: reconecta quem estava conectado (sessão salva no banco). */

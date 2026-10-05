@@ -29,3 +29,33 @@ export async function textToSpeech(text: string, voice?: string): Promise<Buffer
   }
   return Buffer.from(await res.arrayBuffer());
 }
+
+/** Áudios recebidos maiores que isso não são transcritos (o lead vê a resposta, você ouve no WhatsApp). */
+export const MAX_TRANSCRIBE_SECONDS = 300;
+const MAX_TRANSCRIBE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Áudio recebido → texto (pt-BR), para o BEELIE entender o que o lead disse.
+ * Só é chamado para mensagens de leads; conversas pessoais nunca saem do serviço.
+ */
+export async function transcribe(audio: Buffer, mimetype = 'audio/ogg'): Promise<string> {
+  if (!config.openaiKey) throw new Error('Transcrição indisponível: configure OPENAI_API_KEY no Railway.');
+  if (audio.length > MAX_TRANSCRIBE_BYTES) throw new Error('Áudio grande demais para transcrever.');
+  const type = mimetype.split(';')[0]!.trim() || 'audio/ogg';
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(audio)], { type }), type.includes('mpeg') ? 'audio.mp3' : type.includes('mp4') ? 'audio.m4a' : 'audio.ogg');
+  form.append('model', config.sttModel);
+  form.append('language', 'pt');
+  form.append('response_format', 'json');
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${config.openaiKey}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    throw new Error(`Falha ao transcrever o áudio (${res.status}). ${detail}`);
+  }
+  const json = (await res.json().catch(() => ({}))) as { text?: string };
+  return (json.text ?? '').trim();
+}

@@ -27,6 +27,8 @@ export const config = {
   /** Áudio com voz da IA (opcional): chave da OpenAI e modelo de voz. */
   openaiKey: (process.env.OPENAI_API_KEY ?? '').trim(),
   ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
+  /** Modelo que transcreve os áudios recebidos dos leads. */
+  sttModel: (process.env.OPENAI_STT_MODEL ?? 'gpt-4o-mini-transcribe').trim(),
   /** Espera mínima antes da resposta automática (segundos). */
   autoMinDelaySeconds: Number(process.env.AUTO_REPLY_MIN_DELAY_SECONDS ?? 15),
 };
