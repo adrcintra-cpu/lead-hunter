@@ -258,19 +258,23 @@ export class SupabaseRepository implements Repository {
 
   setProfile(profile: Profile) {
     this.state = { ...this.state, profile };
-    this.enqueue('Salvar perfil', () =>
-      this.client.from('profiles').upsert({
-        id: profile.id,
-        full_name: profile.fullName,
-        company_name: profile.companyName,
-        offer: profile.offer,
-        icp_segments: profile.icpSegments,
-        icp_regions: profile.icpRegions,
-        sender_email: profile.senderEmail ?? null,
-        signature: profile.signature ?? null,
-        send_window: profile.sendWindow ?? null,
-      }),
-    );
+    const row = {
+      full_name: profile.fullName,
+      company_name: profile.companyName,
+      offer: profile.offer,
+      icp_segments: profile.icpSegments,
+      icp_regions: profile.icpRegions,
+      sender_email: profile.senderEmail ?? null,
+      signature: profile.signature ?? null,
+      send_window: profile.sendWindow ?? null,
+    };
+    // O perfil é criado pelo banco no cadastro (trigger handle_new_user): aqui só atualizamos.
+    // Se por algum motivo ainda não existir, cria (permitido pela policy "perfil próprio: criar").
+    this.enqueue('Salvar perfil', async () => {
+      const upd = await this.client.from('profiles').update(row).eq('id', profile.id).select('id');
+      if (upd.error || (upd.data && upd.data.length > 0)) return upd;
+      return this.client.from('profiles').insert({ id: profile.id, ...row });
+    });
     this.emit();
   }
 
