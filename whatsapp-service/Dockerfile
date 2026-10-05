@@ -1,5 +1,7 @@
 # Serviço WhatsApp do Lead Hunter. Uma instância só: as sessões ficam em memória.
 FROM node:20-slim AS build
+# git: a biblioteca do WhatsApp (Baileys) baixa uma dependência (libsignal) direto do GitHub.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund
