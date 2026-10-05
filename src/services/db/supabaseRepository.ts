@@ -165,6 +165,7 @@ export class SupabaseRepository implements Repository {
         senderEmail: p.sender_email ?? undefined,
         signature: p.signature ?? undefined,
         sendWindow: p.send_window ?? undefined,
+        whatsappQrCampaigns: typeof p.whatsapp_qr_campaigns === 'boolean' ? p.whatsapp_qr_campaigns : undefined,
         createdAt: p.created_at,
         updatedAt: p.updated_at,
       };
@@ -267,6 +268,8 @@ export class SupabaseRepository implements Repository {
       sender_email: profile.senderEmail ?? null,
       signature: profile.signature ?? null,
       send_window: profile.sendWindow ?? null,
+      // Só grava quando a coluna existe (migration aplicada) e o valor foi definido na tela.
+      ...(profile.whatsappQrCampaigns !== undefined ? { whatsapp_qr_campaigns: profile.whatsappQrCampaigns } : {}),
     };
     // O perfil é criado pelo banco no cadastro (trigger handle_new_user): aqui só atualizamos.
     // Se por algum motivo ainda não existir, cria (permitido pela policy "perfil próprio: criar").

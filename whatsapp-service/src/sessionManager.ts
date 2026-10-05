@@ -251,6 +251,12 @@ export class SessionManager {
     return this.view(userId);
   }
 
+  /** A sessão do usuário está conectada e pronta para enviar. */
+  isConnected(userId: string) {
+    const s = this.sessions.get(userId);
+    return !!s?.sock && s.status === 'conectado';
+  }
+
   /** Verifica se a sessão está de fato ativa (consulta o próprio número no WhatsApp). */
   async test(userId: string): Promise<{ ok: boolean; message: string }> {
     const s = this.sessions.get(userId);

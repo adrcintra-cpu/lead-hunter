@@ -208,6 +208,8 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   const now = new Date();
   const sum: RunSummary = { activated: 0, processed: 0, sent: 0, failed: 0, finished: 0, errors: [] };
 
+  await sweepStaleQrQueue(db).catch(() => undefined);
+
   // Campanhas agendadas que chegaram na hora.
   const scheduled: Row[] = await must(db.from('campaigns').select('id').eq('status', 'agendada').lte('scheduled_at', now.toISOString()));
   for (const c of scheduled) {
@@ -383,6 +385,17 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
   };
 
   if (eff.kind === 'manual_whatsapp') {
+    // WhatsApp conectado (QR): a mensagem entra na fila do serviço e sai sozinha, com intervalo entre envios.
+    // Se o serviço não aceitar (desligado, desconectado, sem configuração), vira tarefa manual como antes.
+    if (p?.whatsapp_qr_campaigns !== false && qrServiceConfigured() && recipient) {
+      const queued: Row = await must(db.from('messages').insert({ ...base, status: 'queued', provider: 'whatsapp_qr' }).select('id').single());
+      const ok = await queueQrSend({ ownerId: owner, leadId: lead.id, messageId: queued.id, phone: recipient, text: draft.body });
+      if (ok) {
+        await log(db, owner, lead.id, 'cadence_step', `WhatsApp na fila do WhatsApp conectado${camp?.name ? ` (${camp.name})` : ''}`, { messageId: queued.id, channel: 'whatsapp', provider: 'whatsapp_qr' });
+        return 'sent';
+      }
+      await db.from('messages').delete().eq('id', queued.id).eq('status', 'queued');
+    }
     await db.from('messages').insert({ ...base, status: 'draft', template: `${draft.template} (envio manual)` });
     await createTask(db, owner, {
       leadId: lead.id,
@@ -422,6 +435,79 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
     await log(db, owner, lead.id, 'message_failed', `Falha no envio de ${channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'}: ${reason}`, { messageId: msg.id });
     return 'failed';
   }
+}
+
+// ---------- WhatsApp conectado (QR) nas campanhas ----------
+
+const qrUrl = () => (Deno.env.get('WHATSAPP_SERVICE_URL') ?? '').trim().replace(/\/+$/, '');
+const qrSecret = () => (Deno.env.get('WHATSAPP_INBOUND_SECRET') ?? '').trim();
+export const qrServiceConfigured = () => !!qrUrl() && !!qrSecret();
+
+/** Entrega a mensagem à fila do serviço de WhatsApp. true = aceita (o envio acontece em seguida, com intervalo). */
+async function queueQrSend(body: { ownerId: string; leadId: string; messageId: string; phone: string; text: string }): Promise<boolean> {
+  try {
+    const res = await fetch(`${qrUrl()}/internal/campaign-send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-inbound-secret': qrSecret() },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** O serviço não conseguiu enviar a mensagem da campanha: ela vira tarefa manual (wa.me), como antes. */
+export async function qrCampaignFallback(db: Db, ownerId: string, messageId: string, reason: string) {
+  const { data: m } = await db
+    .from('messages')
+    .update({ status: 'draft', provider: null, template: 'Campanha (envio manual)', failure_reason: reason.slice(0, 300) })
+    .eq('id', messageId)
+    .eq('owner_id', ownerId)
+    .eq('status', 'queued')
+    .select('id, lead_id, campaign_id, final_content')
+    .maybeSingle();
+  if (!m) return false;
+  const { data: lead } = await db.from('leads').select('id, company_id').eq('id', m.lead_id).maybeSingle();
+  const { data: c } = lead ? await db.from('companies').select('*').eq('id', lead.company_id).maybeSingle() : { data: null };
+  const { data: camp } = m.campaign_id ? await db.from('campaigns').select('owner_name').eq('id', m.campaign_id).maybeSingle() : { data: null };
+  await log(db, ownerId, m.lead_id, 'message_failed', `WhatsApp da campanha não saiu pelo WhatsApp conectado (${reason.slice(0, 120)}). Ficou como tarefa para você enviar.`, { messageId });
+  await createTask(db, ownerId, {
+    leadId: m.lead_id,
+    campaignId: m.campaign_id,
+    title: `Enviar WhatsApp para ${c ? nameOf(c) : 'o lead'}`,
+    description: 'Mensagem pronta. Revise, abra o WhatsApp pelo link, envie e clique em “Marcar como enviado”.',
+    source: 'cadencia',
+    ownerName: camp?.owner_name,
+    actionUrl: c ? waMeLink(c.whatsapp, m.final_content ?? '') : undefined,
+  });
+  return true;
+}
+
+/** O serviço enviou a mensagem da campanha. */
+export async function qrCampaignSent(db: Db, ownerId: string, messageId: string, externalId: string | null, to: string | null) {
+  const at = new Date().toISOString();
+  const { data: m } = await db
+    .from('messages')
+    .update({ status: 'sent', provider: 'whatsapp_qr', external_id: externalId, recipient: to, sent_at: at })
+    .eq('id', messageId)
+    .eq('owner_id', ownerId)
+    .eq('status', 'queued')
+    .select('id, lead_id, campaign_id')
+    .maybeSingle();
+  if (!m) return false;
+  await db.from('leads').update({ last_contact_at: at }).eq('id', m.lead_id);
+  const { data: camp } = m.campaign_id ? await db.from('campaigns').select('name').eq('id', m.campaign_id).maybeSingle() : { data: null };
+  await log(db, ownerId, m.lead_id, 'message_sent', `WhatsApp enviado pelo WhatsApp conectado${camp?.name ? ` (${camp.name})` : ''}`, { messageId, channel: 'whatsapp', provider: 'whatsapp_qr' });
+  return true;
+}
+
+/** Fila perdida (serviço reiniciou antes de enviar): depois de 2 h na fila, a mensagem vira tarefa manual. */
+async function sweepStaleQrQueue(db: Db) {
+  const before = new Date(Date.now() - 2 * 3600_000).toISOString();
+  const { data } = await db.from('messages').select('id, owner_id').eq('provider', 'whatsapp_qr').eq('status', 'queued').lt('created_at', before).limit(50);
+  for (const m of (data ?? []) as Row[]) await qrCampaignFallback(db, m.owner_id, m.id, 'o serviço de WhatsApp reiniciou antes de enviar');
 }
 
 // ---------- Status de entrega (webhooks) ----------

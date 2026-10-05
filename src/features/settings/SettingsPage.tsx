@@ -7,6 +7,8 @@ import { DEFAULT_SEND_WINDOW } from '@/core/types';
 import { ConfirmDialog, PageHeader, ThemeSwitcher } from '@/components/ui';
 import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
 import { AssistantCard } from './AssistantCard';
+import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection';
+import { whatsappQrAvailable } from '@/lib/whatsappClient';
 
 const splitList = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
@@ -194,13 +196,15 @@ function SendingSettings() {
   const { toast } = useApp();
   const p = db.profile!;
   const w = p.sendWindow ?? DEFAULT_SEND_WINDOW;
-  const [f, setF] = useState({ senderEmail: p.senderEmail ?? '', signature: p.signature ?? '', start: w.startHour, end: w.endHour, weekdays: w.weekdaysOnly });
+  const [f, setF] = useState({ senderEmail: p.senderEmail ?? '', signature: p.signature ?? '', start: w.startHour, end: w.endHour, weekdays: w.weekdaysOnly, qr: p.whatsappQrCampaigns !== false });
+  const conn = useWhatsAppConnection();
+  const qrReady = whatsappQrAvailable && conn?.status === 'conectado';
   const valid = f.start < f.end && f.start >= 0 && f.end <= 24 && (!f.senderEmail || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.senderEmail));
   return (
     <section className="card px-5 py-5">
       <h2 className="text-[15px] font-extrabold">Envio das campanhas</h2>
       <p className="mt-1 text-[13px] text-ink-faint">
-        WhatsApp sem API: as etapas de WhatsApp viram tarefa com o link wa.me e você envia pelo seu WhatsApp. E-mails das cadências saem pelo servidor. Todo envio respeita a lista de supressão.
+        Com o WhatsApp conectado, as etapas de WhatsApp das campanhas saem sozinhas pelo seu número, uma de cada vez, com intervalo de 45 s a 2 min entre elas. Sem ele, viram tarefa com o link wa.me. E-mails das cadências saem pelo servidor. Todo envio respeita a lista de supressão.
       </p>
       <form
         className="mt-4 grid gap-3.5 sm:grid-cols-2"
@@ -211,6 +215,7 @@ function SendingSettings() {
             senderEmail: f.senderEmail.trim() || undefined,
             signature: f.signature.trim() || undefined,
             sendWindow: { startHour: Number(f.start), endHour: Number(f.end), weekdaysOnly: f.weekdays },
+            ...(whatsappQrAvailable ? { whatsappQrCampaigns: f.qr } : {}),
           });
           toast('Configurações de envio salvas.', 'success');
         }}
@@ -238,6 +243,17 @@ function SendingSettings() {
             Só em dias úteis
           </label>
         </div>
+        {whatsappQrAvailable && (
+          <label className="flex items-start gap-2 text-sm sm:col-span-2">
+            <input type="checkbox" checked={f.qr} onChange={(e) => setF({ ...f, qr: e.target.checked })} className="mt-0.5 h-4 w-4 accent-[rgb(var(--accent))]" />
+            <span>
+              Enviar o WhatsApp das campanhas pelo WhatsApp conectado
+              <span className="block text-xs text-ink-faint">
+                {qrReady ? 'Conectado: as mensagens saem sozinhas, dentro do horário e dos limites diários da campanha.' : 'O WhatsApp não está conectado agora (Configurações → WhatsApp). Enquanto isso, as etapas viram tarefa manual.'}
+              </span>
+            </span>
+          </label>
+        )}
         {!valid && <p className="text-xs text-bad sm:col-span-2">Confira o e-mail e o horário (início antes do fim).</p>}
         <div className="sm:col-span-2">
           <button type="submit" className="btn-primary" disabled={!valid}>Salvar envio</button>
@@ -246,7 +262,7 @@ function SendingSettings() {
       <div className="mt-5 grid gap-2 text-[13px] sm:grid-cols-2">
         <div className="rounded-lg border border-line px-3 py-2.5">
           <div className="font-bold">WhatsApp</div>
-          <div className="text-ink-faint">Sem API: link wa.me, envio manual pelo seu WhatsApp</div>
+          <div className="text-ink-faint">{qrReady && f.qr ? 'WhatsApp conectado: envio automático, com intervalo entre mensagens' : 'Link wa.me: envio manual pelo seu WhatsApp'}</div>
         </div>
         <div className="rounded-lg border border-line px-3 py-2.5">
           <div className="font-bold">E-mail</div>

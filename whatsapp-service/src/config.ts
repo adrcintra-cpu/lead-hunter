@@ -30,6 +30,9 @@ export const config = {
   /** Modelo que transcreve os áudios recebidos dos leads. */
   sttModel: (process.env.OPENAI_STT_MODEL ?? 'gpt-4o-mini-transcribe').trim(),
   /** Espera mínima antes da resposta automática (segundos). */
+  /** Intervalo sorteado entre mensagens de campanha pelo WhatsApp conectado. */
+  campaignGapMinSeconds: Number(process.env.CAMPAIGN_GAP_MIN_SECONDS ?? 45),
+  campaignGapMaxSeconds: Number(process.env.CAMPAIGN_GAP_MAX_SECONDS ?? 120),
   autoMinDelaySeconds: Number(process.env.AUTO_REPLY_MIN_DELAY_SECONDS ?? 5),
 };
 

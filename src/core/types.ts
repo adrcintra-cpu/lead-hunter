@@ -437,6 +437,8 @@ export interface Profile {
   senderEmail?: string;
   signature?: string;
   sendWindow?: SendWindow;
+  /** Etapas de WhatsApp das campanhas saem sozinhas pelo WhatsApp conectado (QR). Indefinido = ligado (ou coluna ainda não criada). */
+  whatsappQrCampaigns?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -13,14 +13,17 @@ export interface AssistantPrefs {
   voice: string;
 }
 
-export const DEFAULT_PREFS: AssistantPrefs = { autoReply: true, replyFormat: 'texto', voice: 'ash' };
+export const DEFAULT_PREFS: AssistantPrefs = { autoReply: true, replyFormat: 'texto', voice: 'cedar' };
 
 export const VOICES: { id: string; label: string }[] = [
+  { id: 'cedar', label: 'Cedar (masculina, jovem e natural) — recomendada' },
+  { id: 'verse', label: 'Verse (masculina, expressiva)' },
   { id: 'ash', label: 'Ash (masculina)' },
   { id: 'onyx', label: 'Onyx (masculina, grave)' },
   { id: 'echo', label: 'Echo (masculina, leve)' },
   { id: 'sage', label: 'Sage (neutra, calma)' },
   { id: 'alloy', label: 'Alloy (neutra)' },
+  { id: 'marin', label: 'Marin (feminina, jovem e natural)' },
   { id: 'nova', label: 'Nova (feminina, clara)' },
   { id: 'shimmer', label: 'Shimmer (feminina, suave)' },
   { id: 'coral', label: 'Coral (feminina, calorosa)' },
@@ -54,7 +57,7 @@ export async function loadAssistant(): Promise<AssistantState> {
   if (error) return { settings: DEFAULT_ASSISTANT, prefs: DEFAULT_PREFS, prefsAvailable: false, custom: false, available: !missingTable(error.message) };
   const pr = await supabase.from('assistant_settings').select('auto_reply, reply_format, voice').maybeSingle();
   const prefs: AssistantPrefs = pr.data
-    ? { autoReply: pr.data.auto_reply !== false, replyFormat: pr.data.reply_format === 'audio' ? 'audio' : 'texto', voice: pr.data.voice || 'ash' }
+    ? { autoReply: pr.data.auto_reply !== false, replyFormat: pr.data.reply_format === 'audio' ? 'audio' : 'texto', voice: pr.data.voice || 'cedar' }
     : DEFAULT_PREFS;
   return { settings: withDefaults(data), prefs, prefsAvailable: !pr.error, custom: !!data?.persona, available: true };
 }

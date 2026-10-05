@@ -68,6 +68,7 @@ Site (Vercel) ──HTTPS + token de login──▶ este serviço ──▶ Sess
    | `SEND_DAILY_LIMIT` | `60` (opcional) |
    | `WHATSAPP_INBOUND_SECRET` | o mesmo valor salvo nas Secrets das Edge Functions do Supabase |
    | `OPENAI_API_KEY` | chave da OpenAI: responder em áudio e transcrever os áudios dos leads (opcional) |
+   | `CAMPAIGN_GAP_MIN_SECONDS` / `CAMPAIGN_GAP_MAX_SECONDS` | intervalo sorteado entre mensagens de campanha (padrão 45 e 120) |
    | `RAILWAY_DEPLOYMENT_OVERLAP_SECONDS` | `0`: o servidor antigo desliga antes do novo conectar. Duas instâncias com a mesma sessão corrompem a criptografia ("Aguardando mensagem" no celular do contato). |
 
 6. **Gere o endereço público:** Settings → Networking → Generate Domain. Teste abrindo `https://<endereço>/health`; deve aparecer `{"ok":true}`.
@@ -111,3 +112,13 @@ Para ligar:
 ## Próximos passos (estrutura já preparada)
 
 O `SessionManager.sendMessage` é o único ponto de envio. Uma fila futura (agendamentos, follow-ups, campanhas) deve chamar esse método, um envio por vez, respeitando o intervalo e o limite diário, com pausa e cancelamento por campanha. Não deve haver disparos simultâneos.
+
+## Campanhas pelo WhatsApp conectado
+
+As etapas de WhatsApp das campanhas saem sozinhas pelo número conectado (Configurações → Envio das campanhas, ligado por padrão).
+
+1. No Supabase, adicione o segredo `WHATSAPP_SERVICE_URL` com o endereço deste serviço (ex.: `https://lead-hunter-production-e574.up.railway.app`, sem barra no final):
+   `npx supabase secrets set WHATSAPP_SERVICE_URL=https://...`
+2. O agendador (`cadence-runner`) entrega cada mensagem em `/internal/campaign-send`, autenticado pelo `WHATSAPP_INBOUND_SECRET`.
+3. Este serviço envia uma de cada vez, com intervalo de 45 s a 2 min, e confirma no Supabase (`whatsapp-qr-inbound`).
+4. WhatsApp desconectado, número sem WhatsApp ou serviço reiniciado: a mensagem vira tarefa com link wa.me, como antes.

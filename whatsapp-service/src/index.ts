@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from './config.js';
 import { log } from './log.js';
 import { SessionManager } from './sessionManager.js';
+import { CampaignQueue } from './campaignQueue.js';
+import { timingSafeEqual } from 'node:crypto';
 import { ttsAvailable } from './tts.js';
 
 /**
@@ -18,6 +20,34 @@ const db = createClient(config.supabaseUrl, config.supabaseServiceKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 const manager = new SessionManager(db);
+const campaigns = new CampaignQueue(
+  (u, phone, text) => manager.sendMessage(u, phone, text, { typing: true }),
+  (u) => manager.isConnected(u),
+);
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function secretOk(req: IncomingMessage) {
+  const got = Buffer.from(String(req.headers['x-inbound-secret'] ?? ''));
+  const want = Buffer.from(config.inboundSecret);
+  return want.length > 0 && got.length === want.length && timingSafeEqual(got, want);
+}
+
+/** Rota interna: o agendador de campanhas (Supabase) entrega uma mensagem para a fila. Autenticada pelo segredo compartilhado. */
+async function campaignSend(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'POST') throw new HttpError(405, 'Método não permitido.');
+  if (!secretOk(req)) throw new HttpError(401, 'Não autorizado.');
+  const b = await readJson(req);
+  const job = {
+    ownerId: String(b.ownerId ?? ''),
+    leadId: String(b.leadId ?? ''),
+    messageId: String(b.messageId ?? ''),
+    phone: typeof b.phone === 'string' ? b.phone.slice(0, 40) : '',
+    text: typeof b.text === 'string' ? b.text.slice(0, 4000) : '',
+  };
+  if (!UUID.test(job.ownerId) || !UUID.test(job.leadId) || !UUID.test(job.messageId) || !job.phone || !job.text.trim()) throw new HttpError(400, 'Dados inválidos.');
+  if (!campaigns.enqueue(job)) throw new HttpError(409, 'WhatsApp não conectado.');
+  send(res, 202, { queued: true, pending: campaigns.pending(job.ownerId) });
+}
 
 // ---------- utilidades HTTP ----------
 
@@ -150,6 +180,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (path === '/health') return send(res, 200, { ok: true });
+    if (path === '/internal/campaign-send') return await campaignSend(req, res);
     const route = routes[path];
     if (!route) throw new HttpError(404, 'Rota não encontrada.');
     if (req.method !== route.method) throw new HttpError(405, 'Método não permitido.');

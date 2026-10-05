@@ -9,7 +9,7 @@
 //   auto_failed  o envio automático falhou → registra; a mensagem fica para você enviar.
 // Publicar sem verificação de JWT: supabase functions deploy whatsapp-qr-inbound --no-verify-jwt
 
-import { adminClient, handleInbound, log } from '../_shared/automation/engine.ts';
+import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent } from '../_shared/automation/engine.ts';
 import { inWindow } from '../_shared/automation/planner.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from '../_shared/automation/types.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
@@ -73,6 +73,15 @@ Deno.serve(async (req) => {
 
   try {
     if (b.action === 'sent') return Response.json(await markAutoSent(db, ownerId, leadId, b));
+    if (b.action === 'campaign_sent' || b.action === 'campaign_failed') {
+      const messageId = String(b.messageId ?? '');
+      if (!UUID.test(messageId)) return new Response('Dados inválidos', { status: 400 });
+      const ok =
+        b.action === 'campaign_sent'
+          ? await qrCampaignSent(db, ownerId, messageId, typeof b.externalId === 'string' ? b.externalId.slice(0, 100) : null, String(b.to ?? '').replace(/\D/g, '') || null)
+          : await qrCampaignFallback(db, ownerId, messageId, String(b.error ?? 'erro no envio'));
+      return Response.json({ ok });
+    }
     if (b.action === 'auto_failed') {
       await log(db, ownerId, leadId, 'message_failed', `Resposta automática não enviada: ${String(b.error ?? 'erro').slice(0, 200)}. A mensagem ficou pronta para você enviar.`, { messageId: b.messageId });
       return Response.json({ ok: true });
@@ -142,7 +151,7 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     body: s.body,
     intent: s.intent,
     format,
-    voice: typeof cfg?.voice === 'string' ? cfg.voice : 'ash',
+    voice: typeof cfg?.voice === 'string' ? cfg.voice : 'cedar',
     // Atraso natural, como alguém que leu e respondeu.
     delaySec: 10 + Math.floor(Math.random() * 16),
   };

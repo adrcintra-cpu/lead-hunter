@@ -1,7 +1,13 @@
 import { config } from './config.js';
 
-/** Vozes disponíveis (OpenAI). A padrão é masculina, combinando com o BEELIE. */
-export const VOICES = ['ash', 'onyx', 'echo', 'nova', 'shimmer', 'coral', 'sage', 'alloy', 'fable', 'ballad', 'verse'] as const;
+/** Vozes disponíveis (OpenAI). A padrão é cedar: masculina e a mais natural (recomendada pela OpenAI). */
+export const VOICES = ['cedar', 'verse', 'ash', 'echo', 'onyx', 'marin', 'nova', 'shimmer', 'coral', 'sage', 'alloy', 'fable', 'ballad'] as const;
+
+/** Como falar: jovem, descontraído e humano (vale para qualquer voz). */
+const SPEAKING_STYLE =
+  'Fale em português do Brasil, com sotaque brasileiro neutro, como uma pessoa jovem (por volta de 28 anos) mandando um áudio de WhatsApp para um cliente: ' +
+  'tom leve, simpático e confiante, com um sorriso na voz; ritmo de conversa, um pouco ágil, com entonação variada e pequenas pausas naturais entre as ideias. ' +
+  'Nada de voz de locutor, de URA ou robótica; nada de ler pausadamente. Soe espontâneo, como quem está explicando algo a um conhecido.';
 
 export const ttsAvailable = () => !!config.openaiKey;
 
@@ -11,7 +17,7 @@ export const ttsAvailable = () => !!config.openaiKey;
  */
 export async function textToSpeech(text: string, voice?: string): Promise<Buffer> {
   if (!config.openaiKey) throw new Error('Áudio indisponível: configure OPENAI_API_KEY no Railway.');
-  const v = VOICES.includes(voice as (typeof VOICES)[number]) ? voice : 'ash';
+  const v = VOICES.includes(voice as (typeof VOICES)[number]) ? voice : 'cedar';
   const res = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.openaiKey}`, 'Content-Type': 'application/json' },
@@ -20,7 +26,7 @@ export async function textToSpeech(text: string, voice?: string): Promise<Buffer
       voice: v,
       input: text.slice(0, 1500),
       response_format: 'opus',
-      instructions: 'Fale em português do Brasil, com tom cordial, natural e profissional, ritmo de conversa de WhatsApp.',
+      instructions: SPEAKING_STYLE,
     }),
   });
   if (!res.ok) {
