@@ -15,6 +15,30 @@ export function hasClaude(): boolean {
   return !!Deno.env.get('ANTHROPIC_API_KEY');
 }
 
+/**
+ * Saída estruturada (output_config.format): todo objeto precisa de additionalProperties: false,
+ * e limites numéricos/de texto não são aceitos no schema — viram descrição.
+ */
+// deno-lint-ignore no-explicit-any
+export function strictSchema(node: any): any {
+  if (Array.isArray(node)) return node.map(strictSchema);
+  if (!node || typeof node !== 'object') return node;
+  // deno-lint-ignore no-explicit-any
+  const out: any = {};
+  const notes: string[] = [];
+  for (const [k, v] of Object.entries(node)) {
+    if (['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern', 'format'].includes(k)) {
+      notes.push(`${k}: ${v}`);
+      continue;
+    }
+    out[k] = k === 'properties' ? Object.fromEntries(Object.entries(v as object).map(([pk, pv]) => [pk, strictSchema(pv)])) : strictSchema(v);
+  }
+  if (notes.length) out.description = [out.description, `(${notes.join(', ')})`].filter(Boolean).join(' ');
+  const isObject = out.type === 'object' || (Array.isArray(out.type) && out.type.includes('object'));
+  if (isObject) out.additionalProperties = false;
+  return out;
+}
+
 export async function runTask<T = unknown>(fn: TaskName, input: unknown): Promise<ClaudeRun<T>> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurada no servidor');
@@ -25,19 +49,29 @@ export async function runTask<T = unknown>(fn: TaskName, input: unknown): Promis
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1500,
-      temperature: 0.2,
+      max_tokens: 3000,
       system: task.system,
-      tools: [{ name: 'responder', description: 'Devolve a resposta estruturada.', input_schema: task.schema }],
-      tool_choice: { type: 'tool', name: 'responder' },
       messages: [{ role: 'user', content: task.user(input) }],
+      // Resposta em JSON garantida pelo schema da tarefa.
+      output_config: { format: { type: 'json_schema', schema: strictSchema(task.schema) } },
     }),
   });
   if (!res.ok) throw new Error(`Claude API ${res.status}: ${await res.text()}`);
   const data = await res.json();
-  const block = (data.content ?? []).find((b: { type: string }) => b.type === 'tool_use');
-  if (!block) throw new Error('Resposta sem saída estruturada');
-  return { output: task.output(block.input) as T, usage: data.usage ?? {} };
+  if (data.stop_reason === 'refusal') throw new Error('A IA recusou a tarefa.');
+  if (data.stop_reason === 'max_tokens') throw new Error('Resposta da IA cortada (limite de tokens).');
+  const text = (data.content ?? [])
+    .filter((b: { type: string }) => b.type === 'text')
+    .map((b: { text: string }) => b.text)
+    .join('');
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error('Resposta da IA fora do formato esperado.');
+  }
+  // deno-lint-ignore no-explicit-any
+  return { output: task.output(raw as any) as T, usage: data.usage ?? {} };
 }
 
 // Registro de auditoria em ai_runs (append-only). `db` é um cliente supabase-js.

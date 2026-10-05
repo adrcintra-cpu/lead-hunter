@@ -52,7 +52,22 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
           },
           required: ['segment', 'city', 'state', 'regionLabel', 'radiusKm', 'requireWebsite', 'requirePhone', 'whatsapp', 'quantity', 'minEmployees'],
         },
-        confidence: { type: 'object', additionalProperties: { type: 'number' } },
+        // Confiança de 0 a 1 por campo (propriedades fixas: a saída estruturada não aceita mapas livres).
+        confidence: {
+          type: 'object',
+          properties: {
+            segment: { type: 'number' },
+            city: { type: 'number' },
+            state: { type: 'number' },
+            radiusKm: { type: 'number' },
+            requireWebsite: { type: 'number' },
+            requirePhone: { type: 'number' },
+            whatsapp: { type: 'number' },
+            quantity: { type: 'number' },
+            minEmployees: { type: 'number' },
+          },
+          required: ['segment', 'city', 'state', 'radiusKm', 'requireWebsite', 'requirePhone', 'whatsapp', 'quantity', 'minEmployees'],
+        },
       },
       required: ['criteria', 'confidence'],
     },
@@ -85,7 +100,7 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
     system: `Você recebe um score base (0–100) calculado por regras e pode ajustá-lo entre -15 e +15, apenas com base nos dados fornecidos. ${RULES}`,
     schema: {
       type: 'object',
-      properties: { adjustment: { type: 'integer', minimum: -15, maximum: 15 }, reason: { type: 'string' } },
+      properties: { adjustment: { type: 'integer', description: 'Entre -15 e 15.' }, reason: { type: 'string' } },
       required: ['adjustment', 'reason'],
     },
     user: (input) => {
