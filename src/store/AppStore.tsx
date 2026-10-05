@@ -111,6 +111,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
   toastRef.current = toast;
 
+  // Buscas salvas com execução automática: verifica ao abrir o app e a cada 5 minutos enquanto ele está aberto.
+  useEffect(() => {
+    if (!service) return;
+    const check = () =>
+      service
+        .runDueSavedSearches()
+        .then((rs) =>
+          rs.forEach((r) =>
+            toastRef.current?.(
+              `Busca automática “${r.name}”: ${r.news} ${r.news === 1 ? 'empresa nova' : 'empresas novas'}${r.enrolled ? `, ${r.enrolled} na campanha` : ''}.`,
+              'success',
+            ),
+          ),
+        )
+        .catch(() => {});
+    const first = window.setTimeout(check, 4000);
+    const id = window.setInterval(check, 5 * 60_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(id);
+    };
+  }, [service]);
+
   const value: AppContextValue = {
     session,
     loading,

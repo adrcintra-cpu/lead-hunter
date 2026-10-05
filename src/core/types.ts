@@ -326,6 +326,9 @@ export interface SavedSearch {
   rawQuery: string;
   criteria: SearchCriteria;
   lastRunAt?: string;
+  /** Execução automática: desligada, diária ou semanal (só traz empresas novas). */
+  schedule?: 'off' | 'diaria' | 'semanal';
+  nextRunAt?: string;
   createdAt: string;
   updatedAt: string;
 }

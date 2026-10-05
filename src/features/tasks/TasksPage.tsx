@@ -73,16 +73,22 @@ export function TasksPage() {
   const db = useDb();
   const service = useService();
   const { toast } = useApp();
-  const [filter, setFilter] = useState<'aberta' | 'concluida'>('aberta');
+  const [filter, setFilter] = useState<'whatsapp' | 'aberta' | 'concluida'>('aberta');
   const [title, setTitle] = useState('');
+  // Fila de WhatsApp: tarefas abertas com link wa.me, melhores leads (maior score) primeiro.
+  const isWa = (t: Task) => t.status === 'aberta' && !!t.actionUrl?.startsWith('https://wa.me/');
+  const scoreOf = (t: Task) => db.leads.find((l) => l.id === t.leadId)?.currentScore ?? 0;
   const tasks = useMemo(
     () =>
-      db.tasks
-        .filter((t) => t.status === filter)
-        .sort((a, b) => (a.dueAt ?? a.createdAt).localeCompare(b.dueAt ?? b.createdAt) * (filter === 'aberta' ? 1 : -1)),
-    [db.tasks, filter],
+      filter === 'whatsapp'
+        ? db.tasks.filter(isWa).sort((a, b) => scoreOf(b) - scoreOf(a))
+        : db.tasks
+            .filter((t) => t.status === filter)
+            .sort((a, b) => (a.dueAt ?? a.createdAt).localeCompare(b.dueAt ?? b.createdAt) * (filter === 'aberta' ? 1 : -1)),
+    [db.tasks, db.leads, filter], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const open = db.tasks.filter((t) => t.status === 'aberta').length;
+  const waCount = db.tasks.filter(isWa).length;
 
   function add(e: FormEvent) {
     e.preventDefault();
@@ -101,7 +107,7 @@ export function TasksPage() {
         <button type="submit" className="btn-dark shrink-0" disabled={!title.trim()}><Plus className="h-4 w-4" /> Criar</button>
       </form>
       <div role="tablist" className="inline-flex w-fit rounded-lg border border-line bg-subtle p-0.5">
-        {(['aberta', 'concluida'] as const).map((f) => (
+        {(['whatsapp', 'aberta', 'concluida'] as const).map((f) => (
           <button
             key={f}
             role="tab"
@@ -110,13 +116,18 @@ export function TasksPage() {
             onClick={() => setFilter(f)}
             className={cx('min-h-[34px] rounded-md px-3 text-sm font-semibold', filter === f ? 'bg-surface text-ink shadow-sm' : 'text-ink-faint')}
           >
-            {f === 'aberta' ? `Abertas (${open})` : 'Concluídas'}
+            {f === 'whatsapp' ? `WhatsApp de hoje (${waCount})` : f === 'aberta' ? `Abertas (${open})` : 'Concluídas'}
           </button>
         ))}
       </div>
+      {filter === 'whatsapp' && (
+        <p className="-mt-2 text-[13px] text-ink-faint">
+          Mensagens prontas, dos melhores leads para os demais. Para cada uma: <b>Abrir WhatsApp</b> → enviar → <b>Marcar como enviado</b>. O limite diário de cada campanha controla quantas entram na fila por dia.
+        </p>
+      )}
       <div className="card">
         {tasks.length === 0 ? (
-          <EmptyState icon={<ListChecks className="h-8 w-8" />} title={filter === 'aberta' ? 'Nenhuma tarefa aberta' : 'Nenhuma tarefa concluída'}>
+          <EmptyState icon={<ListChecks className="h-8 w-8" />} title={filter === 'whatsapp' ? 'Nenhum WhatsApp na fila' : filter === 'aberta' ? 'Nenhuma tarefa aberta' : 'Nenhuma tarefa concluída'}>
             As cadências criam tarefas quando um lead responde ou quando o WhatsApp precisa ser enviado manualmente.
           </EmptyState>
         ) : (

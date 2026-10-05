@@ -1,4 +1,4 @@
-import { plan, type Effect, type PlanContext } from '../../../supabase/functions/_shared/automation/planner.ts';
+import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from '../../../supabase/functions/_shared/automation/planner.ts';
 import { ADVANCED_STAGES, messageStage, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from '../../../supabase/functions/_shared/automation/replies.ts';
 import {
   CLOSED_STAGES,
@@ -64,9 +64,11 @@ export class AutomationService {
       steps: c.steps.map((s) => (s.type === 'wait' ? { ...s, days: Math.max(0, Math.round(Number(s.days) || 0)) } : s)),
       updatedAt: this.nowIso(),
     };
-    if (this.db.cadences.some((x) => x.id === c.id)) this.repo.update('cadences', c.id, clean);
-    else this.repo.insert('cadences', { ...clean, id: c.id || uid('cad'), createdAt: this.nowIso() });
-    return clean;
+    if (this.db.cadences.some((x) => x.id === c.id)) {
+      this.repo.update('cadences', c.id, clean);
+      return clean;
+    }
+    return this.repo.insert('cadences', { ...clean, id: c.id || uid('cad'), createdAt: this.nowIso() });
   }
 
   cadenceInUse(cadenceId: string): Campaign | undefined {
@@ -177,7 +179,7 @@ export class AutomationService {
     const camp = this.db.campaigns.find((c) => c.id === campaignId);
     if (!camp) return;
     const pending = this.db.enrollments.filter((e) => e.campaignId === campaignId && e.status === 'pendente');
-    if (!pending.length) throw new Error('Nenhum lead preparado. Clique em “Preparar mensagens” primeiro.');
+    if (!pending.length && !camp.autoEnroll) throw new Error('Nenhum lead preparado. Clique em “Preparar mensagens” primeiro.');
     const now = this.svc.now();
     const start = scheduledAt && new Date(scheduledAt) > now ? scheduledAt : now.toISOString();
     const scheduled = start !== now.toISOString();
@@ -331,13 +333,18 @@ export class AutomationService {
         this.repo.update('campaigns', camp.id, { status: 'ativa', startedAt: camp.scheduledAt });
       }
       const active = new Set(this.db.campaigns.filter((c) => c.status === 'ativa').map((c) => c.id));
-      const due = this.db.enrollments.filter((e) => e.status === 'ativa' && active.has(e.campaignId) && e.nextRunAt && new Date(e.nextRunAt) <= now);
+      // Melhores leads primeiro: com limite diário, são eles que usam a cota do dia.
+      const score = (leadId: string) => this.db.leads.find((l) => l.id === leadId)?.currentScore ?? 0;
+      const due = this.db.enrollments
+        .filter((e) => e.status === 'ativa' && active.has(e.campaignId) && e.nextRunAt && new Date(e.nextRunAt) <= now)
+        .sort((a, b) => score(b.leadId) - score(a.leadId));
       for (const e of due) {
         await this.runEnrollment(e.id);
         processed++;
       }
-      // Campanha sem ninguém ativo termina sozinha.
+      // Campanha sem ninguém ativo termina sozinha (exceto com entrada automática: novos leads ainda podem chegar).
       for (const id of active) {
+        if (this.db.campaigns.find((c) => c.id === id)?.autoEnroll) continue;
         const es = this.db.enrollments.filter((e) => e.campaignId === id);
         if (es.length && es.every((e) => e.status === 'concluida' || e.status === 'interrompida')) {
           this.repo.update('campaigns', id, { status: 'finalizada', finishedAt: now.toISOString() });
@@ -359,6 +366,15 @@ export class AutomationService {
       return;
     }
     const p = plan(cad, e.stepIndex, this.context(e, lead, c));
+    // Limite diário da campanha: sem cota hoje, a etapa fica para a primeira janela de amanhã.
+    const send = p.effects.find((x) => x.kind === 'send' || x.kind === 'manual_whatsapp');
+    if (send && 'step' in send) {
+      const camp = this.db.campaigns.find((x) => x.id === e.campaignId);
+      if (camp && this.dailyQuotaLeft(camp, send.step.channel) <= 0) {
+        this.repo.update('enrollments', e.id, { nextRunAt: nextDayWindow(this.svc.now(), this.svc.profile.sendWindow ?? DEFAULT_SEND_WINDOW).toISOString() });
+        return;
+      }
+    }
     for (const eff of p.effects) await this.apply(eff, e, lead, c, cad);
     const at = this.nowIso();
     this.repo.update('enrollments', e.id, {
@@ -428,7 +444,7 @@ export class AutomationService {
           leadId: lead.id,
           campaignId: e.campaignId,
           title: `Enviar WhatsApp para ${c.tradeName ?? c.legalName}`,
-          description: 'Sem opt-in registrado: a automação não envia WhatsApp. Revise a mensagem e envie pelo link.',
+          description: 'Mensagem pronta. Revise, abra o WhatsApp pelo link, envie e clique em “Marcar como enviado”.',
           source: 'cadencia',
           ownerName: camp?.ownerName,
           actionUrl: link ?? undefined,
@@ -552,6 +568,45 @@ export class AutomationService {
     if (a.category === 'sem_contato' || a.category === 'nao_interessado') return { nextAction: a.suggestedAction, nextActionAt: undefined };
     const at = a.category === 'posteriormente' ? new Date(this.svc.now().getTime() + (a.followUpDays ?? 30) * 864e5).toISOString() : this.nowIso();
     return { nextAction: a.suggestedAction, nextActionAt: at };
+  }
+
+  /** Envios de hoje (hora de Brasília) da campanha neste canal. WhatsApp conta as mensagens preparadas na fila. */
+  sentToday(campaignId: string, channel: SendChannel): number {
+    const start = startOfDayBRT(this.svc.now()).toISOString();
+    return this.db.messages.filter((m) => m.campaignId === campaignId && m.channel === channel && m.createdAt >= start).length;
+  }
+
+  /** Quanto ainda pode ser enviado hoje (Infinity quando não há limite). */
+  dailyQuotaLeft(camp: Campaign, channel: SendChannel): number {
+    const limit = channel === 'email' ? camp.dailyLimitEmail : camp.dailyLimitWhatsapp;
+    return limit ? Math.max(0, limit - this.sentToday(camp.id, channel)) : Infinity;
+  }
+
+  /**
+   * Entrada automática: leads novos (de uma busca) que se encaixam no público de campanhas ativas
+   * com "entrada automática" entram na cadência na hora. Cada lead entra em uma campanha só.
+   */
+  autoEnrollNewLeads(leadIds: string[]): { campaign: string; count: number }[] {
+    if (!leadIds.length) return [];
+    const wanted = new Set(leadIds);
+    const out: { campaign: string; count: number }[] = [];
+    const camps = this.db.campaigns.filter((c) => c.autoEnroll && c.status === 'ativa');
+    this.repo.batch(() => {
+      for (const camp of camps) {
+        const cad = this.db.cadences.find((c) => c.id === camp.cadenceId);
+        if (!cad) continue;
+        const leads = this.audienceLeads(camp.audience).filter((l) => wanted.has(l.id));
+        const at = this.nowIso();
+        for (const lead of leads) {
+          this.repo.insert('enrollments', { id: uid('enr'), campaignId: camp.id, cadenceId: cad.id, leadId: lead.id, stepIndex: 0, status: 'ativa', nextRunAt: at, startedAt: at, createdAt: at, updatedAt: at });
+          this.svc.log(lead.id, 'campaign_enrolled', `Entrou automaticamente na campanha “${camp.name}” (score ${lead.currentScore})`, { campaignId: camp.id, auto: true });
+          if (lead.stage === 'novo' || lead.stage === 'qualificado') this.svc.changeStage(lead.id, 'em_cadencia');
+          wanted.delete(lead.id);
+        }
+        if (leads.length) out.push({ campaign: camp.name, count: leads.length });
+      }
+    });
+    return out;
   }
 
   /** Para a automação do lead (ex.: virou cliente ou não interessado). */

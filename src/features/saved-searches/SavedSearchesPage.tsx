@@ -36,7 +36,10 @@ export function SavedSearchesPage() {
 
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-5">
-      <PageHeader title="Buscas" subtitle="Critérios salvos para rodar de novo. No MVP a execução é sempre manual." />
+      <PageHeader
+        title="Buscas"
+        subtitle="Critérios salvos para rodar de novo, manualmente ou de forma automática (todo dia ou toda semana). A busca automática só traz empresas novas e roda enquanto o Lead Hunter estiver aberto em algum navegador."
+      />
       <section className="flex flex-col gap-3">
         <h2 className="text-[15px] font-extrabold">Salvas</h2>
         {db.savedSearches.length === 0 ? (
@@ -51,9 +54,27 @@ export function SavedSearchesPage() {
               <div className="min-w-0">
                 <div className="text-base font-extrabold">{s.name}</div>
                 <div className="mt-1 text-[13px] text-ink-soft">{describeCriteria(s.criteria)}</div>
-                <div className="mt-1.5 text-xs text-ink-faint">{lastRunText(s.id, s.lastRunAt)}</div>
+                <div className="mt-1.5 text-xs text-ink-faint">
+                  {lastRunText(s.id, s.lastRunAt)}
+                  {s.schedule && s.schedule !== 'off' && s.nextRunAt ? ` · próxima automática ${new Date(s.nextRunAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+                </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <label htmlFor={`sched-${s.id}`} className="sr-only">Execução automática de {s.name}</label>
+                <select
+                  id={`sched-${s.id}`}
+                  className="input w-auto"
+                  value={s.schedule ?? 'off'}
+                  onChange={(e) => {
+                    const v = e.target.value as 'off' | 'diaria' | 'semanal';
+                    service.setSavedSearchSchedule(s.id, v);
+                    toast(v === 'off' ? 'Execução automática desligada.' : `Busca agendada (${v === 'diaria' ? 'todo dia' : 'toda semana'}). A primeira roda em instantes.`, 'success');
+                  }}
+                >
+                  <option value="off">Automática: desligada</option>
+                  <option value="diaria">Automática: todo dia</option>
+                  <option value="semanal">Automática: toda semana</option>
+                </select>
                 <button type="button" className="btn-outline" onClick={() => navigate(`/buscar?q=${encodeURIComponent(s.rawQuery)}&saved=${s.id}`)}>
                   <Play className="h-4 w-4" /> Executar novamente
                 </button>

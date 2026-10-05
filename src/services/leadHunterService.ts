@@ -139,6 +139,45 @@ export class LeadHunterService {
     return { ...parsed, unsupported: unsupportedCriteria(parsed.criteria, this.providers) };
   }
 
+  /** Resultado da entrada automática da última busca (para a interface avisar). */
+  lastAutoEnroll: { campaign: string; count: number }[] = [];
+
+  /** Liga/desliga a execução automática de uma busca salva. A primeira execução acontece na próxima verificação. */
+  setSavedSearchSchedule(id: string, schedule: 'off' | 'diaria' | 'semanal') {
+    this.repo.update('savedSearches', id, { schedule, nextRunAt: schedule === 'off' ? undefined : this.now().toISOString() });
+  }
+
+  private runningSaved = false;
+
+  /**
+   * Roda as buscas salvas agendadas que venceram. Só empresas novas viram leads (a deduplicação
+   * descarta as que já existem) e elas entram nas campanhas com entrada automática.
+   * Chamado ao abrir o app e periodicamente enquanto ele está aberto.
+   */
+  async runDueSavedSearches(): Promise<{ name: string; news: number; enrolled: number }[]> {
+    if (this.runningSaved || !this.db.profile) return [];
+    this.runningSaved = true;
+    const out: { name: string; news: number; enrolled: number }[] = [];
+    try {
+      const now = this.now();
+      const due = this.db.savedSearches.filter((s) => s.schedule && s.schedule !== 'off' && (!s.nextRunAt || new Date(s.nextRunAt) <= now));
+      for (const s of due) {
+        // Marca a próxima execução antes de rodar: evita rodar duas vezes (outra aba, outro aparelho).
+        const next = new Date(now.getTime() + (s.schedule === 'semanal' ? 7 : 1) * 864e5);
+        this.repo.update('savedSearches', s.id, { nextRunAt: next.toISOString() });
+        try {
+          const search = await this.runSearch(s.rawQuery, s.criteria, s.criteria, () => {}, s.id);
+          out.push({ name: s.name, news: search.newCount, enrolled: this.lastAutoEnroll.reduce((n, x) => n + x.count, 0) });
+        } catch {
+          /* falha registrada na própria busca (status "erro"); tenta de novo na próxima data */
+        }
+      }
+    } finally {
+      this.runningSaved = false;
+    }
+    return out;
+  }
+
   /** Buscas rodam uma por vez: evita duas buscas simultâneas criarem a mesma empresa. */
   private searchQueue: Promise<unknown> = Promise.resolve();
 
@@ -326,6 +365,8 @@ export class LeadHunterService {
         });
         if (savedSearchId) this.repo.update('savedSearches', savedSearchId, { lastRunAt: nowIso() });
       });
+      // Empresas novas entram sozinhas nas campanhas ativas com "entrada automática".
+      this.lastAutoEnroll = this.automation.autoEnrollNewLeads(limited.filter((r) => r.isNew).map((r) => r.lead.id));
       onStep('done');
       return this.db.searches.find((s) => s.id === search.id)!;
     } catch (err) {

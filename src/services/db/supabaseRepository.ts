@@ -44,7 +44,7 @@ const DEFS: Record<TableName, TableDef> = {
     cols: ['id', 'raw_query', 'parsed_criteria', 'confirmed_criteria', 'status', 'providers_used', 'ignored_criteria', 'result_count', 'new_count', 'duplicates_removed', 'saved_search_id', 'error', 'created_at', 'updated_at'],
     order: 'created_at',
   },
-  savedSearches: { sql: 'saved_searches', cols: ['id', 'name', 'raw_query', 'criteria', 'last_run_at', 'created_at', 'updated_at'], order: 'created_at' },
+  savedSearches: { sql: 'saved_searches', cols: ['id', 'name', 'raw_query', 'criteria', 'last_run_at', 'schedule', 'next_run_at', 'created_at', 'updated_at'], order: 'created_at' },
   searchResults: { sql: 'search_results', cols: ['id', 'search_id', 'company_id', 'lead_id', 'rank', 'provider', 'was_duplicate'], order: 'rank' },
   messages: {
     sql: 'messages',
@@ -55,7 +55,7 @@ const DEFS: Record<TableName, TableDef> = {
   aiRuns: { sql: 'ai_runs', cols: ['id', 'fn', 'model', 'prompt_version', 'latency_ms', 'status', 'created_at'], order: 'created_at' },
   campaigns: {
     sql: 'campaigns',
-    cols: ['id', 'name', 'objective', 'audience', 'channel', 'cadence_id', 'owner_name', 'status', 'scheduled_at', 'started_at', 'finished_at', 'created_at', 'updated_at'],
+    cols: ['id', 'name', 'objective', 'audience', 'channel', 'cadence_id', 'owner_name', 'status', 'scheduled_at', 'started_at', 'finished_at', 'daily_limit_email', 'daily_limit_whatsapp', 'auto_enroll', 'created_at', 'updated_at'],
     order: 'created_at',
   },
   cadences: { sql: 'cadences', cols: ['id', 'name', 'description', 'stop_on_reply', 'steps', 'created_at', 'updated_at'], order: 'created_at' },

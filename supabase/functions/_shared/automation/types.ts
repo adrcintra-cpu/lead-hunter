@@ -63,6 +63,11 @@ export interface Campaign {
   scheduledAt?: string;
   startedAt?: string;
   finishedAt?: string;
+  /** Máximo de envios por dia nesta campanha (vazio = sem limite). WhatsApp conta as mensagens preparadas na fila. */
+  dailyLimitEmail?: number;
+  dailyLimitWhatsapp?: number;
+  /** Leads novos das buscas que se encaixam no público entram sozinhos (a campanha não finaliza sozinha). */
+  autoEnroll?: boolean;
   createdAt: string;
   updatedAt: string;
 }

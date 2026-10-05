@@ -293,6 +293,46 @@ export function CampaignDetailPage() {
           <span className="text-ink-faint"> (já descontados opt-out, clientes, não interessados e leads em outra cadência).</span>
         </p>
 
+        <h3 className="mt-6 text-sm font-extrabold">Automação</h3>
+        <p className="mt-1 text-xs text-ink-faint">Pode ser alterada a qualquer momento, inclusive com a campanha ativa.</p>
+        <div className="mt-3 grid gap-3.5 sm:grid-cols-2">
+          <div>
+            <label htmlFor="c-lim-wa" className="label">Limite diário de WhatsApp</label>
+            <input
+              id="c-lim-wa"
+              type="number"
+              min={1}
+              className="input"
+              placeholder="Sem limite"
+              value={camp.dailyLimitWhatsapp ?? ''}
+              onChange={(e) => set({ dailyLimitWhatsapp: Number(e.target.value) > 0 ? Math.round(Number(e.target.value)) : undefined })}
+            />
+            <p className="mt-1 text-xs text-ink-faint">Mensagens prontas na fila de Tarefas por dia. Hoje: {auto.sentToday(camp.id, 'whatsapp')}.</p>
+          </div>
+          <div>
+            <label htmlFor="c-lim-em" className="label">Limite diário de e-mail</label>
+            <input
+              id="c-lim-em"
+              type="number"
+              min={1}
+              className="input"
+              placeholder="Sem limite"
+              value={camp.dailyLimitEmail ?? ''}
+              onChange={(e) => set({ dailyLimitEmail: Number(e.target.value) > 0 ? Math.round(Number(e.target.value)) : undefined })}
+            />
+            <p className="mt-1 text-xs text-ink-faint">E-mails enviados por dia. Hoje: {auto.sentToday(camp.id, 'email')}. O excedente sai no dia seguinte.</p>
+          </div>
+          <label className="flex items-start gap-2.5 rounded-lg border border-line px-3.5 py-3 text-[13px] sm:col-span-2">
+            <input type="checkbox" className="mt-0.5" checked={!!camp.autoEnroll} onChange={(e) => set({ autoEnroll: e.target.checked })} />
+            <span>
+              <span className="font-bold">Entrada automática</span>
+              <span className="block text-ink-faint">
+                Empresas novas encontradas pelas buscas (inclusive as agendadas) que se encaixam no público acima, com score mínimo {camp.audience.minScore || 0}, entram sozinhas nesta campanha enquanto ela estiver ativa. A campanha não finaliza sozinha.
+              </span>
+            </span>
+          </label>
+        </div>
+
         {cad && (
           <div className="mt-5 rounded-lg bg-subtle px-4 py-3">
             <div className="text-xs font-bold text-ink-soft">Cadência: {cad.name}</div>
@@ -315,7 +355,7 @@ export function CampaignDetailPage() {
             <button type="button" className="btn-outline" onClick={prepare} disabled={!!busy || audience.length === 0}>
               {busy ? <Spinner /> : <Sparkles className="h-4 w-4" />} {busy || `Preparar mensagens (${audience.length})`}
             </button>
-            <button type="button" className="btn-primary" onClick={() => activate()} disabled={!pending.length || !!busy}>
+            <button type="button" className="btn-primary" onClick={() => activate()} disabled={(!pending.length && !camp.autoEnroll) || !!busy}>
               <Play className="h-4 w-4" /> Ativar agora ({pending.length})
             </button>
             <div className="flex items-end gap-2">
@@ -323,7 +363,7 @@ export function CampaignDetailPage() {
                 <label htmlFor="c-when" className="label">Ou agendar para</label>
                 <input id="c-when" type="datetime-local" className="input" value={schedule} onChange={(e) => setSchedule(e.target.value)} />
               </div>
-              <button type="button" className="btn-outline" disabled={!pending.length || !schedule} onClick={() => activate(new Date(schedule).toISOString())}>
+              <button type="button" className="btn-outline" disabled={(!pending.length && !camp.autoEnroll) || !schedule} onClick={() => activate(new Date(schedule).toISOString())}>
                 <CalendarClock className="h-4 w-4" /> Agendar
               </button>
             </div>

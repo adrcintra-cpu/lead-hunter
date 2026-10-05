@@ -7,7 +7,7 @@ import { PROMPT_VERSION } from '../ai/prompts.ts';
 import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { sendEmail } from '../channels/resend.ts';
-import { plan, type Effect, type PlanContext } from './planner.ts';
+import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
@@ -217,7 +217,7 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   const due: Row[] = await must(
     db
       .from('enrollments')
-      .select('*, campaigns!inner(id, name, status, owner_name)')
+      .select('*, campaigns!inner(id, name, status, owner_name, daily_limit_email, daily_limit_whatsapp, auto_enroll), leads!inner(current_score)')
       .eq('status', 'ativa')
       .eq('campaigns.status', 'ativa')
       .lte('next_run_at', now.toISOString())
@@ -225,12 +225,14 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
       .limit(limit),
   );
 
-  const touched = new Set<string>();
+  // Melhores leads primeiro: com limite diário, são eles que usam a cota do dia.
+  due.sort((a, b) => (b.leads?.current_score ?? 0) - (a.leads?.current_score ?? 0));
+  const touched = new Map<string, boolean>(); // campanha → entrada automática
   for (const e of due) {
     // Trava otimista: só uma execução pega cada inscrição.
     const claimed: Row[] = await must(db.from('enrollments').update({ next_run_at: null }).eq('id', e.id).eq('next_run_at', e.next_run_at).select('id'));
     if (!claimed.length) continue;
-    touched.add(e.campaign_id);
+    touched.set(e.campaign_id, !!e.campaigns?.auto_enroll);
     try {
       const r = await runEnrollment(db, e, e.campaigns);
       sum.sent += r.sent;
@@ -244,8 +246,9 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
     }
   }
 
-  // Campanha sem ninguém ativo termina sozinha.
-  for (const id of touched) {
+  // Campanha sem ninguém ativo termina sozinha (exceto com entrada automática: novos leads ainda podem chegar).
+  for (const [id, autoEnroll] of touched) {
+    if (autoEnroll) continue;
     const es: Row[] = await must(db.from('enrollments').select('status').eq('campaign_id', id));
     if (es.length && es.every((x) => x.status === 'concluida' || x.status === 'interrompida')) {
       await db.from('campaigns').update({ status: 'finalizada', finished_at: new Date().toISOString() }).eq('id', id);
@@ -293,6 +296,25 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
   };
 
   const result = plan(cad, e.step_index, ctx);
+
+  // Limite diário da campanha: sem cota hoje, a etapa fica para a primeira janela de amanhã.
+  const send = result.effects.find((x) => x.kind === 'send' || x.kind === 'manual_whatsapp');
+  if (send && 'step' in send) {
+    const limit = send.step.channel === 'email' ? camp?.daily_limit_email : camp?.daily_limit_whatsapp;
+    if (limit) {
+      const { count } = await db
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaign_id', e.campaign_id)
+        .eq('channel', send.step.channel)
+        .gte('created_at', startOfDayBRT(new Date()).toISOString());
+      if ((count ?? 0) >= limit) {
+        await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
+        return { sent: 0, failed: 0 };
+      }
+    }
+  }
+
   let sent = 0;
   let failed = 0;
   for (const eff of result.effects) {
@@ -365,7 +387,7 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
       leadId: lead.id,
       campaignId: e.campaign_id,
       title: `Enviar WhatsApp para ${nameOf(c)}`,
-      description: 'Sem opt-in registrado: a automação não envia WhatsApp. Revise a mensagem e envie pelo link.',
+      description: 'Mensagem pronta. Revise, abra o WhatsApp pelo link, envie e clique em “Marcar como enviado”.',
       source: 'cadencia',
       ownerName: camp?.owner_name,
       actionUrl: waMeLink(c.whatsapp, draft.body),

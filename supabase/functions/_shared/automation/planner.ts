@@ -53,6 +53,18 @@ export function inWindow(d: Date, w: SendWindow): boolean {
   return hour >= w.startHour && hour < w.endHour;
 }
 
+/** Início do dia (00:00, hora de Brasília) de d. Base para os limites diários. */
+export function startOfDayBRT(d: Date): Date {
+  const local = new Date(d.getTime() + BRT_OFFSET_H * 3600_000);
+  local.setUTCHours(0, 0, 0, 0);
+  return new Date(local.getTime() - BRT_OFFSET_H * 3600_000);
+}
+
+/** Primeira janela de envio do dia seguinte (usada quando o limite diário acabou). */
+export function nextDayWindow(d: Date, w: SendWindow): Date {
+  return nextWindowStart(new Date(startOfDayBRT(d).getTime() + 864e5), w);
+}
+
 /** Próximo início de janela a partir de d (ou d, se já estiver dentro). */
 export function nextWindowStart(d: Date, w: SendWindow): Date {
   if (inWindow(d, w)) return d;
