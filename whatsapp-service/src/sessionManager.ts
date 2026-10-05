@@ -1,4 +1,4 @@
-import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, type WASocket } from '@whiskeysockets/baileys';
+import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, type WASocket, type proto } from '@whiskeysockets/baileys';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import { clearAuthState, useDatabaseAuthState } from './authState.js';
@@ -37,6 +37,22 @@ interface Session {
   lastSendAt: number;
   sentDay: string;
   sentToday: number;
+  /**
+   * Últimas mensagens enviadas (id → conteúdo). Quando o celular do contato não consegue
+   * descriptografar ("Aguardando mensagem"), ele pede a mensagem de novo e a biblioteca
+   * reenvia a partir daqui. Sem isso, a mensagem fica presa para sempre.
+   */
+  sent: Map<string, proto.IMessage>;
+}
+
+/** Quantas mensagens enviadas guardar por sessão para reenvio. */
+const SENT_KEEP = 500;
+
+function remember(s: Session, id: string | null | undefined, message: proto.IMessage | null | undefined) {
+  if (!id || !message) return;
+  s.sent.delete(id);
+  s.sent.set(id, message);
+  if (s.sent.size > SENT_KEEP) s.sent.delete(s.sent.keys().next().value as string);
 }
 
 const MAX_RETRIES = 6;
@@ -72,6 +88,7 @@ export class SessionManager {
         lastSendAt: 0,
         sentDay: '',
         sentToday: 0,
+        sent: new Map(),
       };
       this.sessions.set(userId, s);
     }
@@ -138,6 +155,12 @@ export class SessionManager {
         browser: Browsers.macOS('Lead Hunter'),
         markOnlineOnConnect: false,
         syncFullHistory: false,
+        // Reenvio quando o contato pede a mensagem de novo (falha de descriptografia do lado dele).
+        getMessage: async (key) => {
+          const m = key.id ? s.sent.get(key.id) : undefined;
+          if (key.id) log.info({ user: maskUser(userId), found: !!m }, 'contato pediu reenvio de mensagem');
+          return m;
+        },
       });
       s.sock = sock;
       log.info({ user: maskUser(userId), restoring: !!opts.restoring }, 'sessão iniciada');
@@ -149,7 +172,10 @@ export class SessionManager {
         if (s.sock !== sock) return;
         for (const m of messages) {
           // Você escreveu no celular para esse contato: a resposta automática pendente é cancelada.
-          if (m.key?.fromMe) this.inbound.cancelFor(userId, m);
+          if (m.key?.fromMe) {
+            remember(s, m.key.id, m.message);
+            this.inbound.cancelFor(userId, m);
+          }
           else if (type === 'notify') void this.inbound.handle(userId, m);
         }
       });
@@ -291,6 +317,7 @@ export class SessionManager {
       const sent = audio
         ? await s.sock.sendMessage(jid, { audio, mimetype: 'audio/ogg; codecs=opus', ptt: true })
         : await s.sock.sendMessage(jid, { text });
+      remember(s, sent?.key?.id, sent?.message);
       s.sentToday += 1;
       this.set(s, { lastSeenAt: new Date().toISOString() });
       log.info({ user: maskUser(userId), to: maskPhone(phone), today: s.sentToday, audio: !!audio }, 'mensagem enviada');
