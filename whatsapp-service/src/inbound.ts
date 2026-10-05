@@ -268,7 +268,7 @@ export class InboundRelay {
     const m = parseIncoming(raw);
     if (!m) {
       const jid: string = raw?.key?.remoteJid ?? '';
-      if (jid.endsWith('@lid') && !raw?.key?.senderPn && textOf(raw?.message)) log.warn({ user: maskUser(userId) }, 'mensagem ignorada: o WhatsApp não informou o número do remetente');
+      if (jid.endsWith('@lid') && !raw?.key?.senderPn && !raw?.key?.remoteJidAlt && textOf(raw?.message)) log.warn({ user: maskUser(userId) }, 'mensagem ignorada: o WhatsApp não informou o número do remetente');
       return 'ignored';
     }
     try {
