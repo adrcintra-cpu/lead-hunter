@@ -210,3 +210,7 @@ Regras da automação: nunca envia duas vezes a mesma etapa; para os follow-ups 
 - **Fase 2 — restante:** exportação CSV, webhooks para n8n/CRM, análise do site da empresa, lembretes de follow-up.
 - **Fase 3 — automação (este código):** CRM, pipeline novo, campanhas, cadências visuais, WhatsApp por wa.me com envio manual, follow-ups, e-mail via Resend, classificação de respostas, tarefas, dashboard com leitura da IA.
 - **Próximas:** exportação CSV, integrações de CRM, equipes com permissões, planos e cobrança.
+
+## Deploy automático das funções do Supabase
+
+A cada push na `main` que altera `supabase/functions/`, o GitHub Actions publica as funções (`.github/workflows/supabase-functions.yml`). Configuração única: crie um token em Supabase → Account → Access Tokens e salve no GitHub em Settings → Secrets and variables → Actions → `SUPABASE_ACCESS_TOKEN`. Migrations continuam manuais (`npx supabase db push`).
