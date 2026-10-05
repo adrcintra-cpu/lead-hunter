@@ -8,7 +8,21 @@ import type { AIProvider } from '../types';
 export function createRemoteAIProvider(client: SupabaseClient): AIProvider {
   async function call<T>(fn: string, input: unknown): Promise<T> {
     const { data, error } = await client.functions.invoke('ai', { body: { fn, input } });
-    if (error) throw new Error(`Falha na IA (${fn}): ${error.message}`);
+    if (error) {
+      // A função devolve o motivo no corpo da resposta; mostramos ele em vez do erro genérico.
+      let detail = error.message;
+      try {
+        const ctx = (error as { context?: Response }).context;
+        const payload = ctx ? await ctx.json() : null;
+        if (payload?.error) detail = payload.error;
+      } catch {
+        /* mantém a mensagem genérica */
+      }
+      if (/ANTHROPIC_API_KEY/.test(detail)) {
+        throw new Error('A IA ainda não está ligada: cadastre a chave da Claude no Supabase (secret ANTHROPIC_API_KEY).');
+      }
+      throw new Error(`Falha na IA: ${detail}`);
+    }
     return data as T;
   }
   return {
