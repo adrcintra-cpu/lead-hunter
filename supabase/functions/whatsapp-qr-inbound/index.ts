@@ -19,7 +19,7 @@ type Row = Record<string, any>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Máximo de respostas automáticas por lead em 24 h (evita conversa sem fim, inclusive com robôs). */
-const MAX_AUTO_PER_DAY = 6;
+const MAX_AUTO_PER_DAY = 15;
 /** Intenções em que você precisa entrar: o BEELIE responde, e a tarefa continua aberta para você. */
 const NEEDS_HUMAN = new Set(['confirmar_conversa', 'passar_para_vendedor']);
 /** Lead pediu para falar por áudio (ex.: "manda um áudio", "prefiro áudio", "fala por áudio"). */
