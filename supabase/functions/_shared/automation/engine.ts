@@ -467,7 +467,14 @@ const NO_SUGGESTION = new Set(['sem_contato', 'ausente']);
  * Sugestão de resposta da IA para o vendedor revisar (nunca é enviada sozinha).
  * Objetivo: aquecer o lead e marcar uma conversa rápida. Grava como mensagem "draft".
  */
-async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Row, channel: SendChannel, category: string, campaignId?: string | null): Promise<string | null> {
+export interface ReplySuggestionDraft {
+  id: string;
+  body: string;
+  intent: string;
+  note: string;
+}
+
+async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Row, channel: SendChannel, category: string, campaignId?: string | null): Promise<ReplySuggestionDraft | null> {
   if (!hasClaude() || NO_SUGGESTION.has(category)) return null;
   const [{ data: sent }, { data: inb }, { data: p }] = await Promise.all([
     db.from('messages').select('final_content, sent_at, updated_at, status').eq('lead_id', lead.id).eq('channel', channel).order('created_at', { ascending: false }).limit(10),
@@ -504,7 +511,7 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
     if (!body) return null;
     // Uma sugestão por vez: a anterior, se não foi enviada, é substituída.
     await db.from('messages').delete().eq('lead_id', lead.id).eq('channel', channel).eq('status', 'draft').like('template', 'IA — resposta sugerida%');
-    await db.from('messages').insert({
+    const ins: Row = await must(db.from('messages').insert({
       owner_id: ownerId,
       lead_id: lead.id,
       channel,
@@ -517,8 +524,8 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       template: `IA — resposta sugerida (${run.output.intent})`,
       context: [],
       status: 'draft',
-    });
-    return run.output.note || null;
+    }).select('id').single());
+    return { id: ins.id, body, intent: run.output.intent, note: run.output.note ?? '' };
   } catch (err) {
     await logRun(db, ownerId, 'suggestReply', started, 'error', {});
     console.error('suggestReply', err instanceof Error ? err.message : String(err));
@@ -619,11 +626,11 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
     }
   }
   if (d.stage && lead.stage !== d.stage.to && (d.stage.force || !ADVANCED_STAGES.includes(lead.stage))) await setStage(db, lead.id, d.stage.to);
-  const note = d.suppress ? null : await suggestReplyDraft(db, i.ownerId, lead, company, i.channel, cls.category, camp?.id);
-  if (note !== null) await log(db, i.ownerId, lead.id, 'message_generated', 'IA sugeriu uma resposta para você revisar', { kind: 'reply_suggestion', note });
+  const suggestion = d.suppress ? null : await suggestReplyDraft(db, i.ownerId, lead, company, i.channel, cls.category, camp?.id);
+  if (suggestion) await log(db, i.ownerId, lead.id, 'message_generated', 'IA sugeriu uma resposta', { kind: 'reply_suggestion', messageId: suggestion.id, note: suggestion.note, intent: suggestion.intent });
   if (d.task) {
-    const extra = note !== null ? ` Resposta sugerida pela IA pronta no perfil do lead (Gerar abordagem): revise e envie.${note ? ` ${note}` : ''}` : '';
+    const extra = suggestion ? ` Resposta da IA pronta no perfil do lead (Gerar abordagem).${suggestion.note ? ` ${suggestion.note}` : ''}` : '';
     await createTask(db, i.ownerId, { leadId: lead.id, campaignId: camp?.id, title: d.task.title, description: `${d.task.description ?? ''}${extra}`.trim(), source: 'resposta', ownerName: camp?.owner_name ?? lead.owner_name, dueAt: at });
   }
-  return inbound;
+  return { ...(inbound as Row), suggestion, category: cls.category };
 }

@@ -1,6 +1,7 @@
 import type { Message } from '@/core/types';
 import { toWhatsappNumber } from '@/core/utils';
 import { whatsappClient, whatsappQrAvailable } from '@/lib/whatsappClient';
+import { loadAssistant } from '@/services/assistant/assistantSettings';
 import type { LeadHunterService } from '../leadHunterService';
 
 /**
@@ -66,7 +67,7 @@ export class WhatsAppService {
    * Respeita a lista de supressão; o servidor confere conexão, número, intervalo e limite diário.
    * Não há envio em massa: cada clique envia uma mensagem.
    */
-  async sendConnected(messageId: string, text?: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  async sendConnected(messageId: string, text?: string, opts: { audio?: boolean } = {}): Promise<{ ok: true } | { ok: false; error: string }> {
     const m = this.svc.db.messages.find((x) => x.id === messageId);
     const lead = m && this.svc.db.leads.find((l) => l.id === m.leadId);
     const company = lead && this.svc.db.companies.find((c) => c.id === lead.companyId);
@@ -79,12 +80,14 @@ export class WhatsAppService {
     // Envio direto não passa pela revisão do usuário no app do WhatsApp: não deixa sair "[SEU NOME]" e afins.
     if (/\[(SEU|SUA|SEUS|SUAS)\b[^\]]*\]/i.test(body)) return { ok: false, error: 'Complete os campos entre colchetes (ex.: [SEU NOME]) antes de enviar. Preencha seu perfil em Configurações ou edite a mensagem.' };
     try {
-      const r = await whatsappClient.send(company.whatsapp, body);
+      if (opts.audio && body.length > 1500) return { ok: false, error: 'Texto longo demais para áudio (máx. 1.500 caracteres).' };
+      const voice = opts.audio ? (await loadAssistant().catch(() => null))?.prefs.voice : undefined;
+      const r = await whatsappClient.send(company.whatsapp, body, opts.audio ? { audio: true, voice } : {});
       if (!r.ok) {
         this.svc.log(lead.id, 'message_failed', 'Falha ao enviar pelo WhatsApp conectado', { messageId, channel: 'whatsapp', status: 'Falha no envio', error: r.error, user: this.svc.profile.email });
         return r;
       }
-      this.svc.markSent(messageId, { provider: 'whatsapp_qr', externalId: r.id || undefined, recipient: r.to });
+      this.svc.markSent(messageId, { provider: 'whatsapp_qr', externalId: r.id || undefined, recipient: r.to, audio: opts.audio });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };

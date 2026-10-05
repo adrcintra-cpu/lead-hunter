@@ -24,6 +24,11 @@ export const config = {
    */
   inboundSecret: (process.env.WHATSAPP_INBOUND_SECRET ?? '').trim(),
   inboundUrl: (process.env.INBOUND_FUNCTION_URL ?? '').trim(),
+  /** Áudio com voz da IA (opcional): chave da OpenAI e modelo de voz. */
+  openaiKey: (process.env.OPENAI_API_KEY ?? '').trim(),
+  ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
+  /** Espera mínima antes da resposta automática (segundos). */
+  autoMinDelaySeconds: Number(process.env.AUTO_REPLY_MIN_DELAY_SECONDS ?? 15),
 };
 
 if (!/^[0-9a-f]{64}$/i.test(config.encryptionKey)) {

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { ConfirmDialog, ErrorBox, Spinner, cx } from '@/components/ui';
-import { DEFAULT_ASSISTANT, loadAssistant, resetAssistant, saveAssistant, type AssistantSettings } from '@/services/assistant/assistantSettings';
+import { DEFAULT_ASSISTANT, DEFAULT_PREFS, VOICES, loadAssistant, resetAssistant, saveAssistant, savePrefs, type AssistantPrefs, type AssistantSettings } from '@/services/assistant/assistantSettings';
+import { whatsappQrAvailable } from '@/lib/whatsappClient';
+import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection';
 
 type Tab = 'persona' | 'knowledge' | 'playbooks';
 
@@ -16,6 +18,9 @@ const TABS: { id: Tab; label: string; hint: string; rows: number }[] = [
 export function AssistantCard() {
   const { toast } = useApp();
   const [s, setS] = useState<AssistantSettings | null>(null);
+  const [prefs, setPrefs] = useState<AssistantPrefs>(DEFAULT_PREFS);
+  const [prefsAvailable, setPrefsAvailable] = useState(true);
+  const conn = useWhatsAppConnection();
   const [custom, setCustom] = useState(false);
   const [available, setAvailable] = useState(true);
   const [tab, setTab] = useState<Tab>('persona');
@@ -27,6 +32,8 @@ export function AssistantCard() {
     loadAssistant()
       .then((r) => {
         setS(r.settings);
+        setPrefs(r.prefs);
+        setPrefsAvailable(r.prefsAvailable);
         setCustom(r.custom);
         setAvailable(r.available);
       })
@@ -41,7 +48,7 @@ export function AssistantCard() {
     setBusy(true);
     setError('');
     try {
-      await saveAssistant(s);
+      await saveAssistant(s, prefsAvailable ? prefs : undefined);
       setCustom(true);
       toast('Assistente salvo. As próximas respostas sugeridas já usam este texto.', 'success');
     } catch (e) {
@@ -63,6 +70,19 @@ export function AssistantCard() {
     }
   }
 
+  async function updatePrefs(next: AssistantPrefs) {
+    if (!s) return;
+    const prev = prefs;
+    setPrefs(next);
+    try {
+      await savePrefs(s, next, custom);
+      toast(next.autoReply !== prev.autoReply ? (next.autoReply ? 'A BEELIE vai responder sozinha.' : 'Respostas automáticas desligadas: a BEELIE só sugere.') : 'Preferência salva.', 'success');
+    } catch (e) {
+      setPrefs(prev);
+      toast(e instanceof Error ? e.message : 'Não foi possível salvar.', 'error');
+    }
+  }
+
   const current = TABS.find((t) => t.id === tab)!;
 
   return (
@@ -71,7 +91,7 @@ export function AssistantCard() {
         <div>
           <h2 className="flex items-center gap-2 text-[15px] font-extrabold"><Bot className="h-4 w-4" /> Assistente de IA</h2>
           <p className="mt-1 text-[13px] text-ink-faint">
-            Quando um lead responde, a assistente escreve a próxima mensagem seguindo este texto. Você sempre revisa antes de enviar.
+            Quando um lead responde, a assistente escreve a próxima mensagem seguindo este texto.
           </p>
         </div>
         <span className={cx('rounded-md px-2 py-1 text-xs font-bold', custom ? 'bg-accent-soft text-accent-strong' : 'bg-muted text-ink-soft')}>
@@ -89,6 +109,54 @@ export function AssistantCard() {
         <div className="mt-4 flex items-center gap-2 text-[13px] text-ink-faint"><Spinner /> Carregando…</div>
       ) : (
         <>
+          <div className="mt-4 rounded-xl border border-line p-4">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-[rgb(var(--accent))]"
+                checked={prefs.autoReply}
+                disabled={!prefsAvailable}
+                onChange={(e) => void updatePrefs({ ...prefs, autoReply: e.target.checked })}
+              />
+              <span>
+                <span className="block text-sm font-bold">A {s.name || 'assistente'} conversa sozinha no WhatsApp conectado</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">
+                  Quando o lead responde, ela responde em 1 a 2 minutos, buscando entender o cenário e marcar uma conversa com você. Responde só dentro do horário de envio (Envio das campanhas), no máximo 6 vezes por lead em 24 h, e para se você escrever para o lead pelo celular. Pedido de reunião, proposta ou preço vira tarefa para você. Desligado: ela só sugere e você envia.
+                </span>
+              </span>
+            </label>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <div>
+                <span className="label">Formato das respostas</span>
+                <div role="radiogroup" aria-label="Formato" className="flex rounded-lg border border-line p-0.5">
+                  {(['texto', 'audio'] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      role="radio"
+                      aria-checked={prefs.replyFormat === f}
+                      disabled={!prefsAvailable}
+                      onClick={() => void updatePrefs({ ...prefs, replyFormat: f })}
+                      className={cx('min-h-[32px] rounded-md px-3 text-xs font-bold', prefs.replyFormat === f ? 'bg-inverse text-inverse-ink' : 'text-ink-soft hover:bg-muted')}
+                    >
+                      {f === 'texto' ? 'Texto' : 'Áudio (voz da IA)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label htmlFor="as-voice" className="label">Voz</label>
+                <select id="as-voice" className="input w-auto" value={prefs.voice} disabled={!prefsAvailable} onChange={(e) => void updatePrefs({ ...prefs, voice: e.target.value })}>
+                  {VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                </select>
+              </div>
+            </div>
+            {prefs.replyFormat === 'audio' && whatsappQrAvailable && conn && conn.audio === false && (
+              <p className="mt-2 text-xs text-warn">A voz da IA ainda não está configurada no servidor: adicione OPENAI_API_KEY nas variáveis do Railway. Até lá, as respostas automáticas em áudio falham e ficam prontas para você enviar.</p>
+            )}
+            {!prefsAvailable && <p className="mt-2 text-xs text-warn">Falta aplicar a migration da conversa automática (npx supabase db push). Até lá, vale o padrão: a {s.name || 'assistente'} responde sozinha, em texto.</p>}
+          </div>
+
           <div className="mt-4 max-w-xs">
             <label htmlFor="as-name" className="label">Nome da assistente</label>
             <input id="as-name" className="input" value={s.name} onChange={(e) => setS({ ...s, name: e.target.value })} />

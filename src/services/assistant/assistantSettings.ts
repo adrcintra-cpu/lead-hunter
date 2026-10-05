@@ -6,8 +6,31 @@ export { DEFAULT_ASSISTANT };
 
 const LOCAL_KEY = 'lh-assistant';
 
+/** Conversa automática e áudio. */
+export interface AssistantPrefs {
+  autoReply: boolean;
+  replyFormat: 'texto' | 'audio';
+  voice: string;
+}
+
+export const DEFAULT_PREFS: AssistantPrefs = { autoReply: true, replyFormat: 'texto', voice: 'nova' };
+
+export const VOICES: { id: string; label: string }[] = [
+  { id: 'nova', label: 'Nova (feminina, clara)' },
+  { id: 'shimmer', label: 'Shimmer (feminina, suave)' },
+  { id: 'coral', label: 'Coral (feminina, calorosa)' },
+  { id: 'sage', label: 'Sage (neutra, calma)' },
+  { id: 'alloy', label: 'Alloy (neutra)' },
+  { id: 'ash', label: 'Ash (masculina)' },
+  { id: 'onyx', label: 'Onyx (masculina, grave)' },
+  { id: 'echo', label: 'Echo (masculina, leve)' },
+];
+
 export interface AssistantState {
   settings: AssistantSettings;
+  prefs: AssistantPrefs;
+  /** As colunas de conversa automática existem (migration aplicada). */
+  prefsAvailable: boolean;
   /** O usuário já salvou um texto próprio (senão é o padrão da OXYCOM). */
   custom: boolean;
   /** A tabela existe no banco (migration aplicada). No modo de teste é sempre true. */
@@ -21,21 +44,26 @@ export async function loadAssistant(): Promise<AssistantState> {
   if (dataMode !== 'supabase' || !supabase) {
     try {
       const raw = localStorage.getItem(LOCAL_KEY);
-      return { settings: withDefaults(raw ? JSON.parse(raw) : null), custom: !!raw, available: true };
+      const saved = raw ? JSON.parse(raw) : null;
+      return { settings: withDefaults(saved), prefs: { ...DEFAULT_PREFS, ...(saved?.prefs ?? {}) }, prefsAvailable: true, custom: !!saved?.persona, available: true };
     } catch {
-      return { settings: DEFAULT_ASSISTANT, custom: false, available: true };
+      return { settings: DEFAULT_ASSISTANT, prefs: DEFAULT_PREFS, prefsAvailable: true, custom: false, available: true };
     }
   }
   const { data, error } = await supabase.from('assistant_settings').select('name, persona, knowledge, playbooks').maybeSingle();
-  if (error) return { settings: DEFAULT_ASSISTANT, custom: false, available: !missingTable(error.message) };
-  return { settings: withDefaults(data), custom: !!data, available: true };
+  if (error) return { settings: DEFAULT_ASSISTANT, prefs: DEFAULT_PREFS, prefsAvailable: false, custom: false, available: !missingTable(error.message) };
+  const pr = await supabase.from('assistant_settings').select('auto_reply, reply_format, voice').maybeSingle();
+  const prefs: AssistantPrefs = pr.data
+    ? { autoReply: pr.data.auto_reply !== false, replyFormat: pr.data.reply_format === 'audio' ? 'audio' : 'texto', voice: pr.data.voice || 'nova' }
+    : DEFAULT_PREFS;
+  return { settings: withDefaults(data), prefs, prefsAvailable: !pr.error, custom: !!data?.persona, available: true };
 }
 
-export async function saveAssistant(s: AssistantSettings): Promise<void> {
+export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs): Promise<void> {
   const clean = { name: s.name.trim(), persona: s.persona.trim(), knowledge: s.knowledge.trim(), playbooks: s.playbooks.trim() };
   if (dataMode !== 'supabase' || !supabase) {
     try {
-      localStorage.setItem(LOCAL_KEY, JSON.stringify(clean));
+      localStorage.setItem(LOCAL_KEY, JSON.stringify({ ...clean, prefs }));
     } catch {
       throw new Error('Não foi possível salvar neste navegador.');
     }
@@ -43,7 +71,9 @@ export async function saveAssistant(s: AssistantSettings): Promise<void> {
   }
   const { data: u } = await supabase.auth.getUser();
   if (!u.user) throw new Error('Faça login de novo.');
-  const { error } = await supabase.from('assistant_settings').upsert({ owner_id: u.user.id, ...clean, updated_at: new Date().toISOString() });
+  const row: Record<string, unknown> = { owner_id: u.user.id, ...clean, updated_at: new Date().toISOString() };
+  if (prefs) Object.assign(row, { auto_reply: prefs.autoReply, reply_format: prefs.replyFormat, voice: prefs.voice });
+  const { error } = await supabase.from('assistant_settings').upsert(row);
   if (error) throw new Error(missingTable(error.message) ? 'Falta aplicar a migration do assistente (npx supabase db push).' : error.message);
 }
 
@@ -51,11 +81,19 @@ export async function saveAssistant(s: AssistantSettings): Promise<void> {
 export async function resetAssistant(): Promise<void> {
   if (dataMode !== 'supabase' || !supabase) {
     try {
-      localStorage.removeItem(LOCAL_KEY);
+      const raw = localStorage.getItem(LOCAL_KEY);
+      const prefs = raw ? JSON.parse(raw).prefs : undefined;
+      if (prefs) localStorage.setItem(LOCAL_KEY, JSON.stringify({ prefs }));
+      else localStorage.removeItem(LOCAL_KEY);
     } catch {
       /* ignore */
     }
     return;
   }
   await saveAssistant({ name: '', persona: '', knowledge: '', playbooks: '' });
+}
+
+/** Só a conversa automática e o áudio (sem mexer no texto). */
+export async function savePrefs(s: AssistantSettings, prefs: AssistantPrefs, custom: boolean): Promise<void> {
+  await saveAssistant(custom ? s : { name: s.name === DEFAULT_ASSISTANT.name ? '' : s.name, persona: '', knowledge: '', playbooks: '' }, prefs);
 }

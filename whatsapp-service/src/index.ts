@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from './config.js';
 import { log } from './log.js';
 import { SessionManager } from './sessionManager.js';
+import { ttsAvailable } from './tts.js';
 
 /**
  * Serviço de WhatsApp do Lead Hunter (conexão por QR code).
@@ -113,7 +114,7 @@ setInterval(() => {
 type Handler = (userId: string, body: Record<string, unknown>) => Promise<unknown>;
 
 const routes: Record<string, { method: 'GET' | 'POST'; kind: string; handler: Handler }> = {
-  '/whatsapp/status': { method: 'GET', kind: 'status', handler: (u) => manager.status(u) },
+  '/whatsapp/status': { method: 'GET', kind: 'status', handler: async (u) => ({ ...(await manager.status(u)), audio: ttsAvailable() }) },
   '/whatsapp/connect': { method: 'POST', kind: 'connect', handler: (u) => manager.connect(u) },
   '/whatsapp/test': { method: 'POST', kind: 'test', handler: (u) => manager.test(u) },
   '/whatsapp/disconnect': {
@@ -131,7 +132,10 @@ const routes: Record<string, { method: 'GET' | 'POST'; kind: string; handler: Ha
       const phone = typeof body.phone === 'string' ? body.phone.slice(0, 40) : '';
       const message = typeof body.message === 'string' ? body.message : '';
       if (!phone || !message) throw new HttpError(400, 'Informe telefone e mensagem.');
-      return manager.sendMessage(u, phone, message);
+      const audio = body.audio === true;
+      const voice = typeof body.voice === 'string' ? body.voice.slice(0, 20) : undefined;
+      if (audio && message.length > 1500) throw new HttpError(400, 'Texto longo demais para áudio (máx. 1.500 caracteres).');
+      return manager.sendMessage(u, phone, message, { audio, voice });
     },
   },
 };

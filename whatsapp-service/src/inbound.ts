@@ -93,11 +93,32 @@ interface Index {
   at: number;
 }
 
+/** Envio usado pela resposta automática (o SessionManager implementa). */
+export type AutoSender = (userId: string, phone: string, text: string, o: { audio?: boolean; voice?: string }) => Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }>;
+
+/** O que a Edge Function devolve quando a BEELIE deve responder sozinha. */
+interface AutoReply {
+  messageId: string;
+  body: string;
+  intent?: string;
+  format: 'texto' | 'audio';
+  voice?: string;
+  delaySec: number;
+}
+
 export class InboundRelay {
   private indexes = new Map<string, Index>();
   private loading = new Map<string, Promise<Index>>();
+  /** Respostas automáticas agendadas, por conversa (usuário + telefone). */
+  private pending = new Map<string, NodeJS.Timeout>();
+  /** IDs das mensagens que a própria BEELIE enviou (o eco delas não cancela nada). */
+  private ownIds = new Set<string>();
+  private warnedDisabled = false;
 
-  constructor(private db: SupabaseClient) {}
+  constructor(
+    private db: SupabaseClient,
+    private send?: AutoSender,
+  ) {}
 
   get enabled() {
     return !!config.inboundSecret;
@@ -105,6 +126,14 @@ export class InboundRelay {
 
   private url() {
     return config.inboundUrl || `${config.supabaseUrl.replace(/\/+$/, '')}/functions/v1/whatsapp-qr-inbound`;
+  }
+
+  private post(body: Record<string, unknown>) {
+    return fetch(this.url(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-inbound-secret': config.inboundSecret },
+      body: JSON.stringify(body),
+    });
   }
 
   /** Telefones (WhatsApp e fixo) das empresas que são leads do usuário. */
@@ -132,9 +161,9 @@ export class InboundRelay {
 
   private async index(userId: string, fresh = false): Promise<Index> {
     const cur = this.indexes.get(userId);
-    // Cache de 5 min; num número desconhecido, recarrega no máximo a cada 1 min (lead novo).
+    // Cache de 5 min; num número desconhecido, recarrega (no máximo a cada 10 s) para achar lead recém-criado.
     if (cur && !fresh && Date.now() - cur.at < 5 * 60_000) return cur;
-    if (cur && fresh && Date.now() - cur.at < 60_000) return cur;
+    if (cur && fresh && Date.now() - cur.at < 10_000) return cur;
     let p = this.loading.get(userId);
     if (!p) {
       p = this.load(userId).finally(() => this.loading.delete(userId));
@@ -152,22 +181,80 @@ export class InboundRelay {
     return leadId ?? null;
   }
 
-  /** Processa uma mensagem recebida: se for de um lead, encaminha. */
+  private chatKey(userId: string, phone: string) {
+    return `${userId}:${phoneKey(phone)}`;
+  }
+
+  /** Mensagem enviada por você (no celular ou no Lead Hunter): cancela a resposta automática daquela conversa. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cancelFor(userId: string, raw: any) {
+    const id = String(raw?.key?.id ?? '');
+    if (id && this.ownIds.has(id)) return;
+    const jid: string = raw?.key?.remoteJid ?? '';
+    const pnJid = jid.endsWith('@s.whatsapp.net') ? jid : raw?.key?.senderPn ?? raw?.key?.remoteJidAlt;
+    const phone = pnJid ? String(pnJid).split(/[:@]/)[0].replace(/\D/g, '') : '';
+    if (!phone) return;
+    const key = this.chatKey(userId, phone);
+    const t = this.pending.get(key);
+    if (t) {
+      clearTimeout(t);
+      this.pending.delete(key);
+      log.info({ user: maskUser(userId), to: maskPhone(phone) }, 'resposta automática cancelada: você respondeu');
+    }
+  }
+
+  private schedule(userId: string, leadId: string, phone: string, auto: AutoReply) {
+    if (!this.send) return;
+    const key = this.chatKey(userId, phone);
+    const prev = this.pending.get(key);
+    if (prev) clearTimeout(prev); // o lead mandou outra mensagem: vale a sugestão mais nova
+    const delay = Math.max(config.autoMinDelaySeconds, Math.min(600, auto.delaySec)) * 1000;
+    const t = setTimeout(async () => {
+      this.pending.delete(key);
+      const r = await this.send!(userId, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
+      if (!r.ok) {
+        log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'resposta automática não enviada');
+        await this.post({ action: 'auto_failed', ownerId: userId, leadId, messageId: auto.messageId, error: r.error }).catch(() => undefined);
+        return;
+      }
+      if (r.id) {
+        this.ownIds.add(r.id);
+        if (this.ownIds.size > 500) this.ownIds.delete(this.ownIds.values().next().value as string);
+      }
+      log.info({ user: maskUser(userId), to: maskPhone(phone), audio: auto.format === 'audio' }, 'BEELIE respondeu automaticamente');
+      await this.post({ action: 'sent', ownerId: userId, leadId, messageId: auto.messageId, externalId: r.id, to: r.to, format: auto.format, intent: auto.intent }).catch((err) =>
+        log.error({ err: err instanceof Error ? err.message : String(err) }, 'falha ao registrar envio automático'),
+      );
+    }, delay);
+    this.pending.set(key, t);
+    log.info({ user: maskUser(userId), to: maskPhone(phone), inSec: Math.round(delay / 1000) }, 'resposta automática agendada');
+  }
+
+  /** Processa uma mensagem recebida: se for de um lead, encaminha (e agenda a resposta automática, se houver). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async handle(userId: string, raw: any): Promise<'forwarded' | 'ignored' | 'error'> {
-    if (!this.enabled) return 'ignored';
+    if (!this.enabled) {
+      if (!this.warnedDisabled) log.warn('respostas desligadas: falta WHATSAPP_INBOUND_SECRET no Railway');
+      this.warnedDisabled = true;
+      return 'ignored';
+    }
     const m = parseIncoming(raw);
-    if (!m) return 'ignored';
+    if (!m) {
+      const jid: string = raw?.key?.remoteJid ?? '';
+      if (jid.endsWith('@lid') && !raw?.key?.senderPn && textOf(raw?.message)) log.warn({ user: maskUser(userId) }, 'mensagem ignorada: o WhatsApp não informou o número do remetente');
+      return 'ignored';
+    }
     try {
       const leadId = await this.findLead(userId, m.phone);
-      if (!leadId) return 'ignored'; // conversa que não é de lead: não sai daqui
-      const res = await fetch(this.url(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-inbound-secret': config.inboundSecret },
-        body: JSON.stringify({ ownerId: userId, leadId, from: m.phone, body: m.text, externalId: m.id, receivedAt: m.at }),
-      });
+      if (!leadId) {
+        log.info({ user: maskUser(userId) }, 'mensagem de contato que não é lead (ignorada)');
+        return 'ignored'; // conversa pessoal: não sai daqui
+      }
+      const res = await this.post({ ownerId: userId, leadId, from: m.phone, body: m.text, externalId: m.id, receivedAt: m.at });
       if (!res.ok) throw new Error(`função respondeu ${res.status}`);
       log.info({ user: maskUser(userId), from: maskPhone(m.phone) }, 'resposta de lead registrada');
+      const data = (await res.json().catch(() => ({}))) as { auto?: AutoReply | null };
+      if (data.auto?.body && data.auto.messageId) this.schedule(userId, leadId, m.phone, data.auto);
       return 'forwarded';
     } catch (err) {
       log.error({ user: maskUser(userId), from: maskPhone(m.phone), err: err instanceof Error ? err.message : String(err) }, 'falha ao registrar resposta');

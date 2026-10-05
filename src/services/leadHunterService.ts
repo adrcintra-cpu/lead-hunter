@@ -732,7 +732,7 @@ export class LeadHunterService {
    * Registra o envio. Sem opções: o usuário confirma que enviou por fora (manual).
    * Com provider/externalId: o envio foi feito pelo sistema (ex.: WhatsApp conectado por QR code).
    */
-  markSent(messageId: string, via?: { provider: string; externalId?: string; recipient?: string }) {
+  markSent(messageId: string, via?: { provider: string; externalId?: string; recipient?: string; audio?: boolean }) {
     const m = this.db.messages.find((x) => x.id === messageId);
     const lead = m && this.db.leads.find((l) => l.id === m.leadId);
     if (!m || !lead || m.status === 'sent' || m.status === 'replied') return;
@@ -748,7 +748,7 @@ export class LeadHunterService {
         updatedAt: at,
       });
       this.repo.update('leads', lead.id, { lastContactAt: at });
-      this.log(lead.id, 'message_sent', auto ? 'WhatsApp enviado pelo WhatsApp conectado' : `${channelLabel(m.channel)} marcado como enviado (manual)`, {
+      this.log(lead.id, 'message_sent', auto ? `WhatsApp enviado pelo WhatsApp conectado${via?.audio ? ' (áudio com voz da IA)' : ''}` : `${channelLabel(m.channel)} marcado como enviado (manual)`, {
         messageId,
         channel: m.channel,
         status: auto ? 'Enviado pelo WhatsApp conectado' : 'Enviado manualmente',

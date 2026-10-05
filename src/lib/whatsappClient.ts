@@ -20,6 +20,8 @@ export interface WaStatusView {
   connectedAt: string | null;
   lastSeenAt: string | null;
   error: string | null;
+  /** O serviço tem a voz da IA configurada (OPENAI_API_KEY no Railway). */
+  audio?: boolean;
 }
 
 export type WaSendResult = { ok: true; id: string; to: string } | { ok: false; error: string };
@@ -49,7 +51,7 @@ export const whatsappClient = {
   connect: () => call<WaStatusView>('/whatsapp/connect', {}),
   test: () => call<{ ok: boolean; message: string }>('/whatsapp/test', {}),
   disconnect: () => call<WaStatusView>('/whatsapp/disconnect', {}),
-  send: (phone: string, message: string) => call<WaSendResult>('/whatsapp/send', { phone, message }),
+  send: (phone: string, message: string, opts: { audio?: boolean; voice?: string } = {}) => call<WaSendResult>('/whatsapp/send', { phone, message, ...opts }),
 };
 
 // ---------- status compartilhado entre as telas ----------

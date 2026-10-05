@@ -547,7 +547,10 @@ function ApproachPanel({ row }: { row: LeadRow }) {
                   <Pencil className="h-4 w-4" /> {editing ? 'Salvar edição' : 'Editar'}
                 </button>
                 {waLink && channel === 'whatsapp' && (
-                  <SendConnectedButton messageId={message.id} getText={() => (editing ? draft : message.finalContent)} beforeSend={() => editing && saveEdit()} />
+                  <>
+                    <SendConnectedButton messageId={message.id} getText={() => (editing ? draft : message.finalContent)} beforeSend={() => editing && saveEdit()} />
+                    <SendConnectedButton audio messageId={message.id} getText={() => (editing ? draft : message.finalContent)} beforeSend={() => editing && saveEdit()} />
+                  </>
                 )}
                 {waLink && (
                   <a href={waLink} target="_blank" rel="noopener noreferrer" className="btn-primary" onClick={onWhatsappOpened}>

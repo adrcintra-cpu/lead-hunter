@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import { clearAuthState, useDatabaseAuthState } from './authState.js';
 import { InboundRelay } from './inbound.js';
+import { textToSpeech } from './tts.js';
 import { config } from './config.js';
 import { libLogger, log, maskPhone, maskUser } from './log.js';
 import { formatPhone, normalizePhone, toJid } from './phone.js';
@@ -50,7 +51,7 @@ export class SessionManager {
   private inbound: InboundRelay;
 
   constructor(private db: SupabaseClient) {
-    this.inbound = new InboundRelay(db);
+    this.inbound = new InboundRelay(db, (userId, phone, text, o) => this.sendMessage(userId, phone, text, { ...o, typing: true }));
   }
 
   private get(userId: string): Session {
@@ -145,8 +146,12 @@ export class SessionManager {
 
       // Respostas recebidas: só as de leads seguem (ver inbound.ts). 'notify' = mensagem nova, não histórico.
       sock.ev.on('messages.upsert', ({ messages, type }) => {
-        if (s.sock !== sock || type !== 'notify') return;
-        for (const m of messages) void this.inbound.handle(userId, m);
+        if (s.sock !== sock) return;
+        for (const m of messages) {
+          // Você escreveu no celular para esse contato: a resposta automática pendente é cancelada.
+          if (m.key?.fromMe) this.inbound.cancelFor(userId, m);
+          else if (type === 'notify') void this.inbound.handle(userId, m);
+        }
       });
 
       sock.ev.on('connection.update', async (u) => {
@@ -247,7 +252,12 @@ export class SessionManager {
    * respeita o intervalo mínimo e o limite diário, e devolve o id da mensagem.
    * Não há envio em massa: cada chamada envia uma mensagem.
    */
-  async sendMessage(userId: string, rawPhone: string, message: string): Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }> {
+  async sendMessage(
+    userId: string,
+    rawPhone: string,
+    message: string,
+    opts: { audio?: boolean; voice?: string; typing?: boolean } = {},
+  ): Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }> {
     const s = this.sessions.get(userId);
     if (!s?.sock || s.status !== 'conectado') return { ok: false, error: 'WhatsApp não conectado. Conecte em Configurações → WhatsApp.' };
     const text = typeof message === 'string' ? message.trim() : '';
@@ -269,11 +279,21 @@ export class SessionManager {
       const found = await s.sock.onWhatsApp(phone);
       const check = found?.[0];
       if (!check?.exists) return { ok: false, error: 'Este número não tem WhatsApp.' };
+      const jid = check.jid ?? toJid(phone);
       s.lastSendAt = Date.now();
-      const sent = await s.sock.sendMessage(check.jid ?? toJid(phone), { text });
+      // Áudio: gerado antes de "digitar/gravar", para o tempo de espera parecer natural.
+      const audio = opts.audio ? await textToSpeech(text, opts.voice) : null;
+      if (opts.typing) {
+        await s.sock.sendPresenceUpdate(audio ? 'recording' : 'composing', jid).catch(() => undefined);
+        await new Promise((r) => setTimeout(r, Math.min(8000, 1500 + text.length * 35)));
+        await s.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
+      }
+      const sent = audio
+        ? await s.sock.sendMessage(jid, { audio, mimetype: 'audio/ogg; codecs=opus', ptt: true })
+        : await s.sock.sendMessage(jid, { text });
       s.sentToday += 1;
       this.set(s, { lastSeenAt: new Date().toISOString() });
-      log.info({ user: maskUser(userId), to: maskPhone(phone), today: s.sentToday }, 'mensagem enviada');
+      log.info({ user: maskUser(userId), to: maskPhone(phone), today: s.sentToday, audio: !!audio }, 'mensagem enviada');
       return { ok: true, id: sent?.key?.id ?? '', to: phone };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
