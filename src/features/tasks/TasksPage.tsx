@@ -5,6 +5,7 @@ import type { Task } from '@/core/types';
 import { formatDateTime, relativeTime } from '@/core/utils';
 import { EmptyState, PageHeader, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
+import { SendConnectedButton } from '@/features/leads/SendConnectedButton';
 
 const SOURCE_LABEL: Record<Task['source'], string> = { manual: 'Manual', cadencia: 'Cadência', resposta: 'Resposta do lead' };
 
@@ -49,6 +50,7 @@ export function TaskItem({ t, showLead = true }: { t: Task; showLead?: boolean }
       </div>
       {t.actionUrl && t.status === 'aberta' && (
         <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
+          {waMessage && <SendConnectedButton messageId={waMessage.id} small />}
           <a
             href={t.actionUrl}
             target="_blank"

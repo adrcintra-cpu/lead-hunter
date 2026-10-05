@@ -626,18 +626,30 @@ export class LeadHunterService {
    * O usuário confirma que enviou a mensagem (WhatsApp, e-mail ou LinkedIn) pelo próprio app.
    * Registra "Enviado manualmente" com data e hora. Entregue/lido não são marcados: não dá para confirmar sem API.
    */
-  markSent(messageId: string) {
+  /**
+   * Registra o envio. Sem opções: o usuário confirma que enviou por fora (manual).
+   * Com provider/externalId: o envio foi feito pelo sistema (ex.: WhatsApp conectado por QR code).
+   */
+  markSent(messageId: string, via?: { provider: string; externalId?: string; recipient?: string }) {
     const m = this.db.messages.find((x) => x.id === messageId);
     const lead = m && this.db.leads.find((l) => l.id === m.leadId);
     if (!m || !lead || m.status === 'sent' || m.status === 'replied') return;
     const at = this.now().toISOString();
+    const auto = via?.provider === 'whatsapp_qr';
     this.repo.batch(() => {
-      this.repo.update('messages', messageId, { status: 'sent', provider: m.provider ?? 'manual', sentAt: at, updatedAt: at });
+      this.repo.update('messages', messageId, {
+        status: 'sent',
+        provider: via?.provider ?? m.provider ?? 'manual',
+        ...(via?.externalId ? { externalId: via.externalId } : {}),
+        ...(via?.recipient ? { recipient: via.recipient } : {}),
+        sentAt: at,
+        updatedAt: at,
+      });
       this.repo.update('leads', lead.id, { lastContactAt: at });
-      this.log(lead.id, 'message_sent', `${channelLabel(m.channel)} marcado como enviado (manual)`, {
+      this.log(lead.id, 'message_sent', auto ? 'WhatsApp enviado pelo WhatsApp conectado' : `${channelLabel(m.channel)} marcado como enviado (manual)`, {
         messageId,
         channel: m.channel,
-        status: 'Enviado manualmente',
+        status: auto ? 'Enviado pelo WhatsApp conectado' : 'Enviado manualmente',
         user: this.profile.email,
       });
       const order: LeadStage[] = ['novo', 'qualificado', 'em_cadencia'];

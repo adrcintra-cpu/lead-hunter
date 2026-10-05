@@ -5,6 +5,7 @@ import { dataMode } from '@/lib/supabase';
 import { formatDateTime } from '@/core/utils';
 import { DEFAULT_SEND_WINDOW } from '@/core/types';
 import { ConfirmDialog, PageHeader, ThemeSwitcher } from '@/components/ui';
+import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
 
 const splitList = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
@@ -87,6 +88,8 @@ export function SettingsPage() {
           </div>
         </form>
       </section>
+
+      <WhatsAppConnectionCard />
 
       <SendingSettings />
 

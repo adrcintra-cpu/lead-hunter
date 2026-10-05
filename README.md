@@ -190,13 +190,15 @@ Passo a passo:
 
 Regras da automação: nunca envia duas vezes a mesma etapa; para os follow-ups quando o lead responde; cancela tudo quando o lead vira Cliente ou Não interessado, ou entra na lista de supressão. Respostas automáticas de ausência não interrompem a cadência.
 
+**WhatsApp conectado por QR code (opcional).** Com o serviço `whatsapp-service/` publicado (Railway) e `VITE_WHATSAPP_SERVICE_URL` na Vercel, cada usuário conecta o próprio WhatsApp em Configurações → WhatsApp. Aparece o botão **Enviar pelo WhatsApp conectado** no lead e na fila de WhatsApp: um clique envia uma mensagem, com intervalo mínimo, limite diário e lista de supressão; não há envio em massa. O `wa.me` continua disponível. A sessão fica criptografada no servidor. Passo a passo e riscos em [`whatsapp-service/README.md`](whatsapp-service/README.md).
+
 **API oficial do WhatsApp (desligada).** O código para a WhatsApp Business Platform (Meta) continua no projeto (`_shared/channels/metaWhatsapp.ts` e a função `whatsapp-webhook`), mas não é publicado nem usado. Só seria ativado com `WHATSAPP_AUTO=true`, as credenciais da Meta e opt-in de cada lead; as telas não mudam.
 
 ## Segurança e LGPD
 
 - Nenhuma chave secreta no frontend: só `VITE_SUPABASE_URL` e a anon key (pública).
 - RLS em todas as tabelas (`owner_id = auth.uid()`); `lead_activities` e `ai_runs` só aceitam leitura e inserção.
-- Sem scraping, sem robôs e sem automação de WhatsApp Web. WhatsApp só por link `wa.me`, enviado manualmente pela pessoa.
+- Sem scraping e sem robôs. WhatsApp por link `wa.me` (envio manual) ou, se o usuário conectar o próprio WhatsApp por QR code, envio individual a cada clique, nunca em massa. A sessão fica só no servidor, criptografada.
 - Todo e-mail automático leva o rodapé "Para não receber mais mensagens, responda PARAR." e o cabeçalho `List-Unsubscribe`. Responder PARAR, pedir para sair ou marcar como spam põe o contato na lista de supressão e encerra as cadências.
 - Envios só dentro da janela configurada (padrão: dias úteis, 9h–18h, horário de Brasília).
 - `lead_sources.expires_at` existe para respeitar limites de cache de providers como o Google Places.

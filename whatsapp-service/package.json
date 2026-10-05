@@ -1,0 +1,26 @@
+{
+  "name": "lead-hunter-whatsapp-service",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Serviço de WhatsApp (QR code) do Lead Hunter: sessão por usuário, envio individual.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "gen-key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.4.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

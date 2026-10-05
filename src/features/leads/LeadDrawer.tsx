@@ -11,6 +11,7 @@ import { cx, EmptyState, ErrorBox, ProvenanceTag, Skeleton, Spinner, type Proven
 import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { CadencePanel, ConversationPanel, CrmPanel, FollowUpPicker, LeadTasks, Timeline } from './LeadCrmPanels';
 import { parseSubject } from '../../../supabase/functions/_shared/automation/replies.ts';
+import { SendConnectedButton } from './SendConnectedButton';
 
 export function LeadDrawer({ leadId }: { leadId: string }) {
   const { close } = useLeadDrawer();
@@ -496,7 +497,7 @@ function ApproachPanel({ row }: { row: LeadRow }) {
               {sent ? (
                 <>
                   <p className="mt-3 flex items-center gap-1.5 text-[13px] font-semibold text-good">
-                    <Check className="h-4 w-4" /> Enviado manualmente em {formatDateTime(message?.sentAt ?? message?.updatedAt ?? '')}
+                    <Check className="h-4 w-4" /> {message?.provider === 'whatsapp_qr' ? 'Enviado pelo WhatsApp conectado' : 'Enviado manualmente'} em {formatDateTime(message?.sentAt ?? message?.updatedAt ?? '')}
                   </p>
                   <FollowUpPicker leadId={lead.id} channel={channel} />
                   <button type="button" className="btn-outline mt-3" onClick={() => generate(0)} disabled={busy}>
@@ -514,6 +515,9 @@ function ApproachPanel({ row }: { row: LeadRow }) {
                 <button type="button" className="btn-outline" onClick={() => (editing ? saveEdit() : setEditing(true))}>
                   <Pencil className="h-4 w-4" /> {editing ? 'Salvar edição' : 'Editar'}
                 </button>
+                {waLink && channel === 'whatsapp' && (
+                  <SendConnectedButton messageId={message.id} getText={() => (editing ? draft : message.finalContent)} beforeSend={() => editing && saveEdit()} />
+                )}
                 {waLink && (
                   <a href={waLink} target="_blank" rel="noopener noreferrer" className="btn-primary" onClick={onWhatsappOpened}>
                     <MessageCircle className="h-4 w-4" /> Abrir WhatsApp
