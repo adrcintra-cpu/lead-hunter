@@ -9,7 +9,7 @@ import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection
 type Tab = 'persona' | 'knowledge' | 'playbooks';
 
 const TABS: { id: Tab; label: string; hint: string; rows: number }[] = [
-  { id: 'persona', label: 'Persona', hint: 'Só comportamento: como a assistente conversa, o que procura entender e quando convida para a conversa. Muda raramente.', rows: 16 },
+  { id: 'persona', label: 'Persona', hint: 'Só comportamento: como o assistente conversa, o que procura entender e quando convida para a conversa. Muda raramente.', rows: 16 },
   { id: 'knowledge', label: 'Base de conhecimento', hint: 'Tudo sobre a empresa: quem somos, serviços, perguntas frequentes, objeções, processo comercial. Atualize sempre que a empresa evoluir. A IA nunca recomenda o que não estiver aqui.', rows: 18 },
   { id: 'playbooks', label: 'Playbooks', hint: 'Raciocínio por tipo de pedido: o que perguntar, o que considerar e quando passar para um especialista.', rows: 16 },
 ];
@@ -76,7 +76,7 @@ export function AssistantCard() {
     setPrefs(next);
     try {
       await savePrefs(s, next, custom);
-      toast(next.autoReply !== prev.autoReply ? (next.autoReply ? 'A BEELIE vai responder sozinha.' : 'Respostas automáticas desligadas: a BEELIE só sugere.') : 'Preferência salva.', 'success');
+      toast(next.autoReply !== prev.autoReply ? (next.autoReply ? `O ${s.name || 'assistente'} vai responder sozinho.` : `Respostas automáticas desligadas: o ${s.name || 'assistente'} só sugere.`) : 'Preferência salva.', 'success');
     } catch (e) {
       setPrefs(prev);
       toast(e instanceof Error ? e.message : 'Não foi possível salvar.', 'error');
@@ -91,7 +91,7 @@ export function AssistantCard() {
         <div>
           <h2 className="flex items-center gap-2 text-[15px] font-extrabold"><Bot className="h-4 w-4" /> Assistente de IA</h2>
           <p className="mt-1 text-[13px] text-ink-faint">
-            Quando um lead responde, a assistente escreve a próxima mensagem seguindo este texto.
+            Quando um lead responde, o assistente escreve a próxima mensagem seguindo este texto.
           </p>
         </div>
         <span className={cx('rounded-md px-2 py-1 text-xs font-bold', custom ? 'bg-accent-soft text-accent-strong' : 'bg-muted text-ink-soft')}>
@@ -119,9 +119,9 @@ export function AssistantCard() {
                 onChange={(e) => void updatePrefs({ ...prefs, autoReply: e.target.checked })}
               />
               <span>
-                <span className="block text-sm font-bold">A {s.name || 'assistente'} conversa sozinha no WhatsApp conectado</span>
+                <span className="block text-sm font-bold">O {s.name || 'assistente'} conversa sozinho no WhatsApp conectado</span>
                 <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">
-                  Quando o lead responde, ela responde em 1 a 2 minutos, buscando entender o cenário e marcar uma conversa com você. Responde das 8h às 21h, todos os dias (ou no horário de Envio das campanhas, se for mais amplo), no máximo 6 vezes por lead em 24 h, e para se você escrever para o lead pelo celular. Pedido de reunião, proposta ou preço vira tarefa para você. Desligado: ela só sugere e você envia.
+                  Quando o lead responde, ele responde em 1 a 2 minutos, buscando entender o cenário e marcar uma conversa com você. Responde das 8h às 21h, todos os dias (ou no horário de Envio das campanhas, se for mais amplo), no máximo 6 vezes por lead em 24 h, e para se você escrever para o lead pelo celular. Pedido de reunião, proposta ou preço vira tarefa para você. Desligado: ele só sugere e você envia.
                 </span>
               </span>
             </label>
@@ -154,13 +154,13 @@ export function AssistantCard() {
             {prefs.replyFormat === 'audio' && whatsappQrAvailable && conn && conn.audio === false && (
               <p className="mt-2 text-xs text-warn">A voz da IA ainda não está configurada no servidor: adicione OPENAI_API_KEY nas variáveis do Railway. Até lá, as respostas automáticas em áudio falham e ficam prontas para você enviar.</p>
             )}
-            {!prefsAvailable && <p className="mt-2 text-xs text-warn">Falta aplicar a migration da conversa automática (npx supabase db push). Até lá, vale o padrão: a {s.name || 'assistente'} responde sozinha, em texto.</p>}
+            {!prefsAvailable && <p className="mt-2 text-xs text-warn">Falta aplicar a migration da conversa automática (npx supabase db push). Até lá, vale o padrão: o {s.name || 'assistente'} responde sozinho, em texto.</p>}
           </div>
 
           <div className="mt-4 max-w-xs">
-            <label htmlFor="as-name" className="label">Nome da assistente</label>
+            <label htmlFor="as-name" className="label">Nome do assistente</label>
             <input id="as-name" className="input" value={s.name} onChange={(e) => setS({ ...s, name: e.target.value })} />
-            <p className="mt-1 text-xs text-ink-faint">Se perguntarem se é robô, ela se apresenta com esse nome e diz que você continua a conversa.</p>
+            <p className="mt-1 text-xs text-ink-faint">Se perguntarem se é robô, ele se apresenta com esse nome e diz que você continua a conversa.</p>
           </div>
 
           <div role="tablist" aria-label="Partes do assistente" className="mt-4 flex flex-wrap gap-1 border-b border-line">

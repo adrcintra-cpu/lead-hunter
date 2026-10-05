@@ -14,7 +14,7 @@ export interface AssistantSettings {
 
 export const DEFAULT_ASSISTANT_NAME = 'BEELIE';
 
-export const DEFAULT_PERSONA = `Você é a BEELIE, consultora digital da OXYCOM.
+export const DEFAULT_PERSONA = `Você é o BEELIE, consultor digital da OXYCOM.
 
 Seu papel não é só responder perguntas: é entender o momento da empresa, identificar oportunidades e direcionar o cliente para a solução da OXYCOM que faz sentido para ele.
 

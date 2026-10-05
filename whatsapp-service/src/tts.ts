@@ -1,7 +1,7 @@
 import { config } from './config.js';
 
-/** Vozes disponíveis (OpenAI). A padrão é feminina, combinando com a BEELIE. */
-export const VOICES = ['nova', 'shimmer', 'coral', 'sage', 'alloy', 'ash', 'echo', 'onyx', 'fable', 'ballad', 'verse'] as const;
+/** Vozes disponíveis (OpenAI). A padrão é masculina, combinando com o BEELIE. */
+export const VOICES = ['ash', 'onyx', 'echo', 'nova', 'shimmer', 'coral', 'sage', 'alloy', 'fable', 'ballad', 'verse'] as const;
 
 export const ttsAvailable = () => !!config.openaiKey;
 
@@ -11,7 +11,7 @@ export const ttsAvailable = () => !!config.openaiKey;
  */
 export async function textToSpeech(text: string, voice?: string): Promise<Buffer> {
   if (!config.openaiKey) throw new Error('Áudio indisponível: configure OPENAI_API_KEY no Railway.');
-  const v = VOICES.includes(voice as (typeof VOICES)[number]) ? voice : 'nova';
+  const v = VOICES.includes(voice as (typeof VOICES)[number]) ? voice : 'ash';
   const res = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.openaiKey}`, 'Content-Type': 'application/json' },

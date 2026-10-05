@@ -96,7 +96,7 @@ interface Index {
 /** Envio usado pela resposta automática (o SessionManager implementa). */
 export type AutoSender = (userId: string, phone: string, text: string, o: { audio?: boolean; voice?: string }) => Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }>;
 
-/** O que a Edge Function devolve quando a BEELIE deve responder sozinha. */
+/** O que a Edge Function devolve quando o BEELIE deve responder sozinho. */
 interface AutoReply {
   messageId: string;
   body: string;
@@ -111,7 +111,7 @@ export class InboundRelay {
   private loading = new Map<string, Promise<Index>>();
   /** Respostas automáticas agendadas, por conversa (usuário + telefone). */
   private pending = new Map<string, NodeJS.Timeout>();
-  /** IDs das mensagens que a própria BEELIE enviou (o eco delas não cancela nada). */
+  /** IDs das mensagens que o próprio BEELIE enviou (o eco delas não cancela nada). */
   private ownIds = new Set<string>();
   private warnedDisabled = false;
 
@@ -221,7 +221,7 @@ export class InboundRelay {
         this.ownIds.add(r.id);
         if (this.ownIds.size > 500) this.ownIds.delete(this.ownIds.values().next().value as string);
       }
-      log.info({ user: maskUser(userId), to: maskPhone(phone), audio: auto.format === 'audio' }, 'BEELIE respondeu automaticamente');
+      log.info({ user: maskUser(userId), to: maskPhone(phone), audio: auto.format === 'audio' }, 'O BEELIE respondeu automaticamente');
       await this.post({ action: 'sent', ownerId: userId, leadId, messageId: auto.messageId, externalId: r.id, to: r.to, format: auto.format, intent: auto.intent }).catch((err) =>
         log.error({ err: err instanceof Error ? err.message : String(err) }, 'falha ao registrar envio automático'),
       );

@@ -20,9 +20,9 @@ type Row = Record<string, any>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Máximo de respostas automáticas por lead em 24 h (evita conversa sem fim, inclusive com robôs). */
 const MAX_AUTO_PER_DAY = 6;
-/** Intenções em que você precisa entrar: a BEELIE responde, e a tarefa continua aberta para você. */
+/** Intenções em que você precisa entrar: o BEELIE responde, e a tarefa continua aberta para você. */
 const NEEDS_HUMAN = new Set(['confirmar_conversa', 'passar_para_vendedor']);
-/** Horário em que a BEELIE responde quem escreveu (hora de Brasília), todos os dias. */
+/** Horário em que o BEELIE responde quem escreveu (hora de Brasília), todos os dias. */
 const REPLY_WINDOW = { startHour: 8, endHour: 21 };
 
 Deno.serve(async (req) => {
@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
   }
 });
 
-/** Decide se a BEELIE responde sozinha: ligado nas configurações, dentro do horário e do limite diário. */
+/** Decide se o BEELIE responde sozinho: ligado nas configurações, dentro do horário e do limite diário. */
 async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: string; body: string; intent: string }) {
   const { data: cfg } = await db.from('assistant_settings').select('auto_reply, reply_format, voice').eq('owner_id', ownerId).maybeSingle().then(
     (r: { data: Row | null }) => r,
@@ -86,7 +86,7 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
   const campaign: SendWindow = (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW;
   const window: SendWindow = { startHour: Math.min(campaign.startHour, REPLY_WINDOW.startHour), endHour: Math.max(campaign.endHour, REPLY_WINDOW.endHour), weekdaysOnly: false };
   if (!inWindow(new Date(), window)) {
-    await log(db, ownerId, leadId, 'lead_updated', `Fora do horário de resposta (${window.startHour}h às ${window.endHour}h): a BEELIE não respondeu sozinha. A resposta ficou pronta para você revisar e enviar.`, { kind: 'auto_reply_skipped', reason: 'fora_do_horario' });
+    await log(db, ownerId, leadId, 'lead_updated', `Fora do horário de resposta (${window.startHour}h às ${window.endHour}h): o BEELIE não respondeu sozinho. A resposta ficou pronta para você revisar e enviar.`, { kind: 'auto_reply_skipped', reason: 'fora_do_horario' });
     return null;
   }
   const since = new Date(Date.now() - 864e5).toISOString();
@@ -106,7 +106,7 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     body: s.body,
     intent: s.intent,
     format: cfg?.reply_format === 'audio' ? 'audio' : 'texto',
-    voice: typeof cfg?.voice === 'string' ? cfg.voice : 'nova',
+    voice: typeof cfg?.voice === 'string' ? cfg.voice : 'ash',
     // Atraso natural, como alguém que leu e respondeu.
     delaySec: 45 + Math.floor(Math.random() * 75),
   };
@@ -127,7 +127,7 @@ async function markAutoSent(db: Row, ownerId: string, leadId: string, b: Row) {
   if (!msg) return { ok: false };
   await db.from('leads').update({ last_contact_at: at }).eq('id', leadId);
   const audio = b.format === 'audio';
-  await log(db, ownerId, leadId, 'message_sent', `BEELIE respondeu automaticamente${audio ? ' (áudio)' : ''}`, { messageId, channel: 'whatsapp', status: 'Enviado pela BEELIE', provider: 'whatsapp_qr' });
+  await log(db, ownerId, leadId, 'message_sent', `O BEELIE respondeu automaticamente${audio ? ' (áudio)' : ''}`, { messageId, channel: 'whatsapp', status: 'Enviado pelo BEELIE', provider: 'whatsapp_qr' });
   // Conversa seguindo: a tarefa "Responder" é concluída, exceto quando você precisa entrar (reunião aceita ou pedido para o vendedor).
   const intent = String(b.intent ?? /\(([^)]+)\)/.exec(String(msg.template ?? ''))?.[1] ?? '');
   if (!NEEDS_HUMAN.has(intent)) {

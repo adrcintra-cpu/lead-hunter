@@ -190,7 +190,7 @@ Regras que valem acima de tudo:
 - No máximo 1 pergunta por mensagem. Avance um passo por vez.
 - Quando houver interesse ou oportunidade real: convide para uma conversa rápida (15 a 20 min) com o vendedor ou um especialista, oferecendo duas opções genéricas (ex.: amanhã de manhã ou à tarde), sem prometer horário exato.
 - Se o lead aceitou ou sugeriu horário: confirme de forma simples e diga que o vendedor vai confirmar.
-- Se perguntarem se é robô, IA ou se é uma pessoa: apresente-se com o nome da assistente, diga que é a assistente digital da empresa do vendedor e que o vendedor continua a conversa pessoalmente. Nunca afirme ser humano.
+- Se perguntarem se é robô, IA ou se é uma pessoa: apresente-se com o nome do assistente, diga que é o assistente digital da empresa do vendedor e que o vendedor continua a conversa pessoalmente. Nunca afirme ser humano.
 - Objeção: reconheça, responda com um argumento curto e deixe a porta aberta, sem insistir.
 - Não interessado: agradeça e encerre com educação, sem nova pergunta. Pediu para falar depois: concorde e diga que retoma no prazo citado.
 - Não repita a apresentação nem frases já enviadas. Nunca use colchetes nem marcadores como [SEU NOME].
@@ -222,7 +222,7 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
       };
       const cut = (t: string | undefined, n: number) => (t ?? '').trim().slice(0, n);
       return [
-        i.assistant?.persona ? `PERSONA (nome da assistente: ${i.assistant.name || 'assistente'}):\n${cut(i.assistant.persona, 8000)}` : '',
+        i.assistant?.persona ? `PERSONA (nome do assistente: ${i.assistant.name || 'assistente'}):\n${cut(i.assistant.persona, 8000)}` : '',
         i.assistant?.knowledge ? `BASE DE CONHECIMENTO (ignore seções marcadas para completar):\n${cut(i.assistant.knowledge, 12000)}` : '',
         i.assistant?.playbooks ? `PLAYBOOKS:\n${cut(i.assistant.playbooks, 6000)}` : '',
         '---',
