@@ -319,9 +319,10 @@ export class SessionManager {
       const check = found?.[0];
       if (!check?.exists) return { ok: false, error: 'Este número não tem WhatsApp.' };
       const jid = check.jid ?? toJid(phone);
-      s.lastSendAt = Date.now();
-      // Áudio: gerado antes de "digitar/gravar", para o tempo de espera parecer natural.
+      // Áudio: gerado antes de "digitar/gravar" (espera natural) e antes de marcar o envio,
+      // para que, se a voz falhar, a mesma resposta possa sair em texto na hora.
       const audio = opts.audio ? await textToSpeech(text, opts.voice) : null;
+      s.lastSendAt = Date.now();
       if (opts.typing) {
         await s.sock.sendPresenceUpdate(audio ? 'recording' : 'composing', jid).catch(() => undefined);
         await new Promise((r) => setTimeout(r, Math.min(5000, 1000 + text.length * 25)));

@@ -22,6 +22,32 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_AUTO_PER_DAY = 6;
 /** Intenções em que você precisa entrar: o BEELIE responde, e a tarefa continua aberta para você. */
 const NEEDS_HUMAN = new Set(['confirmar_conversa', 'passar_para_vendedor']);
+/** Lead pediu para falar por áudio (ex.: "manda um áudio", "prefiro áudio", "fala por áudio"). */
+// Limites de palavra que entendem acentos (o \\b do JavaScript não reconhece "á").
+const W = (re: string) => new RegExp(re.replace(/\\b/g, '(?<![\\p{L}\\p{N}])').replace(/\\e/g, '(?![\\p{L}\\p{N}])'), 'iu');
+const AUDIO_WORD = '(?:[aá]udios?|voz)';
+const ASKS_AUDIO = W(
+  `\\b(?:me )?(?:mand|envi|grav|fal|explic|respond|cont)\\p{L}*\\e[^.?!]{0,30}\\b${AUDIO_WORD}\\e|\\bprefiro (?:um )?${AUDIO_WORD}\\e|\\b(?:por|em|via|num|no) ${AUDIO_WORD}\\e`,
+);
+/** Lead pediu texto (ex.: "não consigo ouvir", "manda por escrito", "prefiro texto"). */
+const ASKS_TEXT = W(
+  `\\bn[aã]o (?:consigo|posso|d[aá] pra) (?:ouvir|escutar)\\e|\\bpor escrito\\e|\\bescrev\\p{L}*\\e|\\bprefiro (?:texto|mensagem|escrito)\\e|\\b(?:mand|envi|respond)\\p{L}* (?:em|por) (?:texto|mensagem|escrito)\\e|\\bsem [aá]udio\\e`,
+);
+
+/**
+ * Formato da resposta desta conversa: o pedido mais recente do lead vale (áudio ou texto);
+ * sem pedido, se o lead mandou áudio, o BEELIE responde em áudio; senão, vale a configuração.
+ */
+export function chooseFormat(recent: string[], configured: 'texto' | 'audio'): 'texto' | 'audio' {
+  for (const body of recent) {
+    const t = body.replace(/^\[Áudio transcrito\]\s*/i, '');
+    if (ASKS_TEXT.test(t)) return 'texto';
+    if (ASKS_AUDIO.test(t)) return 'audio';
+  }
+  if (recent[0]?.startsWith('[Áudio transcrito]')) return 'audio';
+  return configured;
+}
+
 /** Horário em que o BEELIE responde quem escreveu (hora de Brasília), todos os dias. */
 const REPLY_WINDOW = { startHour: 8, endHour: 21 };
 
@@ -101,11 +127,21 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     await log(db, ownerId, leadId, 'lead_updated', `Limite de ${MAX_AUTO_PER_DAY} respostas automáticas em 24 h atingido: assuma a conversa.`, { kind: 'auto_reply_skipped', reason: 'limite' });
     return null;
   }
+  // Últimas mensagens do lead (mais recente primeiro): pedidos de áudio/texto valem para a conversa.
+  const { data: recent } = await db
+    .from('inbound_messages')
+    .select('body')
+    .eq('lead_id', leadId)
+    .eq('channel', 'whatsapp')
+    .gte('received_at', since)
+    .order('received_at', { ascending: false })
+    .limit(6);
+  const format = chooseFormat(((recent ?? []) as Row[]).map((r) => String(r.body ?? '')), cfg?.reply_format === 'audio' ? 'audio' : 'texto');
   return {
     messageId: s.id,
     body: s.body,
     intent: s.intent,
-    format: cfg?.reply_format === 'audio' ? 'audio' : 'texto',
+    format,
     voice: typeof cfg?.voice === 'string' ? cfg.voice : 'ash',
     // Atraso natural, como alguém que leu e respondeu.
     delaySec: 10 + Math.floor(Math.random() * 16),

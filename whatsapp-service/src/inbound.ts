@@ -206,7 +206,8 @@ export class InboundRelay {
     }
   }
 
-  private schedule(userId: string, leadId: string, phone: string, auto: AutoReply) {
+  private schedule(userId: string, leadId: string, phone: string, reply: AutoReply) {
+    let auto = reply;
     if (!this.send) return;
     const key = this.chatKey(userId, phone);
     const prev = this.pending.get(key);
@@ -214,7 +215,13 @@ export class InboundRelay {
     const delay = Math.max(config.autoMinDelaySeconds, Math.min(600, auto.delaySec)) * 1000;
     const t = setTimeout(async () => {
       this.pending.delete(key);
-      const r = await this.send!(userId, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
+      let r = await this.send!(userId, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
+      if (!r.ok && auto.format === 'audio' && /udio|OPENAI/i.test(r.error)) {
+        // A voz falhou (chave, crédito ou instabilidade): o lead recebe em texto em vez de ficar sem resposta.
+        log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'áudio indisponível: resposta enviada em texto');
+        auto = { ...auto, format: 'texto' };
+        r = await this.send!(userId, phone, auto.body, {});
+      }
       if (!r.ok) {
         log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'resposta automática não enviada');
         await this.post({ action: 'auto_failed', ownerId: userId, leadId, messageId: auto.messageId, error: r.error }).catch(() => undefined);
