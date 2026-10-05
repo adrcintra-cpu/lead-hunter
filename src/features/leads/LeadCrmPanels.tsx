@@ -12,7 +12,7 @@ import { TaskItem } from '@/features/tasks/TasksPage';
 
 /** Dados de CRM: contato, cargo, e-mail, tags, responsável, próxima ação e opt-in de WhatsApp. */
 export function CrmPanel({ row }: { row: LeadRow }) {
-  const { lead } = row;
+  const { lead, company } = row;
   const service = useService();
   const { toast } = useApp();
   const init = () => ({
@@ -23,16 +23,24 @@ export function CrmPanel({ row }: { row: LeadRow }) {
     ownerName: lead.ownerName ?? '',
     nextAction: lead.nextAction ?? '',
     nextActionAt: lead.nextActionAt ? lead.nextActionAt.slice(0, 16) : '',
+    whatsapp: company.whatsapp ?? '',
+    phone: company.phone ?? '',
   });
   const [f, setF] = useState(init);
   const [consent, setConsent] = useState('');
-  useEffect(() => setF(init()), [lead.id, lead.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setF(init()), [lead.id, lead.updatedAt, company.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
   const emailOk = !f.email || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim());
 
   function save(e: FormEvent) {
     e.preventDefault();
     if (!emailOk) return;
+    try {
+      service.updateCompanyContact(lead.id, { whatsapp: f.whatsapp, phone: f.phone });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Telefone inválido.', 'error');
+      return;
+    }
     service.updateLead(lead.id, {
       contactName: f.contactName,
       contactRole: f.contactRole,
@@ -62,6 +70,14 @@ export function CrmPanel({ row }: { row: LeadRow }) {
           <label htmlFor="crm-email" className="label">E-mail</label>
           <input id="crm-email" type="email" className={cx('input', !emailOk && 'border-bad')} value={f.email} onChange={(e) => set('email', e.target.value)} />
           {!emailOk && <p className="mt-1 text-xs text-bad">E-mail inválido.</p>}
+        </div>
+        <div>
+          <label htmlFor="crm-wa" className="label">WhatsApp</label>
+          <input id="crm-wa" className="input" inputMode="tel" value={f.whatsapp} placeholder="(19) 99999-9999" onChange={(e) => set('whatsapp', e.target.value)} />
+        </div>
+        <div>
+          <label htmlFor="crm-phone" className="label">Telefone</label>
+          <input id="crm-phone" className="input" inputMode="tel" value={f.phone} placeholder="(19) 3333-3333" onChange={(e) => set('phone', e.target.value)} />
         </div>
         <div>
           <label htmlFor="crm-owner" className="label">Responsável</label>

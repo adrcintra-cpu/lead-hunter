@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ListPlus, Search as SearchIcon, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ListPlus, Plus, Search as SearchIcon, X } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRows, type LeadRow } from '@/store/selectors';
 import { STAGES, stageLabel, type LeadStage } from '@/core/types';
 import { formatDate, normalize } from '@/core/utils';
 import { EmptyState, PageHeader, ScoreBadge, WhatsappBadge, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
+import { AddLeadDialog } from './AddLeadDialog';
 
 type SortKey = 'empresa' | 'segmento' | 'cidade' | 'estado' | 'score' | 'status' | 'origem' | 'data';
 
@@ -277,6 +278,7 @@ export function LeadsPage() {
   const [params, setParams] = useSearchParams();
   const searchId = params.get('search');
   const search = searchId ? db.searches.find((s) => s.id === searchId) : null;
+  const [adding, setAdding] = useState(false);
   const scoped = useMemo(() => {
     if (!searchId) return rows;
     const ids = new Set(db.searchResults.filter((r) => r.searchId === searchId).map((r) => r.leadId));
@@ -307,9 +309,17 @@ export function LeadsPage() {
             'Clique no nome da empresa para abrir o perfil.'
           )
         }
-        actions={<Link to="/buscar" className="btn-primary">Nova busca</Link>}
+        actions={
+          <>
+            <button type="button" className="btn-outline" onClick={() => setAdding(true)}>
+              <Plus className="h-4 w-4" /> Adicionar lead
+            </button>
+            <Link to="/buscar" className="btn-primary">Nova busca</Link>
+          </>
+        }
       />
       <LeadsTable rows={scoped} />
+      {adding && <AddLeadDialog onClose={() => setAdding(false)} />}
     </div>
   );
 }

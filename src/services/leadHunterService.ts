@@ -467,6 +467,108 @@ export class LeadHunterService {
     });
   }
 
+  // ---------- Cadastro manual ----------
+
+  /**
+   * Adiciona uma empresa à mão (indicação, contato conhecido, teste). Mesmas regras da busca:
+   * se já existir (CNPJ, site ou telefone + cidade), devolve o lead que já existe.
+   */
+  async addManualLead(input: {
+    name: string;
+    segment: string;
+    city: string;
+    state: string;
+    whatsapp?: string;
+    phone?: string;
+    email?: string;
+    contactName?: string;
+    website?: string;
+  }): Promise<{ leadId: string; existed: boolean }> {
+    const name = input.name.trim();
+    const city = input.city.trim();
+    const state = input.state.trim().toUpperCase().slice(0, 2);
+    if (!name || !city || !state) throw new Error('Informe nome, cidade e estado.');
+    const wa = input.whatsapp?.trim() || undefined;
+    if (wa && digits(wa).length < 10) throw new Error('WhatsApp inválido: use DDD + número.');
+    const raw: RawCompany = {
+      provider: 'manual',
+      externalId: uid('man'),
+      legalName: name,
+      legalNameIsTradeName: true,
+      tradeName: name,
+      segment: input.segment.trim() || 'Outros',
+      city,
+      state,
+      phone: input.phone?.trim() || wa,
+      whatsapp: wa,
+      // Informado pelo usuário: tratado como confirmado.
+      whatsappStatus: wa ? 'confirmado' : undefined,
+      website: input.website?.trim() || undefined,
+    };
+    const keys = identityKeys(raw);
+    const existing = this.db.companies.find((c) => identityKeys(c).some((k) => keys.includes(k)));
+    const existingLead = existing && this.db.leads.find((l) => l.companyId === existing.id);
+    if (existingLead) return { leadId: existingLead.id, existed: true };
+
+    const company = toCompany(raw);
+    const leadId = uid('lead');
+    const score = await this.ai.scoreLead(company, this.profile, leadId);
+    const at = nowIso();
+    const email = input.email?.trim().toLowerCase() || undefined;
+    this.repo.batch(() => {
+      this.repo.insert('companies', company);
+      this.repo.insert('leads', {
+        id: leadId,
+        companyId: company.id,
+        stage: 'novo',
+        currentScore: score.score,
+        scoreTier: score.tier,
+        origin: 'Manual',
+        contactName: input.contactName?.trim() || undefined,
+        email,
+        discoveredAt: at,
+        lastActivityAt: at,
+        createdAt: at,
+        updatedAt: at,
+      });
+      this.repo.insert('leadScores', score);
+      this.log(leadId, 'discovered', 'Adicionado manualmente', { user: this.profile.email });
+      this.log(leadId, 'scored', `Score calculado: ${score.score}/100`, { score: score.score, ruleScore: score.ruleScore, aiAdjustment: score.aiAdjustment });
+    });
+    return { leadId, existed: false };
+  }
+
+  /** Corrige WhatsApp e telefone da empresa. Número informado pelo usuário vira "confirmado". */
+  updateCompanyContact(leadId: string, patch: { whatsapp?: string; phone?: string }) {
+    const lead = this.db.leads.find((l) => l.id === leadId);
+    const company = lead && this.db.companies.find((c) => c.id === lead.companyId);
+    if (!lead || !company) return;
+    const wa = patch.whatsapp?.trim() || undefined;
+    const phone = patch.phone?.trim() || undefined;
+    if (wa && digits(wa).length < 10) throw new Error('WhatsApp inválido: use DDD + número.');
+    if (phone && digits(phone).length < 10) throw new Error('Telefone inválido: use DDD + número.');
+    const changes: string[] = [];
+    if ((company.whatsapp ?? '') !== (wa ?? '')) changes.push(wa ? `WhatsApp: ${wa}` : 'WhatsApp removido');
+    if ((company.phone ?? '') !== (phone ?? '')) changes.push(phone ? `Telefone: ${phone}` : 'Telefone removido');
+    if (!changes.length) return;
+    const src = { provider: 'manual', fetchedAt: nowIso() };
+    const prov = { ...company.fieldProvenance };
+    if (wa) prov.whatsapp = src;
+    else delete prov.whatsapp;
+    if (phone) prov.phone = src;
+    else delete prov.phone;
+    this.repo.batch(() => {
+      this.repo.update('companies', company.id, {
+        whatsapp: wa,
+        whatsappStatus: wa ? 'confirmado' : 'desconhecido',
+        phone,
+        fieldProvenance: prov,
+        updatedAt: nowIso(),
+      });
+      this.log(leadId, 'lead_updated', `Contato corrigido: ${changes.join(' · ')}`, { kind: 'contact_updated', user: this.profile.email });
+    });
+  }
+
   async rescore(leadId: string) {
     const lead = this.db.leads.find((l) => l.id === leadId);
     const company = lead && this.db.companies.find((c) => c.id === lead.companyId);
