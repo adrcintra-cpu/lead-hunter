@@ -29,7 +29,8 @@ export interface PlacesApiPlace {
   id: string;
   displayName?: { text: string };
   formattedAddress?: string;
-  addressComponents?: { longText: string; shortText: string; types: string[] }[];
+  // O Google omite listas vazias no JSON: `types` pode não vir.
+  addressComponents?: { longText?: string; shortText?: string; types?: string[] }[];
   location?: { latitude: number; longitude: number };
   nationalPhoneNumber?: string;
   websiteUri?: string;
@@ -53,7 +54,7 @@ export function classifyPhone(phone?: string): { whatsapp?: string; status: What
 }
 
 function component(p: PlacesApiPlace, type: string, short = false): string | undefined {
-  const c = p.addressComponents?.find((x) => x.types.includes(type));
+  const c = p.addressComponents?.find((x) => x.types?.includes(type));
   return c ? (short ? c.shortText : c.longText) : undefined;
 }
 
@@ -158,8 +159,13 @@ export async function searchPlaces(apiKey: string, criteria: SearchCriteria, fet
   for (let page = 0; page < MAX_PAGES; page++) {
     const data = await call(apiKey, pageToken ? { ...body, pageToken } : body, FIELD_MASK, fetchImpl);
     for (const p of data.places ?? []) {
-      const c = mapPlace(p, criteria);
-      if (c) found.push(c);
+      try {
+        const c = mapPlace(p, criteria);
+        if (c) found.push(c);
+      } catch (err) {
+        // Um estabelecimento com dados incompletos não derruba a busca inteira.
+        console.warn('place ignorado', p?.id, err instanceof Error ? err.message : String(err));
+      }
     }
     pageToken = data.nextPageToken;
     if (!pageToken || applyCriteria(found, criteria, center).length >= want) break;
