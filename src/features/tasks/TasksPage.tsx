@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { CheckCircle2, Circle, ExternalLink, ListChecks, Plus } from 'lucide-react';
+import { Check, CheckCircle2, Circle, ExternalLink, ListChecks, Plus } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import type { Task } from '@/core/types';
 import { formatDateTime, relativeTime } from '@/core/utils';
@@ -15,6 +15,13 @@ export function TaskItem({ t, showLead = true }: { t: Task; showLead?: boolean }
   const lead = t.leadId ? db.leads.find((l) => l.id === t.leadId) : undefined;
   const company = lead && db.companies.find((c) => c.id === lead.companyId);
   const overdue = t.status === 'aberta' && t.dueAt && new Date(t.dueAt) < service.now();
+  // Tarefa de WhatsApp da cadência: a mensagem preparada correspondente (para registrar abertura e envio).
+  const waMessage =
+    t.actionUrl?.startsWith('https://wa.me/') && t.leadId
+      ? db.messages
+          .filter((m) => m.leadId === t.leadId && m.channel === 'whatsapp' && (m.status === 'draft' || m.status === 'opened_whatsapp') && (!t.campaignId || m.campaignId === t.campaignId))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+      : undefined;
   return (
     <li className="flex items-start gap-3 px-5 py-3">
       <button
@@ -41,9 +48,22 @@ export function TaskItem({ t, showLead = true }: { t: Task; showLead?: boolean }
         </div>
       </div>
       {t.actionUrl && t.status === 'aberta' && (
-        <a href={t.actionUrl} target="_blank" rel="noopener noreferrer" className="btn-primary min-h-[34px] shrink-0 px-3 text-xs">
-          <ExternalLink className="h-3.5 w-3.5" /> Abrir WhatsApp
-        </a>
+        <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
+          <a
+            href={t.actionUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-primary min-h-[34px] px-3 text-xs"
+            onClick={() => waMessage && service.markWhatsappOpened(waMessage.id)}
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Abrir WhatsApp
+          </a>
+          {waMessage && (
+            <button type="button" className="btn-outline min-h-[34px] px-3 text-xs" onClick={() => service.markSent(waMessage.id)}>
+              <Check className="h-3.5 w-3.5" /> Marcar como enviado
+            </button>
+          )}
+        </div>
       )}
     </li>
   );

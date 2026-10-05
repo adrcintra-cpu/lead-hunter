@@ -200,7 +200,7 @@ export function CampaignDetailPage() {
         <Metric label="Respostas" value={m.replies} hint={`${m.replyRate}% dos contatados`} />
         <Metric label="Interessados" value={m.interested} />
         <Metric label="Falhas" value={m.failed} />
-        <Metric label="Envio manual" value={m.manual} hint="sem opt-in" />
+        <Metric label="Envio manual" value={m.manual} hint="WhatsApp via wa.me" />
       </section>
 
       <section className="card px-5 py-5">

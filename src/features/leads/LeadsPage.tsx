@@ -20,9 +20,10 @@ interface Filters {
   site: '' | 'sim' | 'nao';
   wa: '' | 'sim' | 'nao';
   origin: string;
+  followUp: '' | 'atrasado' | 'hoje' | 'agendado';
 }
 
-const EMPTY: Filters = { text: '', city: '', state: '', segment: '', minScore: '', stage: '', site: '', wa: '', origin: '' };
+const EMPTY: Filters = { text: '', city: '', state: '', segment: '', minScore: '', stage: '', site: '', wa: '', origin: '', followUp: '' };
 
 const uniq = (xs: string[]) => Array.from(new Set(xs)).sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
@@ -48,6 +49,9 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
 
   const filtered = useMemo(() => {
     const t = normalize(f.text);
+    const start = service.now();
+    start.setHours(0, 0, 0, 0);
+    const end = start.getTime() + 864e5;
     const out = rows.filter(({ lead, company: c }) => {
       if (t && !normalize(`${c.legalName} ${c.tradeName ?? ''} ${c.website ?? ''} ${lead.contactName ?? ''} ${lead.email ?? ''} ${(lead.tags ?? []).join(' ')}`).includes(t)) return false;
       if (f.city && c.city !== f.city) return false;
@@ -60,6 +64,12 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
       if (f.wa === 'sim' && !c.whatsapp) return false;
       if (f.wa === 'nao' && c.whatsapp) return false;
       if (f.origin && lead.origin !== f.origin) return false;
+      if (f.followUp) {
+        const at = lead.nextActionAt ? new Date(lead.nextActionAt).getTime() : NaN;
+        if (Number.isNaN(at)) return false;
+        if (f.followUp === 'atrasado' && at >= start.getTime()) return false;
+        if (f.followUp === 'hoje' && (at < start.getTime() || at >= end)) return false;
+      }
       return true;
     });
     const val = (r: LeadRow): string | number => {
@@ -140,6 +150,12 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
         <select aria-label="Origem" className={select} value={f.origin} onChange={(e) => set('origin', e.target.value)}>
           <option value="">Origem</option>
           {opts.origins.map((x) => <option key={x}>{x}</option>)}
+        </select>
+        <select aria-label="Follow-up" className={select} value={f.followUp} onChange={(e) => set('followUp', e.target.value as Filters['followUp'])}>
+          <option value="">Follow-up</option>
+          <option value="atrasado">Atrasados</option>
+          <option value="hoje">Para hoje</option>
+          <option value="agendado">Com próximo contato</option>
         </select>
         {activeFilters > 0 && (
           <button type="button" className="btn-ghost min-h-[38px] px-2 text-[13px]" onClick={() => setF(EMPTY)}>

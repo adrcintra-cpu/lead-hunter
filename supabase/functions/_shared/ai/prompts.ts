@@ -1,7 +1,7 @@
 // Prompts versionados da camada de IA. Cada tarefa define: system, mensagem do
 // usuário, JSON Schema da saída (via tool use) e pós-processamento.
 
-export const PROMPT_VERSION = 'v1';
+export const PROMPT_VERSION = 'v2';
 
 const RULES = `Regras obrigatórias:
 - Use SOMENTE os dados fornecidos. Nunca invente nome de pessoas, números, clientes, prêmios ou fatos.
@@ -113,6 +113,15 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
         `Remetente: ${options.senderName || '[SEU NOME]'}, empresa ${options.senderCompany || '[SUA EMPRESA]'}, oferta: ${options.offer || '[SEU SERVIÇO]'}`,
         options.contactName ? `Contato: ${options.contactName}${options.contactRole ? `, ${options.contactRole}` : ''} (use o primeiro nome)` : 'Contato: não informado (cumprimente a equipe da empresa)',
         options.instructions ? `Instruções do usuário: ${options.instructions}` : '',
+        Array.isArray(options.notes) && options.notes.length ? `Observações do usuário sobre o lead (use só se ajudar; não invente além disso):\n- ${(options.notes as string[]).join('\n- ')}` : '',
+        options.campaignName ? `Campanha: ${options.campaignName}` : '',
+        Array.isArray(options.history) && options.history.length
+          ? [
+              `Mensagens já enviadas a este lead (mais antiga primeiro)${options.daysSinceLastContact != null ? `; último contato há ${options.daysSinceLastContact} dias` : ''}:`,
+              ...(options.history as Json[]).map((h) => `[${h.channel}, ${h.date}] ${h.text}`),
+              'Escreva uma continuação natural dessa conversa: não repita frases, argumentos nem a apresentação das mensagens anteriores; mencione de leve o contato anterior e traga um ângulo novo e curto.',
+            ].join('\n')
+          : '',
         `Empresa alvo (dados reais encontrados): ${JSON.stringify(stripInternal(company))}`,
         'Nunca use só "Olá {nome}, tudo bem?": cite pelo menos um dado real da empresa (segmento, cidade ou site).',
       ]
@@ -124,18 +133,35 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
 
   classifyReply: {
     system: `Você classifica respostas de leads a mensagens comerciais B2B. ${RULES}
-Categorias: interessado (quer saber mais, pediu valores), reuniao (pediu reunião ou ligação), duvida (fez uma pergunta), nao_interessado (recusou), opt_out (pediu para não receber mais mensagens), ausente (resposta automática de férias/ausência), outro.
-Na dúvida entre nao_interessado e opt_out, prefira opt_out se houver pedido para parar de receber.`,
+Categorias:
+- interessado: demonstrou interesse sem pedir algo específico
+- informacoes: pediu mais informações, material ou explicação
+- orcamento: pediu preço, valores, cotação ou proposta
+- reuniao: pediu reunião, ligação ou horário
+- objecao: levantou uma objeção (preço, já tem fornecedor, sem verba) sem recusar de vez
+- posteriormente: pediu para falar em outro momento
+- nao_interessado: recusou
+- sem_contato: pediu para não receber mais mensagens
+- ausente: resposta automática de férias/ausência
+- nao_identificado: não dá para saber
+Na dúvida entre nao_interessado e sem_contato, prefira sem_contato se houver pedido para parar de receber.
+suggestedAction: uma frase curta e prática do que o vendedor deve fazer agora.
+followUpDays: só para "posteriormente", em quantos dias retomar (use o prazo citado; sem prazo, 30).`,
     schema: {
       type: 'object',
       properties: {
-        classification: { type: 'string', enum: ['interessado', 'reuniao', 'duvida', 'nao_interessado', 'opt_out', 'ausente', 'outro'] },
+        category: { type: 'string', enum: ['interessado', 'informacoes', 'orcamento', 'reuniao', 'objecao', 'posteriormente', 'nao_interessado', 'sem_contato', 'ausente', 'nao_identificado'] },
         confidence: { type: 'number' },
         summary: { type: 'string', description: 'Resumo em até 20 palavras.' },
+        suggestedAction: { type: 'string', description: 'Próxima ação sugerida, uma frase.' },
+        followUpDays: { type: 'integer' },
       },
-      required: ['classification', 'confidence', 'summary'],
+      required: ['category', 'confidence', 'summary', 'suggestedAction'],
     },
-    user: (input) => `Resposta do lead:\n${(input as { text: string }).text}`,
+    user: (input) => {
+      const { text, context } = input as { text: string; context?: string };
+      return [context ? `Contexto: ${context}` : '', `Resposta do lead:\n${text}`].filter(Boolean).join('\n\n');
+    },
     output: (raw) => raw,
   },
 

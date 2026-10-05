@@ -116,6 +116,62 @@ export const REPLY_LABEL: Record<ReplyClass, string> = {
   outro: 'Outro',
 };
 
+/**
+ * Categoria detalhada da resposta (o que a pessoa quis dizer). A classificação gravada no banco
+ * (ReplyClass) continua com os valores antigos; a categoria vai no histórico e na próxima ação.
+ */
+export type ReplyCategory =
+  | 'interessado'
+  | 'informacoes'
+  | 'orcamento'
+  | 'reuniao'
+  | 'objecao'
+  | 'posteriormente'
+  | 'nao_interessado'
+  | 'sem_contato'
+  | 'nao_identificado'
+  | 'ausente';
+
+export const REPLY_CATEGORY_LABEL: Record<ReplyCategory, string> = {
+  interessado: 'Interessado',
+  informacoes: 'Solicitou informações',
+  orcamento: 'Solicitou orçamento',
+  reuniao: 'Solicitou reunião',
+  objecao: 'Objeção',
+  posteriormente: 'Falar posteriormente',
+  nao_interessado: 'Não interessado',
+  sem_contato: 'Não deseja mais contato',
+  nao_identificado: 'Não identificado',
+  ausente: 'Resposta automática (ausência)',
+};
+
+export const REPLY_CATEGORIES = Object.keys(REPLY_CATEGORY_LABEL) as ReplyCategory[];
+
+/** Categoria → classificação gravada (compatível com o banco e as métricas). */
+export const CATEGORY_TO_CLASS: Record<ReplyCategory, ReplyClass> = {
+  interessado: 'interessado',
+  informacoes: 'interessado',
+  orcamento: 'interessado',
+  reuniao: 'reuniao',
+  objecao: 'outro',
+  posteriormente: 'outro',
+  nao_interessado: 'nao_interessado',
+  sem_contato: 'opt_out',
+  nao_identificado: 'outro',
+  ausente: 'ausente',
+};
+
+/** Resultado da análise de uma resposta. */
+export interface ReplyAnalysis {
+  category: ReplyCategory;
+  classification: ReplyClass;
+  confidence: number;
+  summary: string;
+  suggestedAction: string;
+  /** Em quantos dias voltar a falar (quando a pessoa pediu para falar depois). */
+  followUpDays?: number;
+}
+
 export interface InboundMessage {
   id: string;
   leadId: string;

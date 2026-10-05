@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Lead Hunter — liga o projeto às APIs reais (Supabase, Claude, Google Places, Resend, WhatsApp).
+# Lead Hunter — liga o projeto às APIs reais (Supabase, Claude, Google Places, Resend).
+# WhatsApp é sem API (link wa.me): não precisa de configuração.
 #
 # Rode no Terminal, na pasta do projeto:   bash scripts/configurar-apis.sh
 #
@@ -52,18 +53,6 @@ if confirm "Configurar e-mail (Resend) agora?"; then
   [[ -n "$RESEND_WH" ]] && SECRETS+=("RESEND_WEBHOOK_SECRET=$RESEND_WH")
 fi
 
-WA=""
-if confirm "Configurar WhatsApp oficial (Meta) agora?"; then
-  WA="$(ask_secret 'Token permanente do usuário do sistema')"
-  WA_PHONE="$(ask 'Phone number ID')"
-  WA_APP="$(ask_secret 'Chave secreta do app (App Secret)')"
-  WA_VERIFY="$(openssl rand -hex 16)"
-  [[ -n "$WA" ]] && SECRETS+=("WHATSAPP_TOKEN=$WA")
-  [[ -n "$WA_PHONE" ]] && SECRETS+=("WHATSAPP_PHONE_NUMBER_ID=$WA_PHONE")
-  [[ -n "$WA_APP" ]] && SECRETS+=("WHATSAPP_APP_SECRET=$WA_APP")
-  SECRETS+=("WHATSAPP_VERIFY_TOKEN=$WA_VERIFY")
-fi
-
 CRON_SECRET=""
 if confirm "Primeira vez configurando a automação? (gera o segredo do agendador)"; then
   CRON_SECRET="$(openssl rand -hex 32)"
@@ -76,15 +65,14 @@ if [[ ${#SECRETS[@]} -gt 0 ]]; then
 else
   warn "Nenhuma chave nova informada"
 fi
-unset CLAUDE GOOGLE RESEND_WH WA_APP SECRETS
+unset CLAUDE GOOGLE RESEND_WH SECRETS
 
 bold "5/6 · Publicar as funções"
 "${SB[@]}" functions deploy ai
 "${SB[@]}" functions deploy providers
 "${SB[@]}" functions deploy cadence-runner --no-verify-jwt
 [[ -n "$RESEND" ]] && "${SB[@]}" functions deploy email-webhook --no-verify-jwt
-[[ -n "$WA" ]] && "${SB[@]}" functions deploy whatsapp-webhook --no-verify-jwt
-unset RESEND WA
+unset RESEND
 ok "Funções publicadas"
 
 URL="https://$REF.supabase.co"
@@ -102,19 +90,12 @@ echo
 echo "  B) Supabase → Authentication → URL Configuration → Site URL:"
 echo "       https://lead-hunter-beige-chi.vercel.app"
 
-if [[ -n "${WA_VERIFY:-}" ]]; then
-  echo
-  echo "  C) Meta → seu app → WhatsApp → Configuração → Webhook:"
-  echo "       URL:                  $URL/functions/v1/whatsapp-webhook"
-  echo "       Token de verificação: $WA_VERIFY"
-  echo "       Assine o campo: messages"
-fi
 echo
-echo "  D) Resend → Webhooks (se usar e-mail):"
+echo "  C) Resend → Webhooks (se usar e-mail):"
 echo "       URL: $URL/functions/v1/email-webhook"
 echo
 if [[ -n "$CRON_SECRET" ]]; then
-echo "  E) Agendar a automação (só na primeira vez; se já fez, pule), a cada 5 min. Supabase → Database → Extensions: ative pg_cron e pg_net."
+echo "  D) Agendar a automação (só na primeira vez; se já fez, pule), a cada 5 min. Supabase → Database → Extensions: ative pg_cron e pg_net."
 echo "     Depois, no SQL Editor, cole e rode:"
 echo
 cat <<SQL

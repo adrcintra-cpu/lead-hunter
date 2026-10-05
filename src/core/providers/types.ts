@@ -6,6 +6,7 @@ import type {
   RawCompany,
   SearchCriteria,
   CriteriaField,
+  ReplyAnalysis,
   ReplyClass,
 } from '../types';
 
@@ -47,6 +48,12 @@ export interface ApproachOptions {
   stage?: 'primeira' | 'acompanhamento' | 'ultimo';
   /** Instruções extras do usuário para esta etapa. */
   instructions?: string;
+  /** Mensagens já enviadas a este lead, da mais antiga para a mais recente (follow-up sem repetir). */
+  history?: { channel: string; date: string; text: string }[];
+  daysSinceLastContact?: number;
+  /** Observações (notas) do usuário sobre o lead. */
+  notes?: string[];
+  campaignName?: string;
 }
 
 /** Números consolidados para a "leitura inteligente" do dashboard. */
@@ -85,7 +92,8 @@ export interface AIProvider {
   summarizeCompany(company: Company): Promise<string>;
   adjustScore(company: Company, ruleScore: number, icp: string): Promise<ScoreAdjustment>;
   generateApproach(company: Company, channel: Channel, options: ApproachOptions): Promise<string>;
-  classifyReply(text: string): Promise<{ classification: ReplyClass; confidence: number; summary: string }>;
+  /** Devolve a análise da resposta. Saídas antigas (só `classification`) são normalizadas pelo AIService. */
+  classifyReply(text: string, context?: string): Promise<Partial<ReplyAnalysis> & { classification?: ReplyClass }>;
   summarizeResults(snapshot: ResultsSnapshot): Promise<string[]>;
 }
 

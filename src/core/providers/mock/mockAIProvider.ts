@@ -2,7 +2,7 @@ import type { AnalysisItem, AnalysisSections, Company, ParsedCriteria, SearchCri
 import { normalize, sleep } from '../../utils';
 import type { AIProvider } from '../types';
 import { MOCK_CITIES } from './mockCompanies';
-import { classifyReplyRules } from '../../../../supabase/functions/_shared/automation/replies.ts';
+import { analyzeReplyRules } from '../../../../supabase/functions/_shared/automation/replies.ts';
 
 const SEGMENT_HINTS: [string, string][] = [
   ['maquinas agricolas', 'Máquinas agrícolas'],
@@ -98,7 +98,7 @@ function channelsFound(c: Company): string[] {
 export const mockAIProvider: AIProvider = {
   id: 'mock_ai',
   model: 'mock-rules-v1',
-  promptVersion: 'v1',
+  promptVersion: 'v2',
 
   async parseSearchQuery(text) {
     await sleep(450);
@@ -168,6 +168,22 @@ export const mockAIProvider: AIProvider = {
     const v = o.variant % 2;
     const stage = o.stage ?? 'primeira';
 
+    // Follow-up com histórico: continua a conversa em vez de repetir a apresentação.
+    if (o.history?.length && stage !== 'ultimo') {
+      const n = o.history.length;
+      const when = o.daysSinceLastContact != null ? (o.daysSinceLastContact <= 1 ? 'ontem' : `há ${o.daysSinceLastContact} dias`) : 'há alguns dias';
+      const angles = [
+        `Uma ideia prática: empresas de ${seg} costumam começar por um diagnóstico rápido, sem compromisso.`,
+        `Se ajudar, posso mandar um exemplo curto de como isso funciona para empresas de ${seg} em ${c.city}.`,
+        `Sei que a rotina é corrida, então resumo: ${offer} pode tirar trabalho manual da equipe da ${who}.`,
+      ];
+      const angle = angles[(n - 1 + v) % angles.length];
+      if (channel === 'email') {
+        return [`Assunto: Re: ${who} — uma ideia rápida`, '', `${hello},`, '', `Escrevi ${when} e imagino que a semana esteja cheia.`, angle, 'Se não for prioridade agora, me diga e eu retomo em outro momento.', '', 'Abraço,', me, myCo].join('\n');
+      }
+      return `${hello}! Te escrevi ${when}. ${angle} Faz sentido falarmos rapidinho?`;
+    }
+
     if (stage === 'acompanhamento') {
       if (channel === 'email') {
         return [`Assunto: Sobre ${offer} para a ${who}`, '', `${hello},`, '', `Mandei uma mensagem há alguns dias sobre ${offer} para empresas de ${seg} em ${c.city}.`, 'Faz sentido conversarmos 15 minutos? Se não for prioridade agora, é só me avisar.', '', 'Abraço,', me, myCo].join('\n');
@@ -208,7 +224,7 @@ export const mockAIProvider: AIProvider = {
 
   async classifyReply(text) {
     await sleep(150);
-    return classifyReplyRules(text);
+    return analyzeReplyRules(text);
   },
 
   async summarizeResults(s) {

@@ -2,8 +2,8 @@ import type { AnalysisSections, Channel, Company, CompanyField, LeadScore, Parse
 import { nowIso, uid } from '../utils';
 import type { AIProvider, ApproachOptions } from '../providers/types';
 import { ruleScore, tierOf, type ScoreExtras } from '../scoring';
-import { classifyReplyRules } from '../../../supabase/functions/_shared/automation/replies.ts';
-import type { ReplyClass } from '../types';
+import { analyzeReplyRules, normalizeAnalysis } from '../../../supabase/functions/_shared/automation/replies.ts';
+import type { ReplyAnalysis } from '../types';
 import type { ResultsSnapshot } from '../providers/types';
 import { ruleBasedParse } from '../providers/mock/mockAIProvider';
 
@@ -98,11 +98,13 @@ export class AIService {
   }
 
   /** Classifica a resposta do lead. Se a IA falhar, usa regras (nunca deixa a resposta sem classificação). */
-  async classifyReply(text: string): Promise<{ classification: ReplyClass; confidence: number; summary: string }> {
+  /** Classifica a resposta em uma das categorias, com resumo e próxima ação sugerida. */
+  async classifyReply(text: string, context?: string): Promise<ReplyAnalysis> {
     try {
-      return await this.run('classifyReply', () => this.provider.classifyReply(text));
+      const raw = await this.run('classifyReply', () => this.provider.classifyReply(text, context));
+      return normalizeAnalysis(raw, text);
     } catch {
-      return classifyReplyRules(text);
+      return analyzeReplyRules(text);
     }
   }
 

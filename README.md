@@ -30,15 +30,16 @@ No modo mock tudo fica no `localStorage` do navegador, separado por usuário. Em
 | Busca | Linguagem natural → critérios editáveis → providers → deduplicação → score |
 | Leads | Tabela com 8 filtros, ordenação, seleção em massa para listas |
 | Perfil | Proveniência por campo, análise da IA (fato × inferência × indisponível), score detalhado |
-| Abordagem | WhatsApp, e-mail, LinkedIn; copiar, regenerar, editar; abre `wa.me` sem enviar nada |
+| Abordagem | Mensagem com IA (WhatsApp, e-mail, LinkedIn), editar, abrir `wa.me` ou o app de e-mail, **Marcar como enviado** e agendar o próximo contato (1, 3, 5, 7, 14, 30 dias ou data). Com contato anterior, a IA escreve um follow-up que continua a conversa |
 | Pipeline | 11 etapas (Novo → Qualificado → Em cadência → Contatado → Respondeu → Interessado → Reunião → Proposta → Cliente, Não interessado, Sem resposta) com arrastar e soltar |
-| CRM e perfil 360° | Contato, cargo, e-mail, tags, responsável, próxima ação, opt-in de WhatsApp, conversa, cadência e linha do tempo completa |
+| CRM e perfil 360° | Contato, cargo, e-mail, tags, responsável, próxima ação, consentimento de WhatsApp, conversa, **Registrar resposta → Analisar com IA**, cadência e linha do tempo completa |
 | Score | 0–100 por regras + ajuste da IA (±15). Quente 80+, morno 50–79, frio abaixo de 50; respostas mudam o score |
 | Campanhas | Nome, objetivo, público (segmento, cidade, score, etapa, tags, lista), canal, cadência, responsável, status, métricas |
 | Cadências | Editor visual de etapas: enviar (IA ou template), esperar, condição, tarefa, mudar etapa; nada fixo no código |
 | Personalização | Mensagem preparada pela IA com dados reais, revisável e editável antes de ativar; contexto, data e modelo guardados |
 | Respostas | Classificação pela IA (interesse, reunião, dúvida, recusa, opt-out, ausência) com ações automáticas |
-| Tarefas | Atendimento humano: responder interessados, WhatsApp manual (sem opt-in), tarefas das cadências |
+| Tarefas | Atendimento humano: responder interessados, WhatsApp das cadências (link wa.me), tarefas das cadências |
+| Follow-ups | Próximo contato de cada lead no Dashboard (hoje e atrasados) e no filtro da tela Leads |
 | Listas e buscas salvas | Criar, editar, excluir; reexecução manual |
 | Opt-out | Lista de supressão bloqueia abordagem e link de WhatsApp |
 | Auditoria | Toda ação vira atividade; atividades são somente inserção |
@@ -82,7 +83,7 @@ Os componentes React nunca chamam IA nem providers diretamente: tudo passa por `
 
 ## Ligar as APIs reais (atalho)
 
-Com as contas criadas (Supabase, Claude, Google Places e, se quiser, Resend e Meta), rode na pasta do projeto:
+Com as contas criadas (Supabase, Claude, Google Places e, se quiser, Resend), rode na pasta do projeto:
 
 ```bash
 bash scripts/configurar-apis.sh
@@ -149,55 +150,53 @@ No modo `supabase` o app usa:
 
 ### Modo de teste (sem nenhuma conta)
 
-Com `VITE_DATA_MODE=mock`, a automação roda no navegador com envios simulados. Carregue a demonstração no Dashboard, abra **Campanhas → Agro e indústria — outubro**, clique em **Preparar mensagens**, revise e **Ativar**. Use o relógio simulado na barra lateral (**+1 dia**, **+7 dias**) para ver as esperas, a janela de envio, os follow-ups e a cadência concluindo. No perfil do lead, a caixa **Simular** (em Conversa) testa a classificação e as ações (pausar, tarefa, opt-out).
+Com `VITE_DATA_MODE=mock`, a automação roda no navegador com envios simulados. Carregue a demonstração no Dashboard, abra **Campanhas → Agro e indústria — outubro**, clique em **Preparar mensagens**, revise e **Ativar**. Use o relógio simulado na barra lateral (**+1 dia**, **+7 dias**) para ver as esperas, a janela de envio, os follow-ups e a cadência concluindo. No perfil do lead, **Registrar resposta** (em Mensagens e respostas) testa a classificação e as ações (pausar, tarefa, opt-out).
 
 ### Produção
 
-O navegador não envia nada. O envio, a leitura de status e as respostas acontecem no Supabase:
+**WhatsApp é sem API.** O sistema prepara a mensagem e abre o `wa.me`; quem envia é você, no seu WhatsApp, e depois clica em **Marcar como enviado**. Respostas de WhatsApp são registradas à mão no perfil do lead (**Registrar resposta**) e a IA classifica. Entregue/lido nunca são marcados, porque não dá para confirmar sem API.
+
+Os e-mails das cadências saem pelo servidor (Resend):
 
 | Peça | O que faz |
 | --- | --- |
 | `cadence-runner` | Executa as etapas vencidas (agendado a cada 5 min). Usa o mesmo planejador do modo de teste (`_shared/automation/planner.ts`) |
-| `whatsapp-webhook` | Recebe status (enviada, entregue, lida, falhou) e mensagens da Meta, com assinatura `X-Hub-Signature-256` |
 | `email-webhook` | Recebe eventos do Resend (entregue, devolvido, spam, resposta), com assinatura svix |
 | `_shared/automation/replies.ts` | Regras de reação às respostas, comuns ao app e ao servidor |
 
 Passo a passo:
 
 1. Aplique as migrations: `supabase db push` (inclui `…_automacao_enums.sql` e `…_automacao.sql`; nada é apagado — as etapas antigas viram Qualificado e Não interessado).
-2. **WhatsApp (Meta):** crie um app no Meta for Developers com o produto WhatsApp, um número na WhatsApp Business Platform e um token de usuário do sistema. Aprove templates de marketing/utilidade com **uma variável no corpo** (`{{1}}`) — é onde entra o texto personalizado. Informe o nome do template em cada etapa de WhatsApp da cadência.
-3. **E-mail (Resend):** verifique o domínio do remetente no Resend; o e-mail em Configurações → Envio precisa ser desse domínio. Para receber respostas, configure o recebimento (Inbound) do Resend no domínio usado no Reply-To.
-4. Secrets (nunca no frontend):
+2. **E-mail (Resend):** verifique o domínio do remetente no Resend; o e-mail em Configurações → Envio precisa ser desse domínio. Para receber respostas, configure o recebimento (Inbound) do Resend no domínio usado no Reply-To.
+3. Secrets (nunca no frontend):
 
    ```bash
-   supabase secrets set WHATSAPP_TOKEN=... WHATSAPP_PHONE_NUMBER_ID=... \
-     WHATSAPP_VERIFY_TOKEN=<texto que você escolhe> WHATSAPP_APP_SECRET=... \
-     RESEND_API_KEY=... RESEND_WEBHOOK_SECRET=whsec_... \
+   supabase secrets set RESEND_API_KEY=... RESEND_WEBHOOK_SECRET=whsec_... \
      CRON_SECRET=<texto aleatório longo>
-   # opcionais: WHATSAPP_TEMPLATE_LANG=pt_BR  EMAIL_FROM_FALLBACK=contato@seudominio.com.br
+   # opcional: EMAIL_FROM_FALLBACK=contato@seudominio.com.br
    ```
 
-5. Publique as funções (os webhooks e o runner usam a própria verificação, não o JWT do usuário):
+4. Publique as funções (os webhooks e o runner usam a própria verificação, não o JWT do usuário):
 
    ```bash
    supabase functions deploy ai
    supabase functions deploy cadence-runner --no-verify-jwt
-   supabase functions deploy whatsapp-webhook --no-verify-jwt
    supabase functions deploy email-webhook --no-verify-jwt
    ```
 
-6. Webhooks:
-   - Meta → WhatsApp → Configuração: URL `https://<PROJECT_REF>.supabase.co/functions/v1/whatsapp-webhook`, token de verificação = `WHATSAPP_VERIFY_TOKEN`, assine o campo `messages`.
+5. Webhook do e-mail:
    - Resend → Webhooks: URL `https://<PROJECT_REF>.supabase.co/functions/v1/email-webhook`, eventos `email.delivered`, `email.bounced`, `email.complained`, `email.opened`, `email.received`.
-7. Agende o runner: veja `supabase/cron_cadence_runner.example.sql` (pg_cron + pg_net, segredo no Vault).
+6. Agende o runner: veja `supabase/cron_cadence_runner.example.sql` (pg_cron + pg_net, segredo no Vault).
 
-Regras da Meta aplicadas pelo código: mensagem iniciada pela empresa só com template aprovado; texto livre apenas dentro de 24 h da última mensagem do contato (fora disso, o envio falha com o motivo registrado). Respostas automáticas de ausência não interrompem a cadência.
+Regras da automação: nunca envia duas vezes a mesma etapa; para os follow-ups quando o lead responde; cancela tudo quando o lead vira Cliente ou Não interessado, ou entra na lista de supressão. Respostas automáticas de ausência não interrompem a cadência.
+
+**API oficial do WhatsApp (desligada).** O código para a WhatsApp Business Platform (Meta) continua no projeto (`_shared/channels/metaWhatsapp.ts` e a função `whatsapp-webhook`), mas não é publicado nem usado. Só seria ativado com `WHATSAPP_AUTO=true`, as credenciais da Meta e opt-in de cada lead; as telas não mudam.
 
 ## Segurança e LGPD
 
 - Nenhuma chave secreta no frontend: só `VITE_SUPABASE_URL` e a anon key (pública).
 - RLS em todas as tabelas (`owner_id = auth.uid()`); `lead_activities` e `ai_runs` só aceitam leitura e inserção.
-- Sem scraping e sem automação de WhatsApp Web. Envio automático de WhatsApp só pela API oficial da Meta, só com template aprovado e só para leads com **opt-in registrado** (data e origem). Sem opt-in, a cadência cria uma tarefa com o link `wa.me` para envio manual.
+- Sem scraping, sem robôs e sem automação de WhatsApp Web. WhatsApp só por link `wa.me`, enviado manualmente pela pessoa.
 - Todo e-mail automático leva o rodapé "Para não receber mais mensagens, responda PARAR." e o cabeçalho `List-Unsubscribe`. Responder PARAR, pedir para sair ou marcar como spam põe o contato na lista de supressão e encerra as cadências.
 - Envios só dentro da janela configurada (padrão: dias úteis, 9h–18h, horário de Brasília).
 - `lead_sources.expires_at` existe para respeitar limites de cache de providers como o Google Places.
@@ -207,5 +206,5 @@ Regras da Meta aplicadas pelo código: mensagem iniciada pela empresa só com te
 - **MVP:** fluxo completo com mocks, Claude opcional via Edge Function.
 - **Fase 2 — núcleo:** Google Places, CNPJ via BrasilAPI, dados no Supabase, reexecução com só empresas novas.
 - **Fase 2 — restante:** exportação CSV, webhooks para n8n/CRM, análise do site da empresa, lembretes de follow-up.
-- **Fase 3 — automação (este código):** CRM, pipeline novo, campanhas, cadências visuais, WhatsApp oficial com opt-in, e-mail via Resend, classificação de respostas, tarefas, dashboard com leitura da IA.
+- **Fase 3 — automação (este código):** CRM, pipeline novo, campanhas, cadências visuais, WhatsApp por wa.me com envio manual, follow-ups, e-mail via Resend, classificação de respostas, tarefas, dashboard com leitura da IA.
 - **Próximas:** exportação CSV, integrações de CRM, equipes com permissões, planos e cobrança.

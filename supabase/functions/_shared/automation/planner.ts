@@ -13,6 +13,13 @@ export interface PlanContext {
   hasWhatsapp: boolean;
   hasWhatsappConsent: boolean;
   hasEmail: boolean;
+  /**
+   * Envio automático de WhatsApp por API. Desligado: toda etapa de WhatsApp vira tarefa com o link
+   * wa.me e a pessoa envia manualmente. Só liga com a API oficial configurada e opt-in do lead.
+   */
+  whatsappAuto?: boolean;
+  /** Lead em etapa encerrada (Cliente, Não interessado): a automação para. */
+  closed?: boolean;
   window: SendWindow;
 }
 
@@ -70,6 +77,7 @@ export function plan(cadence: Cadence, stepIndex: number, ctx: PlanContext): Pla
   const effects: Effect[] = [];
   let i = stepIndex;
   for (let guard = 0; guard < 100; guard++) {
+    if (ctx.closed) return { effects, stepIndex: i, status: 'interrompida', stopReason: 'Lead em etapa encerrada (cliente ou não interessado).' };
     if (ctx.suppressed) return { effects, stepIndex: i, status: 'interrompida', stopReason: 'Contato pediu para não receber mensagens (opt-out).' };
     if (cadence.stopOnReply && ctx.replied) return { effects, stepIndex: i, status: 'interrompida', stopReason: 'O lead respondeu.' };
     if (i >= cadence.steps.length) return { effects, stepIndex: i, status: 'concluida' };
@@ -86,7 +94,7 @@ export function plan(cadence: Cadence, stepIndex: number, ctx: PlanContext): Pla
       }
       if (step.channel === 'whatsapp') {
         if (!ctx.hasWhatsapp) effects.push({ kind: 'skipped', reason: 'Lead sem WhatsApp cadastrado.', stepIndex: i });
-        else if (!ctx.hasWhatsappConsent) effects.push({ kind: 'manual_whatsapp', step, stepIndex: i });
+        else if (!ctx.whatsappAuto || !ctx.hasWhatsappConsent) effects.push({ kind: 'manual_whatsapp', step, stepIndex: i });
         else effects.push({ kind: 'send', channel: 'whatsapp', step, stepIndex: i });
       } else if (!ctx.hasEmail) {
         effects.push({ kind: 'skipped', reason: 'Lead sem e-mail cadastrado.', stepIndex: i });

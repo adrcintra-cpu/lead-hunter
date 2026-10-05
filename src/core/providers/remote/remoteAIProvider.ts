@@ -14,13 +14,13 @@ export function createRemoteAIProvider(client: SupabaseClient): AIProvider {
   return {
     id: 'claude',
     model: 'claude (via Edge Function)',
-    promptVersion: 'v1',
+    promptVersion: 'v2',
     parseSearchQuery: (text) => call('parseSearchQuery', { text }),
     analyzeCompany: (company, icp) => call('analyzeCompany', { company, icp }),
     summarizeCompany: (company) => call('summarizeCompany', { company }),
     adjustScore: (company, ruleScore, icp) => call('adjustScore', { company, ruleScore, icp }),
     generateApproach: (company, channel, options) => call('generateApproach', { company, channel, options }),
-    classifyReply: (text) => call('classifyReply', { text }),
+    classifyReply: (text, context) => call('classifyReply', { text, context }),
     summarizeResults: (snapshot) => call('summarizeResults', { snapshot }),
   };
 }

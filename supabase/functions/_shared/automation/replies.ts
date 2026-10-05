@@ -1,7 +1,7 @@
 // Classificação de respostas por regras (fallback quando a IA não está disponível)
 // e preenchimento de templates com dados reais do lead.
 
-import type { ContextField, ReplyClass } from './types.ts';
+import { CATEGORY_TO_CLASS, REPLY_CATEGORIES, type ContextField, type ReplyAnalysis, type ReplyCategory, type ReplyClass } from './types.ts';
 
 const norm = (s: string) =>
   s
@@ -9,19 +9,84 @@ const norm = (s: string) =>
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase();
 
-const RULES: { cls: ReplyClass; re: RegExp; confidence: number }[] = [
-  { cls: 'opt_out', re: /\b(parar|pare|remov|descadastr|sair da lista|nao (me )?(mande|envie|mandem|enviem)|nao quero receber|stop|unsubscribe|lgpd)/, confidence: 0.9 },
-  { cls: 'ausente', re: /(ferias|fora do escritorio|ausente|out of office|retorno (no dia|em)|resposta automatica)/, confidence: 0.85 },
-  { cls: 'nao_interessado', re: /(nao (tenho|temos) interesse|sem interesse|nao (preciso|precisamos)|ja (temos|possuimos|usamos)|nao e (o )?momento|agradeco,? mas|obrigad[oa],? mas nao)/, confidence: 0.85 },
-  { cls: 'reuniao', re: /(reuniao|agendar|marcar|ligacao|me liga|pode ligar|call|horario|disponivel (amanha|segunda|terca|quarta|quinta|sexta)|semana que vem)/, confidence: 0.8 },
-  { cls: 'interessado', re: /(interess|quero saber|pode (me )?mandar|me (envie|manda)|gostaria|mais informac|como funciona|valores?|preco|orcamento|proposta)/, confidence: 0.75 },
+const RULES: { cat: ReplyCategory; re: RegExp; confidence: number }[] = [
+  { cat: 'sem_contato', re: /\b(parar|pare|remov|descadastr|sair da lista|nao (me )?(mande|envie|mandem|enviem|contate|procure)|nao quero (mais )?receber|nao (entre|entrem) (mais )?em contato|stop|unsubscribe|lgpd)/, confidence: 0.9 },
+  { cat: 'ausente', re: /(ferias|fora do escritorio|ausente ate|estou ausente|out of office|retorno (no dia|em)|resposta automatica)/, confidence: 0.85 },
+  { cat: 'posteriormente', re: /(mais (pra|para) frente|outro momento|proximo (mes|ano|semestre)|depois d[oa]s? |me (procure|chame|procura|chama) (em|no|na|daqui|depois|mais)|retorne (em|no|na|daqui|depois)|daqui a? ?(uns|alguns)? ?\d* ?(dias|semanas|meses)|agora nao|nao e (o )?momento|no momento nao|fim do ano|ano que vem)/, confidence: 0.75 },
+  { cat: 'nao_interessado', re: /(nao (tenho|temos) interesse|sem interesse|nao (preciso|precisamos)|nao nos interessa|agradeco,? mas|obrigad[oa],? mas nao|dispenso|nao quero\b)/, confidence: 0.85 },
+  { cat: 'reuniao', re: /(reuniao|agendar|marcar (uma )?(conversa|call|horario)|ligacao|me liga|pode (me )?ligar|\bcall\b|horario|disponivel (amanha|segunda|terca|quarta|quinta|sexta)|semana que vem)/, confidence: 0.8 },
+  { cat: 'orcamento', re: /(orcamento|cotacao|quanto custa|qual (o )?(valor|preco)|valores|precos?\b|tabela de preco|proposta comercial|manda (uma )?proposta)/, confidence: 0.8 },
+  { cat: 'objecao', re: /(muito caro|caro demais|ja (temos|possuimos|usamos|trabalhamos com)|sem (verba|budget|orcamento)|nao temos (verba|budget)|fornecedor|contrato (vigente|com))/, confidence: 0.7 },
+  { cat: 'informacoes', re: /(mais informac|como funciona|me (envie|manda|mande|passa) (mais )?(detalhes|material|informac|apresentacao|catalogo)|pode (me )?(enviar|mandar|explicar)|quero saber|gostaria de saber|catalogo|portfolio)/, confidence: 0.75 },
+  { cat: 'interessado', re: /(interess|gostei|quero|pode ser|vamos conversar|faz sentido|\bbora\b|\btop\b|legal,? (vamos|pode))/, confidence: 0.7 },
 ];
 
-export function classifyReplyRules(text: string): { classification: ReplyClass; confidence: number; summary: string } {
+/** Próxima ação sugerida para cada categoria (usada pelas regras e quando a IA não sugere). */
+export const DEFAULT_ACTION: Record<ReplyCategory, string> = {
+  interessado: 'Responder pessoalmente e propor uma conversa.',
+  informacoes: 'Enviar as informações pedidas (apresentação ou material).',
+  orcamento: 'Preparar e enviar o orçamento.',
+  reuniao: 'Responder com 2 ou 3 horários para a reunião.',
+  objecao: 'Responder à objeção com um argumento ou caso de uso, sem insistir.',
+  posteriormente: 'Retomar o contato na data combinada.',
+  nao_interessado: 'Agradecer e encerrar a prospecção.',
+  sem_contato: 'Não entrar mais em contato.',
+  nao_identificado: 'Ler a resposta e decidir o próximo passo.',
+  ausente: 'Aguardar o retorno da pessoa; a cadência continua.',
+};
+
+/** Prazo de retorno quando a pessoa pede para falar depois (dias). */
+export function followUpDaysFrom(text: string): number | undefined {
   const t = norm(text);
-  for (const r of RULES) if (r.re.test(t)) return { classification: r.cls, confidence: r.confidence, summary: summarize(text) };
-  if (t.includes('?')) return { classification: 'duvida', confidence: 0.6, summary: summarize(text) };
-  return { classification: 'outro', confidence: 0.4, summary: summarize(text) };
+  const m = /(\d+)\s*(dias|semanas|meses)/.exec(t);
+  if (m) return Number(m[1]) * (m[2] === 'dias' ? 1 : m[2] === 'semanas' ? 7 : 30);
+  if (/proxima semana|semana que vem/.test(t)) return 7;
+  if (/proximo mes|mes que vem/.test(t)) return 30;
+  if (/proximo semestre/.test(t)) return 180;
+  if (/ano que vem|proximo ano/.test(t)) return 90;
+  return undefined;
+}
+
+/** Análise por regras (modo de teste e reserva quando a IA não responde). */
+export function analyzeReplyRules(text: string): ReplyAnalysis {
+  const t = norm(text);
+  const hit = RULES.find((r) => r.re.test(t));
+  const category: ReplyCategory = hit ? hit.cat : t.includes('?') ? 'informacoes' : 'nao_identificado';
+  const confidence = hit ? hit.confidence : t.includes('?') ? 0.55 : 0.4;
+  return {
+    category,
+    classification: CATEGORY_TO_CLASS[category],
+    confidence,
+    summary: summarize(text),
+    suggestedAction: DEFAULT_ACTION[category],
+    followUpDays: category === 'posteriormente' ? followUpDaysFrom(text) ?? 30 : undefined,
+  };
+}
+
+/** Compatibilidade: devolve só a classificação antiga. */
+export function classifyReplyRules(text: string): { classification: ReplyClass; confidence: number; summary: string } {
+  const a = analyzeReplyRules(text);
+  return { classification: a.classification, confidence: a.confidence, summary: a.summary };
+}
+
+/** Normaliza a saída da IA (inclusive de uma versão antiga da função, que só devolvia a classificação). */
+export function normalizeAnalysis(raw: Partial<ReplyAnalysis> & { classification?: ReplyClass }, text: string): ReplyAnalysis {
+  const fallback = analyzeReplyRules(text);
+  let category = raw.category && REPLY_CATEGORIES.includes(raw.category) ? raw.category : undefined;
+  if (!category && raw.classification) {
+    const fromOld: Record<ReplyClass, ReplyCategory> = { interessado: 'interessado', reuniao: 'reuniao', duvida: 'informacoes', nao_interessado: 'nao_interessado', opt_out: 'sem_contato', ausente: 'ausente', outro: 'nao_identificado' };
+    category = fromOld[raw.classification];
+  }
+  category ??= fallback.category;
+  const days = Number(raw.followUpDays);
+  return {
+    category,
+    classification: CATEGORY_TO_CLASS[category],
+    confidence: typeof raw.confidence === 'number' ? Math.max(0, Math.min(1, raw.confidence)) : fallback.confidence,
+    summary: raw.summary?.trim() || fallback.summary,
+    suggestedAction: raw.suggestedAction?.trim() || DEFAULT_ACTION[category],
+    followUpDays: category === 'posteriormente' ? (days > 0 ? Math.round(days) : fallback.followUpDays ?? 30) : undefined,
+  };
 }
 
 function summarize(text: string): string {
@@ -112,21 +177,40 @@ export interface ReplyDecision {
 /** Etapas que uma resposta não faz retroceder (exceto recusa/opt-out). */
 export const ADVANCED_STAGES = ['cliente', 'proposta', 'reuniao'];
 
-export function replyDecision(cls: ReplyClass, companyName: string): ReplyDecision {
-  switch (cls) {
+/**
+ * O que fazer quando o lead responde, por categoria. Aceita também a classificação antiga
+ * (respostas registradas antes desta versão).
+ */
+export function replyDecision(cat: ReplyCategory | ReplyClass, companyName: string): ReplyDecision {
+  const c: ReplyCategory = cat === 'duvida' ? 'informacoes' : cat === 'opt_out' ? 'sem_contato' : cat === 'outro' ? 'nao_identificado' : (cat as ReplyCategory);
+  const pause = (reason: string, to: 'interessado' | 'respondeu', title?: string, description?: string): ReplyDecision => ({
+    enrollments: 'pause',
+    reason,
+    stage: { to, force: false },
+    task: title ? { title, description } : undefined,
+    suppress: false,
+  });
+  switch (c) {
     case 'ausente':
       return { enrollments: 'none', suppress: false }; // resposta automática: a cadência segue
-    case 'opt_out':
+    case 'sem_contato':
       return { enrollments: 'stop', reason: 'pediu para não receber mensagens (opt-out)', stage: { to: 'nao_interessado', force: true }, suppress: true };
     case 'nao_interessado':
       return { enrollments: 'stop', reason: 'lead não tem interesse', stage: { to: 'nao_interessado', force: true }, suppress: false };
     case 'interessado':
-      return { enrollments: 'pause', reason: 'lead respondeu com interesse', stage: { to: 'interessado', force: false }, task: { title: `Responder ${companyName} — interessado`, description: 'A IA classificou a resposta como interesse. Responda pessoalmente.' }, suppress: false };
+      return pause('lead respondeu com interesse', 'interessado', `Responder ${companyName} — interessado`, 'A IA classificou a resposta como interesse. Responda pessoalmente.');
+    case 'informacoes':
+      return pause('lead pediu informações', 'interessado', `Enviar informações para ${companyName}`, 'O lead pediu mais informações.');
+    case 'orcamento':
+      return pause('lead pediu orçamento', 'interessado', `Enviar orçamento para ${companyName}`, 'O lead pediu valores ou orçamento.');
     case 'reuniao':
-      return { enrollments: 'pause', reason: 'lead pediu reunião', stage: { to: 'interessado', force: false }, task: { title: `Agendar reunião com ${companyName}`, description: 'O lead pediu reunião ou ligação.' }, suppress: false };
-    case 'duvida':
-      return { enrollments: 'pause', reason: 'lead respondeu com uma dúvida', stage: { to: 'respondeu', force: false }, task: { title: `Responder dúvida de ${companyName}` }, suppress: false };
+      return pause('lead pediu reunião', 'interessado', `Agendar reunião com ${companyName}`, 'O lead pediu reunião ou ligação.');
+    case 'objecao':
+      return pause('lead apresentou uma objeção', 'respondeu', `Tratar objeção de ${companyName}`);
+    case 'posteriormente':
+      // Sem tarefa: o próximo contato fica agendado na data combinada.
+      return pause('lead pediu para falar depois', 'respondeu');
     default:
-      return { enrollments: 'pause', reason: 'lead respondeu', stage: { to: 'respondeu', force: false }, task: { title: `Ler resposta de ${companyName}`, description: 'A IA não conseguiu classificar com segurança.' }, suppress: false };
+      return pause('lead respondeu', 'respondeu', `Ler resposta de ${companyName}`, 'A IA não conseguiu classificar com segurança.');
   }
 }

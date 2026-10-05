@@ -3,7 +3,7 @@ import { ADVANCED_STAGES, messageStage, parseSubject, renderTemplate, replyDecis
 import {
   CLOSED_STAGES,
   DEFAULT_SEND_WINDOW,
-  REPLY_LABEL,
+  REPLY_CATEGORY_LABEL,
   type Cadence,
   type CadenceStep,
   type Campaign,
@@ -15,13 +15,14 @@ import {
   type LeadStage,
   type Message,
   type MessageDraft,
-  type ReplyClass,
+  type ReplyAnalysis,
   type SendChannel,
   type Task,
 } from '@/core/types';
 import type { ResultsSnapshot } from '@/core/providers/types';
 import { digits, normalize, uid } from '@/core/utils';
 import { leadContext, type LeadHunterService } from '../leadHunterService';
+import { WhatsAppService } from '../whatsapp/whatsAppService';
 
 type SendStep = Extract<CadenceStep, { type: 'send' }>;
 
@@ -139,7 +140,7 @@ export class AutomationService {
     for (let i = 0; i < leads.length; i += 4) {
       await Promise.all(
         leads.slice(i, i + 4).map(async (lead) => {
-          const draft = first ? await this.compose(lead, cad, firstIdx) : undefined;
+          const draft = first ? await this.compose(lead, cad, firstIdx, camp.name) : undefined;
           const at = this.nowIso();
           this.repo.insert('enrollments', {
             id: uid('enr'),
@@ -248,7 +249,7 @@ export class AutomationService {
   }
 
   /** Escreve a mensagem de uma etapa: pela IA (com dados reais) ou pelo template. */
-  async compose(lead: Lead, cad: Cadence, stepIndex: number): Promise<MessageDraft> {
+  async compose(lead: Lead, cad: Cadence, stepIndex: number, campaignName?: string): Promise<MessageDraft> {
     const step = cad.steps[stepIndex] as SendStep;
     const c = this.companyOf(lead)!;
     const stage = messageStage(cad.steps, stepIndex);
@@ -270,6 +271,9 @@ export class AutomationService {
       contactRole: lead.contactRole,
       stage,
       instructions: step.template || undefined,
+      // Histórico do lead: o follow-up continua a conversa em vez de repetir a primeira mensagem.
+      ...this.svc.conversationContext(lead.id),
+      campaignName,
     });
     const parsed = parseSubject(raw);
     const subject = parsed.subject;
@@ -307,6 +311,9 @@ export class AutomationService {
       suppressed: !!this.svc.suppressionFor(c, lead),
       hasWhatsapp: !!c.whatsapp,
       hasWhatsappConsent: !!lead.whatsappConsentAt,
+      // WhatsApp sem API: a cadência nunca envia sozinha, cria tarefa com o link wa.me.
+      whatsappAuto: false,
+      closed: CLOSED_STAGES.includes(lead.stage),
       hasEmail: !!lead.email,
       window: this.svc.profile.sendWindow ?? DEFAULT_SEND_WINDOW,
     };
@@ -388,7 +395,7 @@ export class AutomationService {
     }
     // send ou manual_whatsapp: compõe a mensagem
     const firstSend = cad.steps.findIndex((s) => s.type === 'send');
-    const draft = eff.stepIndex === firstSend && e.draft && e.draft.channel === eff.step.channel ? e.draft : await this.compose(lead, cad, eff.stepIndex);
+    const draft = eff.stepIndex === firstSend && e.draft && e.draft.channel === eff.step.channel ? e.draft : await this.compose(lead, cad, eff.stepIndex, camp?.name);
     const at = this.nowIso();
     const p = this.svc.profile;
     const channel: SendChannel = eff.step.channel;
@@ -414,7 +421,7 @@ export class AutomationService {
     };
 
     if (eff.kind === 'manual_whatsapp') {
-      const link = this.svc.providers.whatsapp.buildLink(c.whatsapp!, draft.body);
+      const link = WhatsAppService.generateWhatsAppUrl(c.whatsapp!, draft.body);
       this.repo.batch(() => {
         this.repo.insert('messages', { ...msg, status: 'draft', template: `${draft.template} (envio manual)` });
         this.createTask({
@@ -497,7 +504,7 @@ export class AutomationService {
     if (!lead || !c) throw new Error('Lead não encontrado.');
     const text = body.trim();
     if (!text) throw new Error('A resposta está vazia.');
-    const cls = await this.svc.ai.classifyReply(text);
+    const cls = await this.svc.ai.classifyReply(text, `Empresa ${c.tradeName ?? c.legalName}, etapa atual: ${lead.stage}`);
     const name = c.tradeName ?? c.legalName;
     const active = this.db.enrollments.filter((e) => e.leadId === leadId && (e.status === 'ativa' || e.status === 'pausada'));
     const enr = active[0];
@@ -518,19 +525,44 @@ export class AutomationService {
     const camp = enr && this.db.campaigns.find((x) => x.id === enr.campaignId);
     this.repo.batch(() => {
       this.repo.insert('inbound', inbound);
-      const last = this.db.messages.filter((m) => m.leadId === leadId && m.channel === channel && m.sentAt).sort((a, b) => (b.sentAt! > a.sentAt! ? 1 : -1))[0];
+      const contacted = (m: Message) => m.sentAt ?? (m.status === 'opened_whatsapp' ? m.updatedAt : undefined);
+      const last = this.db.messages
+        .filter((m) => m.leadId === leadId && m.channel === channel && contacted(m))
+        .sort((a, b) => contacted(b)!.localeCompare(contacted(a)!))[0];
       if (last) this.repo.update('messages', last.id, { status: 'replied', repliedAt: at });
-      this.repo.update('leads', leadId, { lastContactAt: at });
-      this.svc.log(leadId, 'reply_received', `Lead respondeu por ${channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'}`, { inboundId: inbound.id });
-      this.svc.log(leadId, 'reply_classified', `IA classificou como “${REPLY_LABEL[cls.classification]}”`, { classification: cls.classification, confidence: cls.confidence });
-      this.actOnReply(cls.classification, lead, c, name, active, camp?.ownerName, camp?.id, channel);
+      this.repo.update('leads', leadId, { lastContactAt: at, ...this.nextStepFrom(cls) });
+      this.svc.log(leadId, 'reply_received', `Resposta registrada (${channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'})`, { inboundId: inbound.id, user: this.svc.profile.email });
+      this.svc.log(leadId, 'reply_classified', `IA classificou como “${REPLY_CATEGORY_LABEL[cls.category]}”`, {
+        inboundId: inbound.id,
+        category: cls.category,
+        classification: cls.classification,
+        confidence: cls.confidence,
+        summary: cls.summary,
+        suggestedAction: cls.suggestedAction,
+      });
+      this.actOnReply(cls, lead, c, name, active, camp?.ownerName, camp?.id, channel);
     });
     await this.svc.rescore(leadId);
     return inbound;
   }
 
-  private actOnReply(cls: ReplyClass, lead: Lead, c: Company, name: string, active: Enrollment[], owner?: string, campaignId?: string, channel?: SendChannel) {
-    const d = replyDecision(cls, name);
+  /** Próxima ação sugerida pela IA vira a "próxima ação" do lead; "falar depois" agenda a data. */
+  private nextStepFrom(a: ReplyAnalysis): Partial<Lead> {
+    if (a.category === 'ausente') return {};
+    if (a.category === 'sem_contato' || a.category === 'nao_interessado') return { nextAction: a.suggestedAction, nextActionAt: undefined };
+    const at = a.category === 'posteriormente' ? new Date(this.svc.now().getTime() + (a.followUpDays ?? 30) * 864e5).toISOString() : this.nowIso();
+    return { nextAction: a.suggestedAction, nextActionAt: at };
+  }
+
+  /** Para a automação do lead (ex.: virou cliente ou não interessado). */
+  cancelForLead(leadId: string, reason: string) {
+    this.db.enrollments
+      .filter((e) => e.leadId === leadId && (e.status === 'ativa' || e.status === 'pausada' || e.status === 'pendente'))
+      .forEach((e) => this.setEnrollment(e, 'interrompida', reason));
+  }
+
+  private actOnReply(cls: ReplyAnalysis, lead: Lead, c: Company, name: string, active: Enrollment[], owner?: string, campaignId?: string, channel?: SendChannel) {
+    const d = replyDecision(cls.category, name);
     const today = this.svc.now();
     if (d.suppress) {
       const values: [('phone' | 'email'), string][] = [];

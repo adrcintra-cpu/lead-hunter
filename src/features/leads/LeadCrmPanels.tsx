@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Bot, CheckCircle2, Mail, MessageCircle, Pause, Play, ShieldCheck, Square, UserRound } from 'lucide-react';
+import { Bot, CalendarClock, Check, CheckCircle2, ExternalLink, Mail, MessageCircle, Pause, Play, ShieldCheck, Square, UserRound } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import type { LeadRow } from '@/store/selectors';
-import { MESSAGE_STATUS_LABEL, REPLY_LABEL, type ActivityType, type Message } from '@/core/types';
+import { MESSAGE_STATUS_LABEL, REPLY_CATEGORY_LABEL, REPLY_LABEL, type ActivityType, type Channel, type InboundMessage, type Message, type ReplyCategory } from '@/core/types';
 import { describeStep } from '../../../supabase/functions/_shared/automation/planner.ts';
 import { ENROLLMENT_STATUS_LABEL } from '@/services/automation/automationService';
 import { formatDateTime } from '@/core/utils';
@@ -107,7 +107,7 @@ export function CrmPanel({ row }: { row: LeadRow }) {
             }}
           >
             <div className="min-w-[200px] flex-1">
-              <label htmlFor="consent" className="label">Sem opt-in de WhatsApp: a automação só cria tarefas para envio manual</label>
+              <label htmlFor="consent" className="label">Consentimento para WhatsApp (LGPD): como o contato autorizou? O envio é sempre manual, pelo wa.me</label>
               <input id="consent" className="input" value={consent} placeholder="Como o contato autorizou? Ex.: formulário do site" onChange={(e) => setConsent(e.target.value)} />
             </div>
             <button type="submit" className="btn-outline" disabled={!consent.trim()}>Registrar opt-in</button>
@@ -194,30 +194,94 @@ const STATUS_TONE: Partial<Record<Message['status'], string>> = {
   draft: 'bg-warn-soft text-warn',
 };
 
-/** Mensagens enviadas (com status de entrega) e respostas recebidas, em ordem. */
+const FOLLOW_UP_DAYS = [1, 3, 5, 7, 14, 30];
+
+/** Próximo contato: 1, 3, 5, 7, 14, 30 dias ou data personalizada. Usa a "próxima ação" do lead. */
+export function FollowUpPicker({ leadId, channel }: { leadId: string; channel?: Channel }) {
+  const db = useDb();
+  const service = useService();
+  const { toast } = useApp();
+  const lead = db.leads.find((l) => l.id === leadId);
+  const [custom, setCustom] = useState('');
+  if (!lead) return null;
+  const schedule = (d: Date) => {
+    service.scheduleFollowUp(leadId, d, channel);
+    toast(`Próximo contato agendado para ${d.toLocaleDateString('pt-BR')}.`, 'success');
+  };
+  const inDays = (n: number) => {
+    const d = new Date(service.now().getTime() + n * 864e5);
+    d.setHours(9, 0, 0, 0);
+    return d;
+  };
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-subtle p-3">
+      <div className="flex items-center gap-1.5 text-[13px] font-bold">
+        <CalendarClock className="h-4 w-4" /> Próximo contato
+        {lead.nextActionAt && <span className="font-normal text-ink-faint">· agendado para {formatDateTime(lead.nextActionAt)}</span>}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {FOLLOW_UP_DAYS.map((n) => (
+          <button key={n} type="button" className="btn-outline min-h-[32px] px-2.5 text-xs" onClick={() => schedule(inDays(n))}>
+            {n === 1 ? '1 dia' : `${n} dias`}
+          </button>
+        ))}
+        <form
+          className="flex items-center gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (custom) schedule(new Date(`${custom}T09:00:00`));
+            setCustom('');
+          }}
+        >
+          <label htmlFor={`fu-${leadId}`} className="sr-only">Data personalizada</label>
+          <input id={`fu-${leadId}`} type="date" className="input min-h-[32px] w-auto py-0 text-xs" value={custom} onChange={(e) => setCustom(e.target.value)} />
+          <button type="submit" className="btn-outline min-h-[32px] px-2.5 text-xs" disabled={!custom}>Agendar</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+const SHOW_MANUAL: Message['status'][] = ['opened_whatsapp', 'sent', 'delivered', 'read', 'replied', 'failed'];
+
+/** Mensagens (automáticas e enviadas à mão) e respostas recebidas, em ordem. */
 export function ConversationPanel({ row }: { row: LeadRow }) {
   const { lead, company } = row;
   const db = useDb();
   const service = useService();
   const { toast } = useApp();
-  const [sim, setSim] = useState('');
-  const [simChannel, setSimChannel] = useState<'whatsapp' | 'email'>('whatsapp');
+  const [reply, setReply] = useState('');
+  const [replyChannel, setReplyChannel] = useState<'whatsapp' | 'email'>(company.whatsapp ? 'whatsapp' : 'email');
   const [busy, setBusy] = useState(false);
   const items = useMemo(() => {
     const out = db.messages
-      .filter((m) => m.leadId === lead.id && m.campaignId)
-      .map((m) => ({ kind: 'out' as const, at: m.sentAt ?? m.createdAt, m }));
+      .filter((m) => m.leadId === lead.id && (m.campaignId || SHOW_MANUAL.includes(m.status)))
+      .map((m) => ({ kind: 'out' as const, at: m.sentAt ?? m.updatedAt ?? m.createdAt, m }));
     const ins = db.inbound.filter((r) => r.leadId === lead.id).map((r) => ({ kind: 'in' as const, at: r.receivedAt, r }));
     return [...out, ...ins].sort((a, b) => a.at.localeCompare(b.at));
   }, [db.messages, db.inbound, lead.id]);
+  // Categoria detalhada e próxima ação ficam no histórico (reply_classified).
+  const analysis = useMemo(() => {
+    const map = new Map<string, { category?: ReplyCategory; suggestedAction?: string }>();
+    for (const a of db.activities) {
+      if (a.leadId === lead.id && a.type === 'reply_classified' && typeof a.payload.inboundId === 'string') {
+        map.set(a.payload.inboundId, { category: a.payload.category as ReplyCategory | undefined, suggestedAction: a.payload.suggestedAction as string | undefined });
+      }
+    }
+    return map;
+  }, [db.activities, lead.id]);
+  const categoryOf = (r: InboundMessage) => {
+    const c = analysis.get(r.id)?.category;
+    return c ? REPLY_CATEGORY_LABEL[c] : r.classification ? REPLY_LABEL[r.classification] : undefined;
+  };
 
-  async function simulate(e: FormEvent) {
+  async function register(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
-      const r = await service.automation.receiveReply(lead.id, simChannel, sim);
-      toast(`Resposta classificada como “${REPLY_LABEL[r.classification!]}”.`, 'success');
-      setSim('');
+      const r = await service.automation.receiveReply(lead.id, replyChannel, reply);
+      toast(`Resposta analisada: “${categoryOf(r) ?? 'registrada'}”.`, 'success');
+      setReply('');
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Falha ao registrar a resposta.', 'error');
     } finally {
@@ -225,64 +289,101 @@ export function ConversationPanel({ row }: { row: LeadRow }) {
     }
   }
 
+  const statusLabel = (m: Message) =>
+    m.status === 'draft' ? 'Aguardando envio manual' : m.status === 'sent' && m.provider === 'manual' ? 'Enviado manualmente' : MESSAGE_STATUS_LABEL[m.status];
+
   return (
     <section>
       <h3 className="mb-2 text-sm font-extrabold">Mensagens e respostas</h3>
-      {items.length === 0 && <p className="text-[13px] text-ink-faint">Nenhuma mensagem automática enviada ainda.</p>}
+      {items.length === 0 && <p className="text-[13px] text-ink-faint">Nenhuma mensagem enviada ainda.</p>}
       <ul className="flex flex-col gap-2">
-        {items.map((it) =>
-          it.kind === 'out' ? (
-            <li key={it.m.id} className="rounded-lg border border-line p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="flex items-center gap-1.5 font-bold">
-                  {it.m.channel === 'whatsapp' ? <MessageCircle className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
-                  {it.m.channel === 'whatsapp' ? 'WhatsApp' : 'E-mail'} · {formatDateTime(it.at)}
-                </span>
-                <span className={cx('rounded px-1.5 py-0.5 font-bold', STATUS_TONE[it.m.status] ?? 'bg-muted')}>
-                  {it.m.status === 'draft' ? 'Aguardando envio manual' : MESSAGE_STATUS_LABEL[it.m.status]}
-                </span>
-              </div>
-              {it.m.subject && <div className="mt-1.5 text-[13px] font-semibold">{it.m.subject}</div>}
-              <p className="mt-1 whitespace-pre-line text-[13px] leading-relaxed text-ink-soft">{it.m.finalContent}</p>
-              <div className="mt-1.5 text-[11px] text-ink-faint">
-                {it.m.template}
-                {it.m.context?.length ? ` · contexto: ${it.m.context.map((c) => c.label).join(', ')}` : ''}
-                {it.m.failureReason && <span className="text-bad"> · {it.m.failureReason}</span>}
-              </div>
-            </li>
-          ) : (
-            <li key={it.r.id} className="ml-6 rounded-lg border border-accent/40 bg-accent-soft p-3">
+        {items.map((it) => {
+          if (it.kind === 'out') {
+            const m = it.m;
+            const pending = m.channel === 'whatsapp' && (m.status === 'draft' || m.status === 'opened_whatsapp');
+            const link = pending ? service.whatsapp.linkFor(m.id) : null;
+            return (
+              <li key={m.id} className="rounded-lg border border-line p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="flex items-center gap-1.5 font-bold">
+                    {m.channel === 'whatsapp' ? <MessageCircle className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
+                    {m.channel === 'whatsapp' ? 'WhatsApp' : m.channel === 'email' ? 'E-mail' : 'LinkedIn'} · {formatDateTime(it.at)}
+                  </span>
+                  <span className={cx('rounded px-1.5 py-0.5 font-bold', STATUS_TONE[m.status] ?? 'bg-muted')}>{statusLabel(m)}</span>
+                </div>
+                {m.subject && <div className="mt-1.5 text-[13px] font-semibold">{m.subject}</div>}
+                <p className="mt-1 whitespace-pre-line text-[13px] leading-relaxed text-ink-soft">{m.finalContent}</p>
+                <div className="mt-1.5 text-[11px] text-ink-faint">
+                  {m.template}
+                  {m.context?.length ? ` · contexto: ${m.context.map((c) => c.label).join(', ')}` : ''}
+                  {m.failureReason && <span className="text-bad"> · {m.failureReason}</span>}
+                </div>
+                {pending && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {link && (
+                      <a href={link} target="_blank" rel="noopener noreferrer" className="btn-outline min-h-[32px] px-2.5 text-xs" onClick={() => service.markWhatsappOpened(m.id)}>
+                        <ExternalLink className="h-3.5 w-3.5" /> Abrir WhatsApp
+                      </a>
+                    )}
+                    <button type="button" className="btn-primary min-h-[32px] px-2.5 text-xs" onClick={() => { service.markSent(m.id); toast('Marcado como enviado.', 'success'); }}>
+                      <Check className="h-3.5 w-3.5" /> Marcar como enviado
+                    </button>
+                  </div>
+                )}
+              </li>
+            );
+          }
+          const r = it.r;
+          const extra = analysis.get(r.id);
+          return (
+            <li key={r.id} className="ml-6 rounded-lg border border-accent/40 bg-accent-soft p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <span className="flex items-center gap-1.5 font-bold text-accent-strong">
-                  <UserRound className="h-3.5 w-3.5" /> Resposta · {formatDateTime(it.at)}
+                  <UserRound className="h-3.5 w-3.5" /> Resposta · {r.channel === 'whatsapp' ? 'WhatsApp' : 'E-mail'} · {formatDateTime(it.at)}
                 </span>
-                {it.r.classification && (
+                {categoryOf(r) && (
                   <span className="flex items-center gap-1 rounded bg-ai-soft px-1.5 py-0.5 font-bold text-ai">
-                    <Bot className="h-3 w-3" /> {REPLY_LABEL[it.r.classification]}
+                    <Bot className="h-3 w-3" /> {categoryOf(r)}
                   </span>
                 )}
               </div>
-              <p className="mt-1 whitespace-pre-line text-[13px]">{it.r.body}</p>
+              <p className="mt-1 whitespace-pre-line text-[13px]">{r.body}</p>
+              {(r.summary || extra?.suggestedAction) && (
+                <dl className="mt-2 grid gap-1 border-t border-accent/30 pt-2 text-[12.5px]">
+                  {r.summary && (
+                    <div><dt className="inline font-bold">Resumo: </dt><dd className="inline text-ink-soft">{r.summary}</dd></div>
+                  )}
+                  {extra?.suggestedAction && (
+                    <div><dt className="inline font-bold">Próxima ação sugerida: </dt><dd className="inline text-ink-soft">{extra.suggestedAction}</dd></div>
+                  )}
+                </dl>
+              )}
             </li>
-          ),
-        )}
+          );
+        })}
       </ul>
-      {service.automation.runsLocally && (
-        <form onSubmit={simulate} className="mt-3 rounded-lg border border-dashed border-line-strong p-3">
-          <label htmlFor="sim" className="label">Modo de teste: simular uma resposta deste lead</label>
-          <div className="flex flex-wrap gap-2">
-            <select aria-label="Canal da resposta" className="input w-auto" value={simChannel} onChange={(e) => setSimChannel(e.target.value as 'whatsapp' | 'email')}>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="email">E-mail</option>
-            </select>
-            <input id="sim" className="input min-w-[200px] flex-1" value={sim} placeholder="Ex.: Tenho interesse, pode me mandar valores?" onChange={(e) => setSim(e.target.value)} />
-            <button type="submit" className="btn-outline" disabled={busy || !sim.trim() || (simChannel === 'whatsapp' && !company.whatsapp)}>
-              {busy && <Spinner />} Simular
-            </button>
-          </div>
-          <p className="mt-1.5 text-xs text-ink-faint">No modo real, as respostas chegam pelos webhooks do WhatsApp e do e-mail.</p>
-        </form>
-      )}
+      <form onSubmit={register} className="mt-3 rounded-lg border border-dashed border-line-strong p-3">
+        <div className="text-[13px] font-bold">Registrar resposta</div>
+        <p className="mt-0.5 text-xs text-ink-faint">Cole aqui o que o lead respondeu no WhatsApp ou no e-mail. A IA classifica, resume e sugere a próxima ação.</p>
+        <label htmlFor={`reply-${lead.id}`} className="label mt-2">Resposta recebida</label>
+        <textarea
+          id={`reply-${lead.id}`}
+          rows={3}
+          className="input min-h-[72px] resize-y py-2"
+          value={reply}
+          placeholder="Ex.: Tenho interesse, pode me mandar um orçamento?"
+          onChange={(e) => setReply(e.target.value)}
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          <select aria-label="Canal da resposta" className="input w-auto" value={replyChannel} onChange={(e) => setReplyChannel(e.target.value as 'whatsapp' | 'email')}>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="email">E-mail</option>
+          </select>
+          <button type="submit" className="btn-primary" disabled={busy || !reply.trim()}>
+            {busy ? <Spinner /> : <Bot className="h-4 w-4" />} Analisar com IA
+          </button>
+        </div>
+      </form>
     </section>
   );
 }

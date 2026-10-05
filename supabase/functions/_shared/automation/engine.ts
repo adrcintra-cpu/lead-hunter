@@ -5,11 +5,11 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { PROMPT_VERSION } from '../ai/prompts.ts';
 import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
-import { sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
+import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { sendEmail } from '../channels/resend.ts';
 import { plan, type Effect, type PlanContext } from './planner.ts';
-import { ADVANCED_STAGES, classifyReplyRules, messageStage, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
-import { DEFAULT_SEND_WINDOW, REPLY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyClass, type SendChannel, type SendWindow } from './types.ts';
+import { ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
+import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
 // deno-lint-ignore no-explicit-any
 export type Db = any;
@@ -115,7 +115,22 @@ function templateData(lead: Row, c: Row, p: Row): TemplateData {
 }
 
 /** Mesmo comportamento de AutomationService.compose no app. */
-async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: Cadence, stepIndex: number): Promise<MessageDraft> {
+/** Mensagens já enviadas e notas do lead: o follow-up continua a conversa em vez de repetir. */
+async function conversationContext(db: Db, lead: Row) {
+  const [{ data: msgs }, { data: notes }] = await Promise.all([
+    db.from('messages').select('channel, final_content, sent_at').eq('lead_id', lead.id).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(4),
+    db.from('lead_notes').select('body').eq('lead_id', lead.id).order('created_at', { ascending: false }).limit(3),
+  ]);
+  const history = ((msgs ?? []) as Row[]).reverse().map((m) => ({
+    channel: m.channel === 'whatsapp' ? 'WhatsApp' : m.channel === 'email' ? 'E-mail' : 'LinkedIn',
+    date: new Date(m.sent_at).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+    text: String(m.final_content).slice(0, 600),
+  }));
+  const days = lead.last_contact_at ? Math.max(0, Math.floor((Date.now() - new Date(lead.last_contact_at).getTime()) / 864e5)) : undefined;
+  return { history, daysSinceLastContact: days, notes: ((notes ?? []) as Row[]).map((n) => String(n.body)) };
+}
+
+async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: Cadence, stepIndex: number, campaignName?: string): Promise<MessageDraft> {
   const step = cad.steps[stepIndex] as Extract<CadenceStep, { type: 'send' }>;
   const stage = messageStage(cad.steps, stepIndex);
   const at = new Date().toISOString();
@@ -140,7 +155,18 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
     const run = await runTask<string>('generateApproach', {
       company: companyForAI(c),
       channel: step.channel,
-      options: { variant: 0, senderName: p.full_name, senderCompany: p.company_name, offer: p.offer, contactName: lead.contact_name, contactRole: lead.contact_role, stage, instructions: step.template || undefined },
+      options: {
+        variant: 0,
+        senderName: p.full_name,
+        senderCompany: p.company_name,
+        offer: p.offer,
+        contactName: lead.contact_name,
+        contactRole: lead.contact_role,
+        stage,
+        instructions: step.template || undefined,
+        ...(await conversationContext(db, lead)),
+        campaignName,
+      },
     });
     raw = run.output;
     await logRun(db, ownerId, 'generateApproach', started, 'ok', run.usage);
@@ -258,6 +284,10 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
     suppressed: isSuppressed(supp, company, lead),
     hasWhatsapp: !!company.whatsapp,
     hasWhatsappConsent: !!lead.whatsapp_consent_at,
+    // WhatsApp sem API por padrão: a etapa vira tarefa com wa.me. A API oficial (Meta) só é usada
+    // se WHATSAPP_AUTO=true e as credenciais estiverem configuradas.
+    whatsappAuto: Deno.env.get('WHATSAPP_AUTO') === 'true' && hasWhatsapp(),
+    closed: ['cliente', 'nao_interessado'].includes(lead.stage),
     hasEmail: !!lead.email,
     window: (p.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW,
   };
@@ -307,7 +337,7 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
   // Envio: usa a mensagem revisada na preparação (primeiro envio) ou compõe agora.
   const firstSend = cad.steps.findIndex((s) => s.type === 'send');
   const draft: MessageDraft =
-    eff.stepIndex === firstSend && e.draft && e.draft.channel === eff.step.channel ? e.draft : await compose(db, owner, lead, c, p, cad, eff.stepIndex);
+    eff.stepIndex === firstSend && e.draft && e.draft.channel === eff.step.channel ? e.draft : await compose(db, owner, lead, c, p, cad, eff.stepIndex, camp?.name);
   const channel: SendChannel = eff.step.channel;
   const sender = channel === 'email' ? p.sender_email || Deno.env.get('EMAIL_FROM_FALLBACK') || null : null;
   const recipient = channel === 'email' ? lead.email : toE164Digits(c.whatsapp ?? '');
@@ -419,12 +449,12 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
   const company: Row = await must(db.from('companies').select('*').eq('id', lead.company_id).single());
   const name = nameOf(company);
 
-  let cls: { classification: ReplyClass; confidence: number; summary: string } = classifyReplyRules(text);
+  let cls: ReplyAnalysis = analyzeReplyRules(text);
   if (hasClaude()) {
     const started = Date.now();
     try {
-      const run = await runTask<typeof cls>('classifyReply', { text });
-      cls = run.output;
+      const run = await runTask<Partial<ReplyAnalysis>>('classifyReply', { text, context: `Empresa ${name}, etapa atual: ${lead.stage}` });
+      cls = normalizeAnalysis(run.output, text);
       await logRun(db, i.ownerId, 'classifyReply', started, 'ok', run.usage);
     } catch {
       await logRun(db, i.ownerId, 'classifyReply', started, 'error', {});
@@ -459,11 +489,30 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
 
   const { data: last } = await db.from('messages').select('id').eq('lead_id', lead.id).eq('channel', i.channel).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(1);
   if (last?.[0]) await db.from('messages').update({ status: 'replied', replied_at: at }).eq('id', last[0].id);
-  await db.from('leads').update({ last_contact_at: at }).eq('id', lead.id);
-  await log(db, i.ownerId, lead.id, 'reply_received', `Lead respondeu por ${i.channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'}`, { inboundId: (inbound as Row).id });
-  await log(db, i.ownerId, lead.id, 'reply_classified', `IA classificou como “${REPLY_LABEL[cls.classification]}”`, { classification: cls.classification, confidence: cls.confidence });
+  // Próxima ação sugerida pela IA; "falar depois" agenda a data de retorno.
+  const next: Row = {};
+  if (cls.category !== 'ausente') {
+    next.next_action = cls.suggestedAction;
+    next.next_action_at =
+      cls.category === 'sem_contato' || cls.category === 'nao_interessado'
+        ? null
+        : cls.category === 'posteriormente'
+          ? new Date(Date.now() + (cls.followUpDays ?? 30) * 864e5).toISOString()
+          : at;
+  }
+  await db.from('leads').update({ last_contact_at: at, ...next }).eq('id', lead.id);
+  const inboundId = (inbound as Row).id;
+  await log(db, i.ownerId, lead.id, 'reply_received', `Resposta recebida (${i.channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'})`, { inboundId });
+  await log(db, i.ownerId, lead.id, 'reply_classified', `IA classificou como “${REPLY_CATEGORY_LABEL[cls.category]}”`, {
+    inboundId,
+    category: cls.category,
+    classification: cls.classification,
+    confidence: cls.confidence,
+    summary: cls.summary,
+    suggestedAction: cls.suggestedAction,
+  });
 
-  const d = replyDecision(cls.classification, name);
+  const d = replyDecision(cls.category, name);
   if (d.suppress) {
     const reason = `Pediu para não receber mensagens (${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })})`;
     const rows: Row[] = [];

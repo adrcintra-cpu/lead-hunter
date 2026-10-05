@@ -355,7 +355,7 @@ export type MessageStatus =
 export const MESSAGE_STATUS_LABEL: Record<MessageStatus, string> = {
   draft: 'Rascunho',
   copied: 'Copiada',
-  opened_whatsapp: 'Aberta no WhatsApp',
+  opened_whatsapp: 'WhatsApp aberto',
   queued: 'Na fila',
   sent: 'Enviada',
   delivered: 'Entregue',

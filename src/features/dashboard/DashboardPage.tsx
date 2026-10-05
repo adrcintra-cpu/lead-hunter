@@ -3,8 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Bot, Database, Megaphone, Plus, Sparkles } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRows } from '@/store/selectors';
-import { stageLabel } from '@/core/types';
-import { relativeTime } from '@/core/utils';
+import { CLOSED_STAGES, stageLabel } from '@/core/types';
+import { formatDateTime, relativeTime } from '@/core/utils';
 import { EmptyState, PageHeader, ScoreBadge, Spinner, cx } from '@/components/ui';
 import { dataMode } from '@/lib/supabase';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
@@ -46,6 +46,24 @@ export function DashboardPage() {
   const latest = useMemo(() => [...rows].sort((a, b) => b.lead.discoveredAt.localeCompare(a.lead.discoveredAt)).slice(0, 5), [rows]);
   const activity = db.activities.filter((a) => a.type !== 'cadence_step').slice(0, 8);
   const liveCampaigns = db.campaigns.filter((c) => c.status === 'ativa' || c.status === 'agendada' || c.status === 'pausada');
+  // Follow-ups: próximo contato agendado nos leads ainda em prospecção.
+  const followUps = useMemo(() => {
+    const now = service.now();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start.getTime() + 864e5);
+    const due = db.leads
+      .filter((l) => l.nextActionAt && !CLOSED_STAGES.includes(l.stage) && new Date(l.nextActionAt) < end)
+      .sort((a, b) => a.nextActionAt!.localeCompare(b.nextActionAt!));
+    const weekAgo = now.getTime() - 7 * 864e5;
+    return {
+      due,
+      overdue: due.filter((l) => new Date(l.nextActionAt!) < start).length,
+      today: due.filter((l) => new Date(l.nextActionAt!) >= start).length,
+      start,
+      contacts7d: db.messages.filter((m) => m.sentAt && new Date(m.sentAt).getTime() >= weekAgo).length,
+    };
+  }, [db.leads, db.messages, service, db.clockOffsetMs]); // eslint-disable-line react-hooks/exhaustive-deps
   const nameOf = (leadId: string) => {
     const r = rows.find((x) => x.lead.id === leadId);
     return r ? r.company.tradeName ?? r.company.legalName : 'Lead';
@@ -172,6 +190,37 @@ export function DashboardPage() {
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
             <div className="flex flex-col gap-4">
+              <section className="card">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+                  <h2 className="text-[15px] font-bold">Follow-ups</h2>
+                  <span className="text-[12.5px] font-semibold">
+                    <span className={cx(followUps.overdue > 0 ? 'text-bad' : 'text-ink-faint')}>{followUps.overdue} atrasados</span>
+                    <span className="text-ink-faint"> · </span>
+                    <span className="text-accent">{followUps.today} para hoje</span>
+                  </span>
+                </div>
+                <p className="px-5 text-xs text-ink-faint">{followUps.contacts7d} {followUps.contacts7d === 1 ? 'contato realizado' : 'contatos realizados'} nos últimos 7 dias</p>
+                {followUps.due.length ? (
+                  <ul className="mt-1 divide-y divide-line">
+                    {followUps.due.slice(0, 6).map((l) => {
+                      const late = new Date(l.nextActionAt!) < followUps.start;
+                      return (
+                        <li key={l.id}>
+                          <button type="button" onClick={() => drawer.open(l.id)} className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-5 py-3 text-left hover:bg-subtle">
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-bold">{nameOf(l.id)}</span>
+                              <span className="block truncate text-[12.5px] text-ink-faint">{l.nextAction || 'Follow-up'} · {stageLabel(l.stage)}</span>
+                            </span>
+                            <span className={cx('text-xs font-semibold', late ? 'text-bad' : 'text-ink-soft')}>{late ? 'Atrasado · ' : ''}{formatDateTime(l.nextActionAt!)}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="px-5 pb-4 pt-1 text-[13px] text-ink-faint">Nenhum follow-up para hoje. Agende o próximo contato no perfil do lead, depois de marcar a mensagem como enviada.</p>
+                )}
+              </section>
               <section className="card">
                 <div className="flex items-center justify-between px-5 pt-4">
                   <h2 className="text-[15px] font-bold">Tarefas abertas</h2>

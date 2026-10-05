@@ -5,6 +5,7 @@ import { useApp, useDb, useService } from '@/store/AppStore';
 import { STAGES, type Cadence, type CadenceStep, type StepAction } from '@/core/types';
 import { describeStep } from '../../../supabase/functions/_shared/automation/planner.ts';
 import { uid } from '@/core/utils';
+import { CADENCE_TEMPLATES } from '@/services/automation/defaultCadence';
 import { ConfirmDialog, EmptyState, PageHeader, cx } from '@/components/ui';
 
 const VARS = ['{{nome}}', '{{empresa}}', '{{cargo}}', '{{cidade}}', '{{segmento}}', '{{site}}', '{{remetente}}', '{{minha_empresa}}', '{{oferta}}'];
@@ -20,17 +21,37 @@ export function CadencesPage() {
         title="Cadências"
         subtitle="Sequências de contato: canal, intervalo, mensagem e condições. Usadas pelas campanhas."
         actions={
-          <button
-            type="button"
-            className="btn-dark"
-            onClick={() => {
-              const at = new Date().toISOString();
-              const c = service.automation.saveCadence({ id: uid('cad'), name: 'Nova cadência', stopOnReply: true, steps: [], createdAt: at, updatedAt: at });
-              navigate(`/cadencias/${c.id}`);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Nova cadência
-          </button>
+          <>
+            <label htmlFor="cad-template" className="sr-only">Criar a partir de um modelo</label>
+            <select
+              id="cad-template"
+              className="input w-auto"
+              value=""
+              onChange={(e) => {
+                const t = CADENCE_TEMPLATES.find((x) => x.key === e.target.value);
+                if (!t) return;
+                const at = new Date().toISOString();
+                const c = service.automation.saveCadence({ ...t.build(), id: uid('cad'), createdAt: at, updatedAt: at });
+                navigate(`/cadencias/${c.id}`);
+              }}
+            >
+              <option value="">Usar um modelo…</option>
+              {CADENCE_TEMPLATES.map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-dark"
+              onClick={() => {
+                const at = new Date().toISOString();
+                const c = service.automation.saveCadence({ id: uid('cad'), name: 'Nova cadência', stopOnReply: true, steps: [], createdAt: at, updatedAt: at });
+                navigate(`/cadencias/${c.id}`);
+              }}
+            >
+              <Plus className="h-4 w-4" /> Nova cadência
+            </button>
+          </>
         }
       />
       {db.cadences.length === 0 ? (
@@ -298,13 +319,9 @@ function StepCard({
             )}
           </div>
           {step.channel === 'whatsapp' && (
-            <div className="sm:col-span-2">
-              <label htmlFor={`${id}-wt`} className="label">Template aprovado na Meta</label>
-              <input id={`${id}-wt`} className="input font-mono" value={step.whatsappTemplate ?? ''} placeholder="ex.: prospeccao_inicial" onChange={(e) => onChange({ ...step, whatsappTemplate: e.target.value })} />
-              <p className="mt-1 text-xs text-ink-faint">
-                A Meta exige template aprovado para iniciar conversa. Envio automático só para leads com opt-in; os demais viram tarefa com o link pronto.
-              </p>
-            </div>
+            <p className="text-xs text-ink-faint sm:col-span-2">
+              WhatsApp sem API: na data desta etapa, a mensagem fica pronta e vira uma tarefa com o link wa.me. Você revisa, abre e envia pelo seu WhatsApp.
+            </p>
           )}
         </div>
       )}

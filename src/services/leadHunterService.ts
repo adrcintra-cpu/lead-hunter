@@ -7,7 +7,9 @@ import { formatCnpj, isValidCnpj } from '@/core/cnpj';
 import type { Engagement, ScoreExtras } from '@/core/scoring';
 import { DEFAULT_CADENCE } from '@/services/automation/defaultCadence';
 import { AutomationService } from '@/services/automation/automationService';
+import { WhatsAppService } from '@/services/whatsapp/whatsAppService';
 import {
+  CLOSED_STAGES,
   stageLabel,
   type ActivityType,
   type Channel,
@@ -49,6 +51,8 @@ export class LeadHunterService {
   readonly ai: AIService;
   /** Campanhas, cadências, envios, respostas e tarefas. */
   readonly automation: AutomationService;
+  /** WhatsApp sem API (wa.me): preparar, abrir, marcar como enviado. */
+  readonly whatsapp: WhatsAppService;
 
   constructor(
     readonly repo: Repository,
@@ -58,6 +62,7 @@ export class LeadHunterService {
       this.repo.insert('aiRuns', { id: uid('ai'), createdAt: nowIso(), ...run }),
     );
     this.automation = new AutomationService(this);
+    this.whatsapp = new WhatsAppService(this);
   }
 
   get db() {
@@ -351,6 +356,8 @@ export class LeadHunterService {
     this.repo.batch(() => {
       this.repo.update('leads', leadId, { stage });
       this.log(leadId, 'stage_changed', `Etapa: ${stageLabel(lead.stage)} → ${stageLabel(stage)}`, { from: lead.stage, to: stage });
+      // Cliente ou não interessado: cancela os próximos contatos automáticos deste lead.
+      if (CLOSED_STAGES.includes(stage)) this.automation.cancelForLead(leadId, `lead marcado como ${stageLabel(stage)}`);
     });
   }
 
@@ -509,6 +516,8 @@ export class LeadHunterService {
     if (!lead || !company) throw new Error('Lead não encontrado.');
     if (this.suppressionFor(company, lead)) throw new Error('Contato na lista de supressão: abordagem bloqueada.');
     const p = this.profile;
+    const conv = this.conversationContext(leadId);
+    const followUp = conv.history.length > 0;
     const text = await this.ai.generateApproach(company, channel, {
       variant,
       senderName: p.fullName,
@@ -516,7 +525,8 @@ export class LeadHunterService {
       offer: p.offer,
       contactName: lead.contactName,
       contactRole: lead.contactRole,
-      stage: 'primeira',
+      stage: followUp ? 'acompanhamento' : 'primeira',
+      ...conv,
     });
     const at = nowIso();
     const msg: Message = {
@@ -528,14 +538,14 @@ export class LeadHunterService {
       status: 'draft',
       model: this.ai.model,
       promptVersion: this.providers.ai.promptVersion,
-      template: 'IA — abordagem inicial',
+      template: followUp ? 'IA — follow-up (com histórico)' : 'IA — abordagem inicial',
       context: leadContext(company, lead),
       createdAt: at,
       updatedAt: at,
     };
     this.repo.batch(() => {
       this.repo.insert('messages', msg);
-      this.log(leadId, 'message_generated', `Abordagem gerada (${channelLabel(channel)})`, { messageId: msg.id, channel });
+      this.log(leadId, 'message_generated', `${followUp ? 'Follow-up preparado' : 'Mensagem preparada'} (${channelLabel(channel)})`, { messageId: msg.id, channel, followUp });
       if (lead.stage === 'novo') this.changeStage(leadId, 'qualificado');
     });
     return msg;
@@ -556,11 +566,7 @@ export class LeadHunterService {
 
   /** Devolve o link wa.me. Nada é enviado automaticamente. */
   whatsappLink(messageId: string, text?: string): string | null {
-    const m = this.db.messages.find((x) => x.id === messageId);
-    const lead = m && this.db.leads.find((l) => l.id === m.leadId);
-    const company = lead && this.db.companies.find((c) => c.id === lead.companyId);
-    if (!m || !lead || !company?.whatsapp || this.suppressionFor(company)) return null;
-    return this.providers.whatsapp.buildLink(company.whatsapp, text ?? m.finalContent);
+    return this.whatsapp.linkFor(messageId, text);
   }
 
   markWhatsappOpened(messageId: string) {
@@ -568,12 +574,77 @@ export class LeadHunterService {
     const lead = m && this.db.leads.find((l) => l.id === m.leadId);
     if (!m || !lead) return;
     this.repo.batch(() => {
-      this.repo.update('messages', messageId, { status: 'opened_whatsapp' });
-      this.log(lead.id, 'whatsapp_opened', 'Conversa aberta no WhatsApp (wa.me)', { messageId });
+      this.whatsapp.registerOpen(messageId);
       this.repo.update('leads', lead.id, { lastContactAt: this.now().toISOString() });
       const order: LeadStage[] = ['novo', 'qualificado', 'em_cadencia'];
       if (order.includes(lead.stage)) this.changeStage(lead.id, 'contatado');
     });
+  }
+
+  /**
+   * O usuário confirma que enviou a mensagem (WhatsApp, e-mail ou LinkedIn) pelo próprio app.
+   * Registra "Enviado manualmente" com data e hora. Entregue/lido não são marcados: não dá para confirmar sem API.
+   */
+  markSent(messageId: string) {
+    const m = this.db.messages.find((x) => x.id === messageId);
+    const lead = m && this.db.leads.find((l) => l.id === m.leadId);
+    if (!m || !lead || m.status === 'sent' || m.status === 'replied') return;
+    const at = this.now().toISOString();
+    this.repo.batch(() => {
+      this.repo.update('messages', messageId, { status: 'sent', provider: m.provider ?? 'manual', sentAt: at, updatedAt: at });
+      this.repo.update('leads', lead.id, { lastContactAt: at });
+      this.log(lead.id, 'message_sent', `${channelLabel(m.channel)} marcado como enviado (manual)`, {
+        messageId,
+        channel: m.channel,
+        status: 'Enviado manualmente',
+        user: this.profile.email,
+      });
+      const order: LeadStage[] = ['novo', 'qualificado', 'em_cadencia'];
+      if (order.includes(lead.stage)) this.changeStage(lead.id, 'contatado');
+      // Tarefa de envio manual criada pela cadência: concluída junto.
+      if (m.channel === 'whatsapp') {
+        this.db.tasks
+          .filter((t) => t.leadId === lead.id && t.status === 'aberta' && t.source === 'cadencia' && t.actionUrl?.startsWith('https://wa.me/'))
+          .forEach((t) => this.automation.completeTask(t.id));
+      }
+    });
+  }
+
+  /** Agenda o próximo contato (usa a "próxima ação" que o lead já tem). */
+  scheduleFollowUp(leadId: string, at: Date, channel?: Channel) {
+    const lead = this.db.leads.find((l) => l.id === leadId);
+    if (!lead) return;
+    const when = at.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    this.repo.batch(() => {
+      this.repo.update('leads', leadId, { nextAction: `Follow-up${channel ? ` por ${channelLabel(channel)}` : ''}`, nextActionAt: at.toISOString() });
+      this.log(leadId, 'lead_updated', `Follow-up agendado para ${when}`, { kind: 'followup_scheduled', at: at.toISOString(), channel, user: this.profile.email });
+    });
+  }
+
+  /**
+   * O que a IA precisa para escrever um follow-up que continua a conversa:
+   * mensagens já enviadas, tempo desde o último contato e observações do usuário.
+   */
+  conversationContext(leadId: string) {
+    const lead = this.db.leads.find((l) => l.id === leadId);
+    const when = (m: Message) => m.sentAt ?? (m.status === 'opened_whatsapp' ? m.updatedAt : undefined);
+    const history = this.db.messages
+      .filter((m) => m.leadId === leadId && when(m))
+      .sort((a, b) => when(a)!.localeCompare(when(b)!))
+      .slice(-4)
+      .map((m) => ({
+        channel: channelLabel(m.channel),
+        date: new Date(when(m)!).toLocaleDateString('pt-BR'),
+        text: m.finalContent.length > 600 ? `${m.finalContent.slice(0, 600)}…` : m.finalContent,
+      }));
+    const last = lead?.lastContactAt;
+    const daysSinceLastContact = last ? Math.max(0, Math.floor((this.now().getTime() - new Date(last).getTime()) / 864e5)) : undefined;
+    const notes = this.db.notes
+      .filter((n) => n.leadId === leadId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 3)
+      .map((n) => n.body);
+    return { history, daysSinceLastContact, notes };
   }
 
   // ---------- Listas ----------

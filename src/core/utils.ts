@@ -60,3 +60,16 @@ export function relativeTime(iso: string): string {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Telefone no padrão internacional do WhatsApp, só dígitos (ex.: 5519999999999).
+ * Números brasileiros com DDD (10 ou 11 dígitos) ganham o 55 — inclusive os do DDD 55 (RS).
+ */
+export function toWhatsappNumber(phone: string): string | null {
+  let d = phone.replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2); // discagem internacional
+  else if (d.startsWith('0') && (d.length === 11 || d.length === 12)) d = d.slice(1); // 0 + DDD
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  if (d.length >= 12 && d.length <= 15) return d; // já tem o código do país
+  return null;
+}

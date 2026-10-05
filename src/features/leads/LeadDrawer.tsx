@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Copy, ExternalLink, MessageCircle, Pencil, RefreshCw, ShieldOff, X } from 'lucide-react';
+import { Check, Copy, ExternalLink, Mail, MessageCircle, Pencil, RefreshCw, ShieldOff, Sparkles, X } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRow, type LeadRow } from '@/store/selectors';
 import { ANALYSIS_SECTIONS, STAGES, type Channel, type CompanyField, type LeadStage, type Message } from '@/core/types';
@@ -9,7 +9,8 @@ import { formatDate, formatDateTime } from '@/core/utils';
 import { channelLabel } from '@/services/leadHunterService';
 import { cx, EmptyState, ErrorBox, ProvenanceTag, Skeleton, Spinner, type ProvenanceKind } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
-import { CadencePanel, ConversationPanel, CrmPanel, LeadTasks, Timeline } from './LeadCrmPanels';
+import { CadencePanel, ConversationPanel, CrmPanel, FollowUpPicker, LeadTasks, Timeline } from './LeadCrmPanels';
+import { parseSubject } from '../../../supabase/functions/_shared/automation/replies.ts';
 
 export function LeadDrawer({ leadId }: { leadId: string }) {
   const { close } = useLeadDrawer();
@@ -411,8 +412,27 @@ function ApproachPanel({ row }: { row: LeadRow }) {
     if (!message) return;
     if (editing) saveEdit();
     service.markWhatsappOpened(message.id);
-    toast('WhatsApp aberto com a mensagem. Nada foi enviado automaticamente.', 'success');
+    toast('WhatsApp aberto com a mensagem. Depois de enviar, clique em “Marcar como enviado”.', 'success');
   }
+
+  // E-mail: abre o app de e-mail do usuário com assunto e corpo prontos (o envio é dele).
+  const emailText = editing ? draft : message?.finalContent ?? '';
+  const emailParts = parseSubject(emailText);
+  const mailto =
+    message && channel === 'email' && lead.email
+      ? `mailto:${lead.email.trim()}?subject=${encodeURIComponent(emailParts.subject ?? '')}&body=${encodeURIComponent(emailParts.body)}`
+      : null;
+
+  function onMarkSent() {
+    if (!message) return;
+    if (editing) saveEdit();
+    service.markSent(message.id);
+    toast('Registrado como enviado manualmente. Agende o próximo contato.', 'success');
+  }
+
+  // Já houve contato: a próxima mensagem é um follow-up que continua a conversa.
+  const hadContact = db.messages.some((m) => m.leadId === lead.id && (m.sentAt || m.status === 'opened_whatsapp'));
+  const sent = message && (message.status === 'sent' || message.status === 'delivered' || message.status === 'read' || message.status === 'replied');
 
   const waProblem =
     channel !== 'whatsapp'
@@ -454,14 +474,16 @@ function ApproachPanel({ row }: { row: LeadRow }) {
           {error && <div className="mt-3"><ErrorBox>{error}</ErrorBox></div>}
           {!message ? (
             <div className="mt-3 rounded-lg border border-dashed border-line-strong p-4 text-center">
-              <p className="text-[13px] text-ink-faint">A IA escreve uma mensagem curta usando só dados encontrados.</p>
+              <p className="text-[13px] text-ink-faint">
+                {hadContact ? 'A IA lê o histórico e escreve uma continuação da conversa, sem repetir a mensagem anterior.' : 'A IA escreve uma mensagem curta usando só dados encontrados.'}
+              </p>
               <button type="button" className="btn-primary mt-3" onClick={() => generate(0)} disabled={busy}>
-                {busy && <Spinner />} Gerar mensagem para {channelLabel(channel)}
+                {busy ? <Spinner /> : <Sparkles className="h-4 w-4" />} {hadContact ? 'Gerar follow-up com IA' : 'Gerar mensagem com IA'} ({channelLabel(channel)})
               </button>
             </div>
           ) : (
             <>
-              <label htmlFor="msg" className="label mt-3">{editing ? 'Editando mensagem' : 'Mensagem gerada'}</label>
+              <label htmlFor="msg" className="label mt-3">{editing ? 'Editando mensagem' : sent ? 'Mensagem enviada' : 'Mensagem preparada'}</label>
               <textarea
                 id="msg"
                 rows={channel === 'email' ? 11 : 6}
@@ -471,6 +493,17 @@ function ApproachPanel({ row }: { row: LeadRow }) {
                 className={cx('input min-h-[120px] resize-y py-2.5 leading-relaxed', !editing && 'bg-subtle')}
               />
               <p className="mt-1.5 text-xs text-ink-faint">Campos entre colchetes são seus: complete em Configurações para preencher automaticamente.</p>
+              {sent ? (
+                <>
+                  <p className="mt-3 flex items-center gap-1.5 text-[13px] font-semibold text-good">
+                    <Check className="h-4 w-4" /> Enviado manualmente em {formatDateTime(message?.sentAt ?? message?.updatedAt ?? '')}
+                  </p>
+                  <FollowUpPicker leadId={lead.id} channel={channel} />
+                  <button type="button" className="btn-outline mt-3" onClick={() => generate(0)} disabled={busy}>
+                    {busy ? <Spinner /> : <Sparkles className="h-4 w-4" />} Gerar follow-up com IA
+                  </button>
+                </>
+              ) : (
               <div className="mt-3 flex flex-wrap gap-2">
                 <button type="button" className="btn-outline" onClick={copy}>
                   <Copy className="h-4 w-4" /> Copiar
@@ -486,10 +519,22 @@ function ApproachPanel({ row }: { row: LeadRow }) {
                     <MessageCircle className="h-4 w-4" /> Abrir WhatsApp
                   </a>
                 )}
+                {mailto && (
+                  <a href={mailto} className="btn-primary" onClick={() => editing && saveEdit()}>
+                    <Mail className="h-4 w-4" /> Abrir no e-mail
+                  </a>
+                )}
+                <button type="button" className="btn-outline" onClick={onMarkSent}>
+                  <Check className="h-4 w-4" /> Marcar como enviado
+                </button>
               </div>
+              )}
             </>
           )}
           {waProblem && <p className="mt-2 text-[12.5px] text-warn">{waProblem}</p>}
+          {channel === 'email' && message && !lead.email && !sent && (
+            <p className="mt-2 text-[12.5px] text-warn">Cadastre o e-mail do contato (Dados de CRM) para abrir a mensagem no seu app de e-mail.</p>
+          )}
         </>
       )}
     </section>

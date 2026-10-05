@@ -194,7 +194,7 @@ function SendingSettings() {
     <section className="card px-5 py-5">
       <h2 className="text-[15px] font-extrabold">Envio das campanhas</h2>
       <p className="mt-1 text-[13px] text-ink-faint">
-        WhatsApp automático só para leads com opt-in registrado; os demais viram tarefa com o link pronto. Todo envio respeita a lista de supressão.
+        WhatsApp sem API: as etapas de WhatsApp viram tarefa com o link wa.me e você envia pelo seu WhatsApp. E-mails das cadências saem pelo servidor. Todo envio respeita a lista de supressão.
       </p>
       <form
         className="mt-4 grid gap-3.5 sm:grid-cols-2"
@@ -240,7 +240,7 @@ function SendingSettings() {
       <div className="mt-5 grid gap-2 text-[13px] sm:grid-cols-2">
         <div className="rounded-lg border border-line px-3 py-2.5">
           <div className="font-bold">WhatsApp</div>
-          <div className="text-ink-faint">{service.automation.runsLocally ? 'Simulado no modo de teste' : 'WhatsApp Business Platform (API oficial), via servidor'}</div>
+          <div className="text-ink-faint">Sem API: link wa.me, envio manual pelo seu WhatsApp</div>
         </div>
         <div className="rounded-lg border border-line px-3 py-2.5">
           <div className="font-bold">E-mail</div>
