@@ -22,6 +22,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_AUTO_PER_DAY = 6;
 /** Intenções em que você precisa entrar: a BEELIE responde, e a tarefa continua aberta para você. */
 const NEEDS_HUMAN = new Set(['confirmar_conversa', 'passar_para_vendedor']);
+/** Horário em que a BEELIE responde quem escreveu (hora de Brasília), todos os dias. */
+const REPLY_WINDOW = { startHour: 8, endHour: 21 };
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Método não permitido', { status: 405 });
@@ -78,10 +80,13 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
   );
   if (cfg && cfg.auto_reply === false) return null;
 
+  // Quem puxou a conversa foi o lead: a janela de resposta é mais ampla que a das campanhas
+  // (começa mais cedo e vai até 21h, todos os dias), mas nunca de madrugada.
   const { data: p } = await db.from('profiles').select('send_window').eq('id', ownerId).maybeSingle();
-  const window: SendWindow = (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW;
+  const campaign: SendWindow = (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW;
+  const window: SendWindow = { startHour: Math.min(campaign.startHour, REPLY_WINDOW.startHour), endHour: Math.max(campaign.endHour, REPLY_WINDOW.endHour), weekdaysOnly: false };
   if (!inWindow(new Date(), window)) {
-    await log(db, ownerId, leadId, 'lead_updated', 'Fora do horário de envio: a BEELIE não respondeu sozinha. A resposta ficou pronta para você revisar e enviar.', { kind: 'auto_reply_skipped', reason: 'fora_do_horario' });
+    await log(db, ownerId, leadId, 'lead_updated', `Fora do horário de resposta (${window.startHour}h às ${window.endHour}h): a BEELIE não respondeu sozinha. A resposta ficou pronta para você revisar e enviar.`, { kind: 'auto_reply_skipped', reason: 'fora_do_horario' });
     return null;
   }
   const since = new Date(Date.now() - 864e5).toISOString();

@@ -121,7 +121,7 @@ export function AssistantCard() {
               <span>
                 <span className="block text-sm font-bold">A {s.name || 'assistente'} conversa sozinha no WhatsApp conectado</span>
                 <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">
-                  Quando o lead responde, ela responde em 1 a 2 minutos, buscando entender o cenário e marcar uma conversa com você. Responde só dentro do horário de envio (Envio das campanhas), no máximo 6 vezes por lead em 24 h, e para se você escrever para o lead pelo celular. Pedido de reunião, proposta ou preço vira tarefa para você. Desligado: ela só sugere e você envia.
+                  Quando o lead responde, ela responde em 1 a 2 minutos, buscando entender o cenário e marcar uma conversa com você. Responde das 8h às 21h, todos os dias (ou no horário de Envio das campanhas, se for mais amplo), no máximo 6 vezes por lead em 24 h, e para se você escrever para o lead pelo celular. Pedido de reunião, proposta ou preço vira tarefa para você. Desligado: ela só sugere e você envia.
                 </span>
               </span>
             </label>
