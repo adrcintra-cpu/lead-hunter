@@ -1,6 +1,6 @@
 import type { AnalysisSections, Channel, Company, CompanyField, LeadScore, ParsedCriteria, Profile } from '../types';
 import { nowIso, uid } from '../utils';
-import type { AIProvider, ApproachOptions } from '../providers/types';
+import type { AIProvider, ApproachOptions, ReplySuggestion, ReplySuggestionInput } from '../providers/types';
 import { ruleScore, tierOf, type ScoreExtras } from '../scoring';
 import { analyzeReplyRules, normalizeAnalysis } from '../../../supabase/functions/_shared/automation/replies.ts';
 import type { ReplyAnalysis } from '../types';
@@ -106,6 +106,11 @@ export class AIService {
     } catch {
       return analyzeReplyRules(text);
     }
+  }
+
+  /** Sugestão de resposta para o vendedor revisar. */
+  suggestReply(input: ReplySuggestionInput): Promise<ReplySuggestion> {
+    return this.run('suggestReply', () => this.provider.suggestReply(input));
   }
 
   /** Leitura em linguagem natural dos números (só usa os números fornecidos). */

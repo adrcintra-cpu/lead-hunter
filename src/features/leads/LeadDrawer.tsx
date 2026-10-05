@@ -377,6 +377,29 @@ function ApproachPanel({ row }: { row: LeadRow }) {
     setEditing(false);
   }, [message?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Resposta sugerida pela IA depois de uma resposta do lead (objetivo: marcar uma conversa).
+  const isSuggestion = !!message?.template?.startsWith('IA — resposta sugerida');
+  const lastReply = useMemo(
+    () => db.inbound.filter((r) => r.leadId === lead.id && r.channel === channel).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0],
+    [db.inbound, lead.id, channel],
+  );
+
+  async function regenerateSuggestion() {
+    setBusy(true);
+    setError('');
+    try {
+      const cat = db.activities
+        .filter((a) => a.leadId === lead.id && a.type === 'reply_classified')
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.payload?.category as string | undefined;
+      const m = await service.automation.suggestReply(lead.id, channel as 'whatsapp' | 'email', cat);
+      if (!m) setError('Não há resposta do lead para responder.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Não foi possível sugerir uma resposta.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function generate(nextVariant: number) {
     setBusy(true);
     setError('');
@@ -484,7 +507,15 @@ function ApproachPanel({ row }: { row: LeadRow }) {
             </div>
           ) : (
             <>
-              <label htmlFor="msg" className="label mt-3">{editing ? 'Editando mensagem' : sent ? 'Mensagem enviada' : 'Mensagem preparada'}</label>
+              {isSuggestion && !sent && lastReply && (
+                <div className="mt-3 rounded-lg border border-line bg-subtle px-3 py-2 text-[13px]">
+                  <div className="text-xs font-bold text-ink-faint">O lead respondeu</div>
+                  <p className="mt-0.5 whitespace-pre-wrap">{lastReply.body}</p>
+                </div>
+              )}
+              <label htmlFor="msg" className="label mt-3">
+                {editing ? 'Editando mensagem' : sent ? 'Mensagem enviada' : isSuggestion ? 'Resposta sugerida pela IA · revise antes de enviar' : 'Mensagem preparada'}
+              </label>
               <textarea
                 id="msg"
                 rows={channel === 'email' ? 11 : 6}
@@ -509,7 +540,7 @@ function ApproachPanel({ row }: { row: LeadRow }) {
                 <button type="button" className="btn-outline" onClick={copy}>
                   <Copy className="h-4 w-4" /> Copiar
                 </button>
-                <button type="button" className="btn-outline" onClick={() => generate(variant + 1)} disabled={busy}>
+                <button type="button" className="btn-outline" onClick={() => (isSuggestion ? regenerateSuggestion() : generate(variant + 1))} disabled={busy}>
                   {busy ? <Spinner /> : <RefreshCw className="h-4 w-4" />} Regenerar
                 </button>
                 <button type="button" className="btn-outline" onClick={() => (editing ? saveEdit() : setEditing(true))}>

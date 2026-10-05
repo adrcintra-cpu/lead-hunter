@@ -28,7 +28,7 @@ export function createRemoteAIProvider(client: SupabaseClient): AIProvider {
   return {
     id: 'claude',
     model: 'claude (via Edge Function)',
-    promptVersion: 'v2',
+    promptVersion: 'v3',
     parseSearchQuery: (text) => call('parseSearchQuery', { text }),
     analyzeCompany: (company, icp) => call('analyzeCompany', { company, icp }),
     summarizeCompany: (company) => call('summarizeCompany', { company }),
@@ -36,5 +36,6 @@ export function createRemoteAIProvider(client: SupabaseClient): AIProvider {
     generateApproach: (company, channel, options) => call('generateApproach', { company, channel, options }),
     classifyReply: (text, context) => call('classifyReply', { text, context }),
     summarizeResults: (snapshot) => call('summarizeResults', { snapshot }),
+    suggestReply: (input) => call('suggestReply', input),
   };
 }

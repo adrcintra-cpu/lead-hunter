@@ -559,7 +559,62 @@ export class AutomationService {
       this.actOnReply(cls, lead, c, name, active, camp?.ownerName, camp?.id, channel);
     });
     await this.svc.rescore(leadId);
+    // Sugestão de resposta para o usuário revisar. Falha aqui não afeta o registro da resposta.
+    await this.suggestReply(leadId, channel, cls.category, camp?.id).catch(() => null);
     return inbound;
+  }
+
+  /**
+   * A IA escreve a próxima resposta da conversa (objetivo: marcar uma conversa rápida).
+   * Fica como mensagem "draft" no lead: nunca é enviada sem o clique do usuário.
+   * Uma sugestão por vez: a anterior não enviada é substituída.
+   */
+  async suggestReply(leadId: string, channel: SendChannel, category?: string, campaignId?: string): Promise<Message | null> {
+    if (category === 'sem_contato' || category === 'ausente') return null;
+    const lead = this.db.leads.find((l) => l.id === leadId);
+    const c = lead && this.companyOf(lead);
+    if (!lead || !c || this.svc.suppressionFor(c, lead)) return null;
+    const when = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const out = this.db.messages
+      .filter((m) => m.leadId === leadId && m.channel === channel && (m.sentAt || m.status === 'opened_whatsapp'))
+      .map((m) => ({ from: 'vendedor' as const, at: m.sentAt ?? m.updatedAt, text: m.finalContent.slice(0, 800) }));
+    const ins = this.db.inbound.filter((r) => r.leadId === leadId && r.channel === channel).map((r) => ({ from: 'lead' as const, at: r.receivedAt, text: r.body.slice(0, 800) }));
+    const conv = [...out, ...ins].sort((a, b) => a.at.localeCompare(b.at)).slice(-12);
+    if (!conv.length || conv[conv.length - 1].from !== 'lead') return null;
+    const p = this.svc.profile;
+    const s = await this.svc.ai.suggestReply({
+      channel,
+      category,
+      sender: { name: p.fullName, company: p.companyName, offer: p.offer },
+      contact: { name: lead.contactName, role: lead.contactRole },
+      company: c,
+      conversation: conv.map((m) => ({ from: m.from, date: when(m.at), text: m.text })),
+    });
+    const body = s.message?.trim();
+    if (!body) return null;
+    const at = this.nowIso();
+    const msg: Message = {
+      id: uid('msg'),
+      leadId,
+      channel,
+      generatedContent: body,
+      finalContent: body,
+      status: 'draft',
+      model: this.svc.ai.model,
+      promptVersion: this.svc.providers.ai.promptVersion,
+      template: `IA — resposta sugerida (${s.intent})`,
+      context: leadContext(c, lead),
+      campaignId,
+      createdAt: at,
+      updatedAt: at,
+    };
+    const old = this.db.messages.filter((m) => m.leadId === leadId && m.channel === channel && m.status === 'draft' && m.template?.startsWith('IA — resposta sugerida'));
+    this.repo.batch(() => {
+      old.forEach((m) => this.repo.remove('messages', m.id));
+      this.repo.insert('messages', msg);
+      this.svc.log(leadId, 'message_generated', 'IA sugeriu uma resposta para você revisar', { messageId: msg.id, kind: 'reply_suggestion', note: s.note, intent: s.intent });
+    });
+    return msg;
   }
 
   /** Próxima ação sugerida pela IA vira a "próxima ação" do lead; "falar depois" agenda a data. */
@@ -667,7 +722,7 @@ export class AutomationService {
       delivered: sent.filter((m) => ['delivered', 'read', 'replied'].includes(m.status)).length,
       read: sent.filter((m) => ['read', 'replied'].includes(m.status)).length,
       failed: msgs.filter((m) => m.status === 'failed').length,
-      manual: msgs.filter((m) => m.status === 'draft').length,
+      manual: msgs.filter((m) => m.status === 'draft' && !m.template?.startsWith('IA — resposta sugerida')).length,
       replies: repliedLeads.size,
       interested: new Set(ins.filter((r) => r.classification === 'interessado' || r.classification === 'reuniao').map((r) => r.leadId)).size,
       meetings: new Set(ins.filter((r) => r.classification === 'reuniao').map((r) => r.leadId)).size,

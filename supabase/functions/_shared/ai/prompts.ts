@@ -1,7 +1,7 @@
 // Prompts versionados da camada de IA. Cada tarefa define: system, mensagem do
 // usuário, JSON Schema da saída (via tool use) e pós-processamento.
 
-export const PROMPT_VERSION = 'v2';
+export const PROMPT_VERSION = 'v3';
 
 const RULES = `Regras obrigatórias:
 - Use SOMENTE os dados fornecidos. Nunca invente nome de pessoas, números, clientes, prêmios ou fatos.
@@ -178,6 +178,61 @@ followUpDays: só para "posteriormente", em quantos dias retomar (use o prazo ci
       return [context ? `Contexto: ${context}` : '', `Resposta do lead:\n${text}`].filter(Boolean).join('\n\n');
     },
     output: (raw) => raw,
+  },
+
+  suggestReply: {
+    system: `Você escreve a próxima resposta de uma conversa comercial B2B, em nome do vendedor, para o vendedor revisar e enviar. ${RULES}
+Objetivo da conversa: aquecer o lead e marcar uma conversa rápida (ligação ou reunião de 15 a 20 minutos) com o vendedor.
+- Responda à ÚLTIMA mensagem do lead, de forma natural, cordial e humana: tom de conversa, frases curtas, sem formatação, no máximo 1 emoji.
+- WhatsApp: até 3 frases. E-mail: até 80 palavras, sem linha de assunto.
+- Responda o que foi perguntado usando só a oferta e os dados fornecidos. Preço, prazo, detalhes técnicos ou cases que não estejam no input: diga que o vendedor explica na conversa. Nunca invente.
+- Avance um passo por vez. Interesse ou dúvida respondida: proponha a conversa rápida oferecendo duas opções genéricas (ex.: amanhã de manhã ou à tarde), sem prometer horário exato de agenda.
+- Se o lead aceitou ou sugeriu um horário: confirme de forma simples e diga que o vendedor vai confirmar.
+- Se perguntarem se é robô, IA ou se é uma pessoa: diga com naturalidade que é o assistente do vendedor e que ele continua a conversa pessoalmente. Nunca afirme ser humano.
+- Objeção: reconheça, responda com um argumento curto da oferta e deixe a porta aberta, sem insistir.
+- Não interessado: agradeça e encerre com educação, sem nova pergunta.
+- Pediu para falar depois: concorde e diga que retoma no prazo citado.
+- Não repita a apresentação nem frases já enviadas. Nunca use colchetes nem marcadores como [SEU NOME].
+intent:
+- continuar: segue a conversa (dúvida respondida, ainda sem proposta de conversa)
+- propor_conversa: a mensagem propõe a ligação/reunião
+- confirmar_conversa: o lead aceitou; a mensagem confirma
+- encerrar: lead recusou ou pediu para falar depois
+- passar_para_vendedor: o pedido exige o vendedor (proposta, preço específico, negociação, reclamação)
+note: uma frase para o vendedor sobre o que fazer agora.`,
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        intent: { type: 'string', enum: ['continuar', 'propor_conversa', 'confirmar_conversa', 'encerrar', 'passar_para_vendedor'] },
+        note: { type: 'string' },
+      },
+      required: ['message', 'intent', 'note'],
+    },
+    user: (input) => {
+      const i = input as {
+        channel: string;
+        category?: string;
+        sender: { name?: string; company?: string; offer?: string };
+        contact?: { name?: string; role?: string };
+        company: Json;
+        conversation: { from: 'vendedor' | 'lead'; date: string; text: string }[];
+      };
+      return [
+        `Canal: ${i.channel}`,
+        `Vendedor: ${i.sender.name || 'não informado (não se apresente pelo nome)'}${i.sender.company ? `, empresa ${i.sender.company}` : ''}`,
+        `Oferta do vendedor: ${i.sender.offer || 'não informada (não detalhe serviços)'}`,
+        i.contact?.name ? `Contato no lead: ${i.contact.name}${i.contact.role ? `, ${i.contact.role}` : ''} (use o primeiro nome)` : '',
+        i.category ? `Classificação da última resposta: ${i.category}` : '',
+        `Empresa do lead (dados reais): ${JSON.stringify(stripInternal(i.company))}`,
+        'Conversa até agora (mais antiga primeiro):',
+        ...i.conversation.map((m) => `[${m.from === 'vendedor' ? 'Vendedor' : 'Lead'}, ${m.date}] ${m.text}`),
+        'Escreva a próxima mensagem do vendedor.',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    },
+    output: (raw) => ({ message: String(raw.message ?? '').trim(), intent: String(raw.intent ?? 'continuar'), note: String(raw.note ?? '') }),
   },
 
   summarizeResults: {

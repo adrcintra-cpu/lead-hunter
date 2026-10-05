@@ -243,4 +243,30 @@ export const mockAIProvider: AIProvider = {
     if (s.openTasks) out.push(`Há ${s.openTasks} tarefas abertas aguardando atendimento humano.`);
     return out;
   },
+
+  /** Sugestão de resposta por regras (modo de teste): mesmo objetivo da IA real, marcar uma conversa. */
+  async suggestReply(i) {
+    await sleep(150);
+    const last = normalize(i.conversation[i.conversation.length - 1]?.text ?? '');
+    const first = i.contact?.name?.split(' ')[0];
+    const hi = first ? `${first}, ` : '';
+    const me = i.sender.name ? i.sender.name.split(' ')[0] : 'o responsável';
+    if (/\b(robo|bot|ia|inteligencia artificial|automatic)/.test(last) || last.includes('e uma pessoa') || last.includes('voce e real')) {
+      return { message: `${hi}aqui é o assistente do ${me}. Ele mesmo continua a conversa com você em seguida, tudo bem?`, intent: 'passar_para_vendedor', note: 'O lead perguntou se fala com uma pessoa: assuma a conversa.' };
+    }
+    switch (i.category) {
+      case 'nao_interessado':
+        return { message: `${hi}tudo certo, obrigado pelo retorno! Se em algum momento fizer sentido, é só me chamar por aqui.`, intent: 'encerrar', note: 'Lead recusou: não insista.' };
+      case 'posteriormente':
+        return { message: `${hi}combinado! Retomo com você mais para frente. Obrigado pelo retorno.`, intent: 'encerrar', note: 'Agende o retorno na data combinada.' };
+      case 'orcamento':
+        return { message: `${hi}os valores dependem do que vocês precisam hoje. Que tal uma conversa rápida de 15 minutos para eu entender e te passar algo certeiro? Amanhã de manhã ou à tarde fica melhor?`, intent: 'propor_conversa', note: 'Pediu preço: prepare uma faixa de valores para a conversa.' };
+      case 'reuniao':
+        return { message: `${hi}ótimo! Vou confirmar o melhor horário com o ${me} e já te retorno por aqui.`, intent: 'confirmar_conversa', note: 'O lead aceitou conversar: confirme o horário.' };
+      case 'objecao':
+        return { message: `${hi}entendo totalmente. Muitas empresas chegam até nós justamente para complementar o que já fazem. Uma conversa rápida de 15 minutos ajudaria a ver se faz sentido, sem compromisso. Pode ser esta semana?`, intent: 'propor_conversa', note: 'Objeção: responda com calma, sem pressionar.' };
+      default:
+        return { message: `${hi}que bom que respondeu! Para eu entender melhor o momento de vocês, topa uma conversa rápida de 15 minutos? Amanhã de manhã ou à tarde fica bom?`, intent: 'propor_conversa', note: 'Lead engajado: proponha um horário.' };
+    }
+  },
 };

@@ -95,6 +95,26 @@ export interface AIProvider {
   /** Devolve a análise da resposta. Saídas antigas (só `classification`) são normalizadas pelo AIService. */
   classifyReply(text: string, context?: string): Promise<Partial<ReplyAnalysis> & { classification?: ReplyClass }>;
   summarizeResults(snapshot: ResultsSnapshot): Promise<string[]>;
+  /** Próxima resposta da conversa, para o vendedor revisar (nunca enviada sozinha). */
+  suggestReply(input: ReplySuggestionInput): Promise<ReplySuggestion>;
+}
+
+export interface ReplySuggestionInput {
+  channel: string;
+  category?: string;
+  sender: { name?: string; company?: string; offer?: string };
+  contact?: { name?: string; role?: string };
+  company: Company;
+  /** Conversa em ordem cronológica; a última mensagem é do lead. */
+  conversation: { from: 'vendedor' | 'lead'; date: string; text: string }[];
+}
+
+export type ReplyIntent = 'continuar' | 'propor_conversa' | 'confirmar_conversa' | 'encerrar' | 'passar_para_vendedor';
+
+export interface ReplySuggestion {
+  message: string;
+  intent: ReplyIntent | string;
+  note: string;
 }
 
 export interface WhatsappProvider {
