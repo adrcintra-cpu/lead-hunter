@@ -40,10 +40,10 @@
   --ink: 236 237 233;
   --ink-soft: 190 193 196;
   --ink-faint: 154 158 163;
-  --accent: 150 130 255;
-  --accent-ink: 12 6 36;
-  --accent-soft: 36 24 84;
-  --accent-strong: 196 184 255;
+  --accent: 62 0 255;
+  --accent-ink: 255 255 255;
+  --accent-soft: 30 14 82;
+  --accent-strong: 176 160 255;
   --good: 120 214 186;
   --good-soft: 18 52 44;
   --warn: 240 190 110;
@@ -55,6 +55,13 @@
   --inverse: 236 237 233;
   --inverse-ink: 16 17 19;
   color-scheme: dark;
+}
+
+/* Tema escuro: botões e destaques usam o #3E00FF exato; textos na cor principal
+   usam um tom mais claro dela, para continuarem legíveis sobre o fundo escuro. */
+.dark .text-accent,
+.dark .hover\:text-accent:hover {
+  color: rgb(var(--accent-strong));
 }
 
 @layer base {

@@ -5,6 +5,7 @@ import { useApp, useDb } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { cx, ThemeSwitcher, Toasts } from '@/components/ui';
 import { LeadDrawer } from '@/features/leads/LeadDrawer';
+import { OxyhubLogo } from '@/components/OxyhubLogo';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -28,17 +29,9 @@ export function AppShell() {
   return (
     <div className="min-h-screen md:grid md:grid-cols-[236px_minmax(0,1fr)]">
       <aside className="border-b border-line bg-subtle md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
-        <div className="flex items-center gap-2.5 px-5 pb-3 pt-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-ink">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-              <circle cx="11" cy="11" r="6" />
-              <path d="M20 20l-4.2-4.2" />
-            </svg>
-          </div>
-          <div className="min-w-0">
-            <div className="text-[15px] font-extrabold tracking-tight">Lead Hunter</div>
-            <div className="hidden text-[11.5px] text-ink-faint md:block">Copiloto de prospecção</div>
-          </div>
+        <div className="px-5 pb-3 pt-5">
+          <OxyhubLogo className="h-7 w-auto" />
+          <div className="mt-1.5 hidden text-[11.5px] text-ink-faint md:block">Lead Hunter</div>
         </div>
         <nav aria-label="Navegação principal" className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:pb-0 md:pt-3">
           {NAV.map(({ to, label, icon: Icon, end }) => (

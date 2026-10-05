@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useApp } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { ErrorBox, Spinner, ThemeSwitcher, Toasts } from '@/components/ui';
+import { OxyhubLogo } from '@/components/OxyhubLogo';
 
 export function LoginPage() {
   const { signIn, signUp } = useApp();
@@ -35,14 +36,9 @@ export function LoginPage() {
     <div className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       <section className="flex flex-col justify-between px-6 py-8 sm:px-12">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-ink">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-                <circle cx="11" cy="11" r="6" />
-                <path d="M20 20l-4.2-4.2" />
-              </svg>
-            </div>
-            <span className="text-[15px] font-extrabold tracking-tight">Lead Hunter</span>
+          <div className="flex items-center gap-3">
+            <OxyhubLogo className="h-7 w-auto" />
+            <span className="border-l border-line pl-3 text-[13px] font-semibold text-ink-faint">Lead Hunter</span>
           </div>
           <ThemeSwitcher compact />
         </div>
