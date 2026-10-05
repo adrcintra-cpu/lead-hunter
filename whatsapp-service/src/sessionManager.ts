@@ -346,10 +346,11 @@ export class SessionManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async transcribeIncoming(userId: string, raw: any): Promise<string | null> {
     const s = this.sessions.get(userId);
-    if (!s?.sock || !ttsAvailable()) return null;
     const msg = raw?.message;
     const audio = (msg?.ephemeralMessage?.message ?? msg?.viewOnceMessage?.message ?? msg)?.audioMessage;
     if (!audio) return null;
+    if (!ttsAvailable()) throw new Error('falta OPENAI_API_KEY nas variáveis do Railway');
+    if (!s?.sock) throw new Error('sessão do WhatsApp fechada');
     if (Number(audio.seconds) > MAX_TRANSCRIBE_SECONDS) throw new Error(`áudio com mais de ${MAX_TRANSCRIBE_SECONDS / 60} min`);
     const sock = s.sock;
     const buf = (await downloadMediaMessage(raw, 'buffer', {}, { logger: libLogger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
