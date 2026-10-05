@@ -80,6 +80,16 @@ Os componentes React nunca chamam IA nem providers diretamente: tudo passa por `
 - Itens de análise marcados como fato sem campo de evidência são rebaixados para inferência automaticamente.
 - A abordagem usa só dados encontrados; o que falta vira marcador entre colchetes (`[SEU SERVIÇO]`).
 
+## Ligar as APIs reais (atalho)
+
+Com as contas criadas (Supabase, Claude, Google Places e, se quiser, Resend e Meta), rode na pasta do projeto:
+
+```bash
+bash scripts/configurar-apis.sh
+```
+
+O script entra no Supabase, aplica o banco, grava as chaves como secrets (digitadas sem aparecer na tela, nunca em arquivo), publica as funções e mostra o que falta fazer à mão (variáveis da Vercel, webhooks e o agendamento). Os detalhes de cada serviço estão nas seções abaixo.
+
 ## Conectar as fontes reais (Fase 2)
 
 No modo `supabase` o app usa:
