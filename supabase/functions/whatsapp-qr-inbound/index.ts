@@ -12,6 +12,7 @@
 
 import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent } from '../_shared/automation/engine.ts';
 import { inWindow } from '../_shared/automation/planner.ts';
+import { looksAutomated } from '../_shared/automation/replies.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from '../_shared/automation/types.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
 import { handleUnknown } from '../_shared/automation/unknownInbound.ts';
@@ -50,6 +51,18 @@ export function chooseFormat(recent: string[], configured: 'texto' | 'audio'): '
   return configured;
 }
 
+/**
+ * Robô do outro lado? Última mensagem com cara de menu/atendimento automático:
+ * - primeira vez na conversa (24 h): responde UMA vez, em texto (às vezes é a saudação antes de uma pessoa);
+ * - de novo: para de responder sozinho (evita duas máquinas conversando).
+ */
+export function botDecision(recent: string[], lastIntent?: string): 'ok' | 'text' | 'stop' {
+  const latestBot = (recent[0] && looksAutomated(recent[0])) || lastIntent === 'resposta_automatica';
+  if (!latestBot) return 'ok';
+  const earlier = recent.slice(1).filter((b) => looksAutomated(b)).length;
+  return earlier >= 1 ? 'stop' : 'text';
+}
+
 /** Horário em que o BEELIE responde quem escreveu (hora de Brasília), todos os dias. */
 const REPLY_WINDOW = { startHour: 8, endHour: 21 };
 
@@ -85,7 +98,7 @@ Deno.serve(async (req) => {
         externalId: typeof b.externalId === 'string' && b.externalId ? `qr:${b.externalId.slice(0, 100)}` : undefined,
         receivedAt: typeof b.receivedAt === 'string' ? b.receivedAt : undefined,
       });
-      const auto = result?.suggestion ? await autoDecision(db, ownerId, r.leadId, result.suggestion) : null;
+      const auto = result?.suggestion ? await autoDecision(db, ownerId, r.leadId, result.suggestion, result.beelie?.lastIntent) : null;
       return Response.json({ ok: true, leadId: r.leadId, created: r.created, auto });
     } catch (err) {
       console.error('unknown', err instanceof Error ? err.message : String(err));
@@ -127,7 +140,7 @@ Deno.serve(async (req) => {
       externalId: typeof b.externalId === 'string' && b.externalId ? `qr:${b.externalId.slice(0, 100)}` : undefined,
       receivedAt: typeof b.receivedAt === 'string' ? b.receivedAt : undefined,
     });
-    const auto = result?.suggestion ? await autoDecision(db, ownerId, leadId, result.suggestion) : null;
+    const auto = result?.suggestion ? await autoDecision(db, ownerId, leadId, result.suggestion, result.beelie?.lastIntent) : null;
     return Response.json({ ok: true, auto });
   } catch (err) {
     console.error('inbound', err instanceof Error ? err.message : String(err));
@@ -136,7 +149,7 @@ Deno.serve(async (req) => {
 });
 
 /** Decide se o BEELIE responde sozinho: ligado nas configurações, dentro do horário e do limite diário. */
-async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: string; body: string; intent: string }) {
+async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: string; body: string; intent: string }, lastIntent?: string) {
   const { data: cfg } = await db.from('assistant_settings').select('auto_reply, reply_format, voice').eq('owner_id', ownerId).maybeSingle().then(
     (r: { data: Row | null }) => r,
     () => ({ data: null }),
@@ -173,7 +186,15 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     .gte('received_at', since)
     .order('received_at', { ascending: false })
     .limit(6);
-  const format = chooseFormat(((recent ?? []) as Row[]).map((r) => String(r.body ?? '')), cfg?.reply_format === 'audio' ? 'audio' : 'texto');
+  const bodies = ((recent ?? []) as Row[]).map((r) => String(r.body ?? ''));
+  // Atendimento automático (robô) do outro lado: o Beelie não fica conversando com outra máquina.
+  const bot = botDecision(bodies, lastIntent);
+  if (bot === 'stop') {
+    const { count: noted } = await db.from('lead_activities').select('id', { count: 'exact', head: true }).eq('lead_id', leadId).eq('payload->>reason', 'robo').gte('created_at', since);
+    if (!noted) await log(db, ownerId, leadId, 'lead_updated', 'Do outro lado é um atendimento automático (robô): o BEELIE parou de responder sozinho. Fale com a empresa por outro caminho ou responda o menu você mesmo.', { kind: 'auto_reply_skipped', reason: 'robo' });
+    return null;
+  }
+  const format = bot === 'text' ? 'texto' : chooseFormat(bodies, cfg?.reply_format === 'audio' ? 'audio' : 'texto');
   return {
     messageId: s.id,
     body: s.body,

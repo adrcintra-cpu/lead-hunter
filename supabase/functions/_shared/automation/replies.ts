@@ -236,3 +236,37 @@ export function withSiteInvite(body: string, intent: string, site: string | null
   if (mentioned(body) || alreadySent.some(mentioned)) return body;
   return `${body.trim()}\n\nSe quiser saber mais sobre a gente, é só acessar ${site}`;
 }
+
+/**
+ * Mensagem com cara de atendimento automático (chatbot da empresa do lead): menus, "digite",
+ * política de privacidade, avaliação, "não consigo entender"... Usado para o Beelie não ficar
+ * conversando com outro robô.
+ */
+const BOT_PATTERNS = [
+  /\bdigite\b/,
+  /\bescolha (uma|a) (das )?op[cç]/,
+  /\bop[cç][aã]o\s*\d/,
+  /\bselecione\b/,
+  /\bmenu\b/,
+  /\bresponda com\b/,
+  /pol[ií]tica de privacidade/,
+  /\bn[aã]o (consigo|consegui) (entender|compreender)/,
+  /\bn[aã]o entendi (a |sua )?(sua |[uú]ltima )?mensagem/,
+  /\b(envi(e|ar)|mande) (novamente )?em texto\b/,
+  /\bavalia[cç][aã]o\b/,
+  /\bassistente virtual\b/,
+  /\batendimento (virtual|autom[aá]tico|digital)\b/,
+  /\bmensagem autom[aá]tica\b/,
+  /\bresposta autom[aá]tica\b/,
+  /\bchat ?bot\b/,
+  /\bprotocolo\b/,
+  /\bbem[- ]vind[oa](\(o\)|\(a\))? de volta\b/,
+  /\bvoc[eê] concorda\b/,
+  /\bhor[aá]rio de atendimento\b/,
+  /\bem breve (um|uma|nosso|nossa) (atendente|consultor|consultora|especialista)/,
+];
+
+export function looksAutomated(text: string): boolean {
+  const t = text.replace(/^\[Áudio transcrito\]\s*/i, '').toLowerCase();
+  return BOT_PATTERNS.some((re) => re.test(t));
+}

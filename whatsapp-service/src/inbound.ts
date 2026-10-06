@@ -235,6 +235,15 @@ export class InboundRelay {
     return !!id && this.ownIds.has(id);
   }
 
+  private dropPending(userId: string, phone: string) {
+    const key = this.chatKey(userId, phone);
+    const t = this.pending.get(key);
+    if (!t) return;
+    clearTimeout(t);
+    this.pending.delete(key);
+    log.info({ user: maskUser(userId), to: maskPhone(phone) }, 'resposta automática cancelada: nova mensagem sem resposta automática');
+  }
+
   private chatKey(userId: string, phone: string) {
     return `${userId}:${phoneKey(phone)}`;
   }
@@ -334,6 +343,9 @@ export class InboundRelay {
       log.info({ user: maskUser(userId), from: maskPhone(m.phone) }, 'resposta de lead registrada');
       const data = (await res.json().catch(() => ({}))) as { auto?: AutoReply | null };
       if (data.auto?.body && data.auto.messageId) this.schedule(userId, leadId, m.phone, data.auto);
+      // Sem resposta automática para esta mensagem (robô do outro lado, limite, fora do horário):
+      // a resposta que estava agendada para a mensagem anterior também não sai.
+      else this.dropPending(userId, m.phone);
       return 'forwarded';
     } catch (err) {
       log.error({ user: maskUser(userId), from: maskPhone(m.phone), err: err instanceof Error ? err.message : String(err) }, 'falha ao registrar resposta');
