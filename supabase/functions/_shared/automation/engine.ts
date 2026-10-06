@@ -10,6 +10,7 @@ import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/m
 import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
+import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -116,10 +117,20 @@ function templateData(lead: Row, c: Row, p: Row): TemplateData {
 }
 
 /** Mesmo comportamento de AutomationService.compose no app. */
+/** Nome do SDR (assistente) do usuário; sem configuração, "Beelie". */
+async function sdrName(db: Db, ownerId: string): Promise<string> {
+  const { data } = await db.from('assistant_settings').select('name').eq('owner_id', ownerId).maybeSingle().then(
+    (r: { data: Row | null }) => r,
+    () => ({ data: null }),
+  );
+  const n = String(data?.name ?? '').trim();
+  return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : 'Beelie';
+}
+
 /** Mensagens já enviadas e notas do lead: o follow-up continua a conversa em vez de repetir. */
 async function conversationContext(db: Db, lead: Row) {
   const [{ data: msgs }, { data: notes }] = await Promise.all([
-    db.from('messages').select('channel, final_content, sent_at').eq('lead_id', lead.id).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(4),
+    db.from('messages').select('channel, final_content, sent_at').eq('lead_id', lead.id).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(6),
     db.from('lead_notes').select('body').eq('lead_id', lead.id).order('created_at', { ascending: false }).limit(3),
   ]);
   const history = ((msgs ?? []) as Row[]).reverse().map((m) => ({
@@ -128,7 +139,12 @@ async function conversationContext(db: Db, lead: Row) {
     text: String(m.final_content).slice(0, 600),
   }));
   const days = lead.last_contact_at ? Math.max(0, Math.floor((Date.now() - new Date(lead.last_contact_at).getTime()) / 864e5)) : undefined;
-  return { history, daysSinceLastContact: days, notes: ((notes ?? []) as Row[]).map((n) => String(n.body)) };
+  return {
+    history,
+    daysSinceLastContact: days,
+    notes: ((notes ?? []) as Row[]).map((n) => String(n.body)),
+    brief: 'beelie' in lead ? beelieBrief(lead.beelie, { contactName: lead.contact_name, contactRole: lead.contact_role, email: lead.email }) : undefined,
+  };
 }
 
 async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: Cadence, stepIndex: number, campaignName?: string): Promise<MessageDraft> {
@@ -158,7 +174,8 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
       channel: step.channel,
       options: {
         variant: 0,
-        senderName: p.full_name,
+        // O SDR que assina a prospecção é o assistente (Beelie), não o usuário.
+        senderName: await sdrName(db, ownerId),
         senderCompany: p.company_name,
         offer: p.offer,
         contactName: lead.contact_name,
@@ -423,7 +440,8 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
     } else {
       if (!sender) throw new Error('Remetente de e-mail não configurado (Configurações → Envio).');
       const html = emailHtml(draft.body, p.signature, { imageUrl: p.signature_image_url, linkUrl: p.signature_link_url, width: p.signature_image_width }) ?? undefined;
-      r = await sendEmail({ from: sender, fromName: p.full_name || p.company_name || undefined, to: lead.email, subject: draft.subject || `Contato — ${p.company_name ?? ''}`.trim(), text: draft.body, html });
+      const sdr = await sdrName(db, owner);
+      r = await sendEmail({ from: sender, fromName: p.company_name ? `${sdr} | ${p.company_name}` : sdr, to: lead.email, subject: draft.subject || `Contato — ${p.company_name ?? ''}`.trim(), text: draft.body, html });
     }
     const sentAt = new Date().toISOString();
     await db.from('messages').update({ status: 'sent', external_id: r.externalId, provider: r.provider, sent_at: sentAt }).eq('id', msg.id);
@@ -547,6 +565,20 @@ export async function findLeadByRecipient(db: Db, channel: SendChannel, address:
   return null;
 }
 
+/** Conversa unificada (WhatsApp + e-mail), em ordem cronológica: o Beelie lembra de tudo. */
+async function loadConversation(db: Db, leadId: string, limit = 14) {
+  const [{ data: sent }, { data: inb }] = await Promise.all([
+    db.from('messages').select('channel, final_content, sent_at, updated_at, status').eq('lead_id', leadId).order('created_at', { ascending: false }).limit(20),
+    db.from('inbound_messages').select('channel, body, received_at').eq('lead_id', leadId).order('received_at', { ascending: false }).limit(20),
+  ]);
+  const ch = (c: string) => (c === 'email' ? 'e-mail' : c === 'whatsapp' ? 'WhatsApp' : c);
+  const out = ((sent ?? []) as Row[])
+    .filter((m) => m.sent_at || m.status === 'opened_whatsapp')
+    .map((m) => ({ from: 'vendedor' as const, at: String(m.sent_at ?? m.updated_at), channel: ch(m.channel), text: String(m.final_content ?? '').slice(0, 800) }));
+  const ins = ((inb ?? []) as Row[]).map((r) => ({ from: 'lead' as const, at: String(r.received_at), channel: ch(r.channel), text: String(r.body ?? '').slice(0, 800) }));
+  return [...out, ...ins].sort((a, b) => a.at.localeCompare(b.at)).slice(-limit);
+}
+
 /** Categorias em que a IA não sugere resposta (o lead pediu para parar ou é resposta automática). */
 const NO_SUGGESTION = new Set(['sem_contato', 'ausente']);
 
@@ -563,11 +595,7 @@ export interface ReplySuggestionDraft {
 
 async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Row, channel: SendChannel, category: string, campaignId?: string | null): Promise<ReplySuggestionDraft | null> {
   if (!hasClaude() || NO_SUGGESTION.has(category)) return null;
-  const [{ data: sent }, { data: inb }, { data: p }] = await Promise.all([
-    db.from('messages').select('final_content, sent_at, updated_at, status').eq('lead_id', lead.id).eq('channel', channel).order('created_at', { ascending: false }).limit(10),
-    db.from('inbound_messages').select('body, received_at').eq('lead_id', lead.id).eq('channel', channel).order('received_at', { ascending: false }).limit(10),
-    db.from('profiles').select('full_name, company_name, offer').eq('id', ownerId).maybeSingle(),
-  ]);
+  const [conv, { data: p }] = await Promise.all([loadConversation(db, lead.id, 12), db.from('profiles').select('full_name, company_name, offer').eq('id', ownerId).maybeSingle()]);
   // Persona e base de conhecimento do usuário; sem tabela ou sem linha, usa o padrão.
   const { data: cfg } = await db.from('assistant_settings').select('name, persona, knowledge, playbooks').eq('owner_id', ownerId).maybeSingle().then(
     (r: { data: Row | null }) => r,
@@ -575,11 +603,7 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
   );
   const assistant = withDefaults(cfg);
   const day = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  const out = ((sent ?? []) as Row[])
-    .filter((m) => m.sent_at || m.status === 'opened_whatsapp')
-    .map((m) => ({ from: 'vendedor' as const, at: String(m.sent_at ?? m.updated_at), text: String(m.final_content ?? '').slice(0, 800) }));
-  const ins = ((inb ?? []) as Row[]).map((r) => ({ from: 'lead' as const, at: String(r.received_at), text: String(r.body ?? '').slice(0, 800) }));
-  const conversation = [...out, ...ins].sort((a, b) => a.at.localeCompare(b.at)).slice(-12).map((m) => ({ from: m.from, date: day(m.at), text: m.text }));
+  const conversation = conv.map((m) => ({ from: m.from, date: `${day(m.at)}, ${m.channel}`, text: m.text }));
   if (!conversation.length || conversation[conversation.length - 1].from !== 'lead') return null;
 
   const started = Date.now();
@@ -587,11 +611,13 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
     const run = await runTask<{ message: string; intent: string; note: string }>('suggestReply', {
       channel,
       category,
-      sender: { name: p?.full_name, company: p?.company_name, offer: p?.offer },
+      // O SDR é o assistente (Beelie), nunca o nome do usuário.
+      sender: { name: assistant.name, company: p?.company_name, offer: p?.offer },
       contact: { name: lead.contact_name, role: lead.contact_role },
       company: companyForAI(company),
       conversation,
       assistant,
+      brief: beelieBrief(lead.beelie, { contactName: lead.contact_name, contactRole: lead.contact_role, email: lead.email }),
     });
     await logRun(db, ownerId, 'suggestReply', started, 'ok', run.usage);
     const body = run.output.message?.trim();
@@ -633,11 +659,20 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
   const name = nameOf(company);
 
   let cls: ReplyAnalysis = analyzeReplyRules(text);
+  const history = await loadConversation(db, lead.id, 10);
+  const lastOutbound = [...history].reverse().find((m) => m.from === 'vendedor')?.text;
+  let aiSignals: Partial<ConversationSignals> | null = null;
   if (hasClaude()) {
     const started = Date.now();
     try {
-      const run = await runTask<Partial<ReplyAnalysis>>('classifyReply', { text, context: `Empresa ${name}, etapa atual: ${lead.stage}` });
+      const run = await runTask<Partial<ReplyAnalysis> & Partial<ConversationSignals>>('classifyReply', {
+        text,
+        context: `Empresa ${name}, etapa atual: ${lead.stage}`,
+        conversation: history.map((m) => ({ from: m.from === 'lead' ? 'lead' : 'beelie', text: m.text })),
+        brief: beelieBrief(lead.beelie, { contactName: lead.contact_name, contactRole: lead.contact_role, email: lead.email }),
+      });
       cls = normalizeAnalysis(run.output, text);
+      aiSignals = run.output;
       await logRun(db, i.ownerId, 'classifyReply', started, 'ok', run.usage);
     } catch {
       await logRun(db, i.ownerId, 'classifyReply', started, 'error', {});
@@ -695,6 +730,9 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
     suggestedAction: cls.suggestedAction,
   });
 
+  // Beelie: memória da conversa e enriquecimento do cadastro (só dado confirmado e não corrigido por pessoa).
+  const intelResult = await applyBeelie(db, i.ownerId, lead, company, combineSignals(aiSignals, analyzeSignalsRules(text, lastOutbound, { companyName: name, category: cls.category })), at, camp, cls.category === 'reuniao');
+
   const d = replyDecision(cls.category, name);
   if (d.suppress) {
     const reason = `Pediu para não receber mensagens (${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })})`;
@@ -719,5 +757,62 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
     const extra = suggestion ? ` Resposta da IA pronta no perfil do lead (Gerar abordagem).${suggestion.note ? ` ${suggestion.note}` : ''}` : '';
     await createTask(db, i.ownerId, { leadId: lead.id, campaignId: camp?.id, title: d.task.title, description: `${d.task.description ?? ''}${extra}`.trim(), source: 'resposta', ownerName: camp?.owner_name ?? lead.owner_name, dueAt: at });
   }
-  return { ...(inbound as Row), suggestion, category: cls.category };
+  return { ...(inbound as Row), suggestion, category: cls.category, beelie: intelResult?.intel ?? null };
+}
+
+/** Aplica a análise ao lead: memória (leads.beelie), cadastro, outro responsável e reunião. */
+async function applyBeelie(db: Db, ownerId: string, lead: Row, company: Row, signals: ConversationSignals, at: string, camp: Row | null, meetingTaskByDecision = false) {
+  if (!('beelie' in lead)) return null; // migration ainda não aplicada: segue sem a memória
+  const r = mergeIntel(lead.beelie, { contactName: lead.contact_name, contactRole: lead.contact_role, email: lead.email }, signals, at, { companyName: nameOf(company) });
+  const patch: Row = { beelie: r.intel };
+  if (r.patch.contactName) patch.contact_name = r.patch.contactName;
+  if (r.patch.contactRole) patch.contact_role = r.patch.contactRole;
+  if (r.patch.email) patch.email = r.patch.email;
+  await db.from('leads').update(patch).eq('id', lead.id);
+  Object.assign(lead, patch); // a sugestão de resposta usa o cadastro atualizado
+
+  const applied = r.learned.filter((l) => l.applied);
+  if (applied.length) await log(db, ownerId, lead.id, 'lead_updated', `Cadastro atualizado pelo Beelie: ${applied.map((l) => `${l.label} → ${l.value}`).join(', ')}`, { kind: 'beelie_update', fields: applied });
+  const noted = r.learned.filter((l) => !l.applied);
+  if (noted.length) await log(db, ownerId, lead.id, 'lead_updated', `Beelie identificou: ${noted.map((l) => `${l.label}: ${l.value}`).join(' · ')}`, { kind: 'beelie_note', fields: noted });
+  await log(db, ownerId, lead.id, 'lead_updated', `Beelie: ${stageLabel(r.intel.stage)} · ${r.intel.temperature}${r.intel.needArea ? ` · ${NEED_AREAS[r.intel.needArea]}` : ''}`, { kind: 'beelie_stage', stage: r.intel.stage, temperature: r.intel.temperature, intent: signals.intent });
+
+  if (r.referred) {
+    const c = r.referred.contact ?? '';
+    // Outro responsável: vira contato da empresa (tabela contacts), sem sobrescrever o contato atual.
+    await db.from('contacts').insert({
+      owner_id: ownerId,
+      company_id: company.id,
+      name: r.referred.name,
+      role: r.referred.role ?? null,
+      email: c.includes('@') ? c : null,
+      phone: c && !c.includes('@') ? c.replace(/\D/g, '') : null,
+      source: 'conversa',
+    }).then(() => undefined, () => undefined);
+    await createTask(db, ownerId, {
+      leadId: lead.id,
+      campaignId: camp?.id,
+      title: `Falar com ${r.referred.name} (${nameOf(company)})`,
+      description: `Indicada na conversa como responsável${r.referred.role ? ` (${r.referred.role})` : ''}.${c ? ` Contato: ${c}.` : ' Contato ainda não informado.'}`,
+      source: 'resposta',
+      ownerName: camp?.owner_name ?? lead.owner_name,
+      dueAt: at,
+    });
+  }
+  if (r.meetingReached) {
+    if (!ADVANCED_STAGES.includes(lead.stage) && lead.stage !== 'reuniao') await setStage(db, lead.id, 'reuniao');
+    const { data: open } = await db.from('tasks').select('id').eq('lead_id', lead.id).eq('status', 'aberta').ilike('title', 'Agendar reunião%').limit(1);
+    if (!open?.length && !meetingTaskByDecision) {
+      await createTask(db, ownerId, {
+        leadId: lead.id,
+        campaignId: camp?.id,
+        title: `Agendar reunião com ${lead.contact_name || nameOf(company)}`,
+        description: `O lead aceitou conversar. Combine o horário e confirme por ${lead.contact_name ? lead.contact_name.split(' ')[0] : 'mensagem'}.${r.intel.need ? ` Necessidade: ${r.intel.need}.` : ''}`,
+        source: 'resposta',
+        ownerName: camp?.owner_name ?? lead.owner_name,
+        dueAt: at,
+      });
+    }
+  }
+  return r;
 }

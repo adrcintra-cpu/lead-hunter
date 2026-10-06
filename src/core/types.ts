@@ -1,3 +1,4 @@
+import type { BeelieIntel } from '../../supabase/functions/_shared/automation/beelie.ts';
 // Tipos de domínio do Lead Hunter. Espelham as tabelas em supabase/migrations.
 
 export * from '../../supabase/functions/_shared/automation/types.ts';
@@ -161,6 +162,8 @@ export interface Lead {
   /** Opt-in para WhatsApp: sem isso, a automação não envia WhatsApp, só cria tarefa. */
   whatsappConsentAt?: string;
   whatsappConsentSource?: string;
+  /** Memória do Beelie: estágio, temperatura, o que foi identificado na conversa e correções humanas. */
+  beelie?: BeelieIntel;
   createdAt: string;
   updatedAt: string;
 }

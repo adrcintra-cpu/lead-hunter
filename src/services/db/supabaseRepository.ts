@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Profile } from '@/core/types';
+import type { Lead, Profile } from '@/core/types';
 import { APPEND_ONLY, emptyDb, type DbState, type Repository, type TableName, type Tables } from './schema';
 import { chunks, purgeState, type PurgeRequest } from './purge';
 
@@ -127,6 +127,8 @@ export class SupabaseRepository implements Repository {
   private queue: Promise<void> = Promise.resolve();
   /** As colunas da imagem da assinatura existem (migration 900 aplicada). */
   private signatureCols = false;
+  /** A coluna leads.beelie (memória do Beelie) existe (migration 1000 aplicada). */
+  private beelieCol = false;
 
   constructor(
     private client: SupabaseClient,
@@ -154,6 +156,21 @@ export class SupabaseRepository implements Repository {
         (next as unknown as Record<string, unknown[]>)[t] = rows.map((r) => fromRow(t, r));
       }),
     );
+    // Memória do Beelie: lida à parte, para o app funcionar mesmo antes da migration.
+    {
+      const intel = new Map<string, unknown>();
+      this.beelieCol = true;
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await this.client.from('leads').select('id, beelie').range(from, from + 999);
+        if (error) {
+          this.beelieCol = false;
+          break;
+        }
+        for (const r of (data ?? []) as { id: string; beelie: unknown }[]) if (r.beelie) intel.set(r.id, r.beelie);
+        if (!data || data.length < 1000) break;
+      }
+      if (intel.size) next.leads = next.leads.map((l) => (intel.has(l.id) ? { ...l, beelie: intel.get(l.id) as Lead['beelie'] } : l));
+    }
     const { data: p, error } = await this.client.from('profiles').select('*').eq('id', this.user.id).maybeSingle();
     if (error) throw new Error(`Falha ao carregar o perfil: ${error.message}`);
     if (p) {
@@ -247,6 +264,10 @@ export class SupabaseRepository implements Repository {
     const values = toRow(table, { ...(patch as Record<string, unknown>), ...stamp }, true);
     delete values.id;
     if (Object.keys(values).length) this.enqueue(`Atualizar ${def.sql}`, () => this.client.from(def.sql).update(values).eq('id', id));
+    if (table === 'leads' && 'beelie' in (patch as Record<string, unknown>) && this.beelieCol) {
+      const beelie = (patch as Record<string, unknown>).beelie ?? null;
+      this.enqueue('Atualizar memória do Beelie', () => this.client.from('leads').update({ beelie }).eq('id', id));
+    }
     this.emit();
     return updated;
   }

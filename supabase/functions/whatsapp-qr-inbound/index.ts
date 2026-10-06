@@ -176,7 +176,16 @@ async function markAutoSent(db: Row, ownerId: string, leadId: string, b: Row) {
   // Conversa seguindo: a tarefa "Responder" é concluída, exceto quando você precisa entrar (reunião aceita ou pedido para o vendedor).
   const intent = String(b.intent ?? /\(([^)]+)\)/.exec(String(msg.template ?? ''))?.[1] ?? '');
   if (!NEEDS_HUMAN.has(intent)) {
-    await db.from('tasks').update({ status: 'concluida', done_at: at }).eq('lead_id', leadId).eq('owner_id', ownerId).eq('source', 'resposta').eq('status', 'aberta');
+    // Tarefas de "responder" são concluídas; agendar reunião e falar com quem foi indicado continuam com você.
+    await db
+      .from('tasks')
+      .update({ status: 'concluida', done_at: at })
+      .eq('lead_id', leadId)
+      .eq('owner_id', ownerId)
+      .eq('source', 'resposta')
+      .eq('status', 'aberta')
+      .not('title', 'ilike', 'Agendar reunião%')
+      .not('title', 'ilike', 'Falar com%');
   }
   return { ok: true };
 }

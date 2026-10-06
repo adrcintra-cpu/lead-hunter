@@ -1,7 +1,9 @@
 // Prompts versionados da camada de IA. Cada tarefa define: system, mensagem do
 // usuário, JSON Schema da saída (via tool use) e pós-processamento.
 
-export const PROMPT_VERSION = 'v4';
+import { BEELIE_INTENTS, BEELIE_STAGES, FACT_FIELDS, NEED_AREAS } from '../automation/beelie.ts';
+
+export const PROMPT_VERSION = 'v5';
 
 const RULES = `Regras obrigatórias:
 - Use SOMENTE os dados fornecidos. Nunca invente nome de pessoas, números, clientes, prêmios ou fatos.
@@ -111,12 +113,24 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
   },
 
   generateApproach: {
-    system: `Você escreve primeiras mensagens comerciais B2B curtas, naturais e profissionais. ${RULES}
-- WhatsApp: até 3 frases, sem formatação, sem emojis em excesso, termina com uma pergunta simples.
-- E-mail: comece com "Assunto: ...", até 90 palavras no corpo.
+    system: `Você é o SDR que escreve as mensagens de prospecção (o nome e a empresa estão em "Remetente"). Você conduz uma conversa progressiva, não dispara pitch:
+abertura → identificação do contato → engajamento → descoberta → oportunidade → qualificação → reunião. ${RULES}
+PRIMEIRA MENSAGEM (sem histórico): o objetivo NÃO é vender, é FAZER A PESSOA RESPONDER.
+- Curta (1 a 2 frases no WhatsApp), com um contexto real da empresa (segmento, cidade ou site) + curiosidade + UMA pergunta fácil de responder.
+- Sem nome do contato: pergunte se fala com quem cuida da área (marketing/comercial/presença digital) da empresa. Com nome: cumprimente pelo primeiro nome e pergunte se é quem cuida dessa parte.
+- NÃO liste serviços, NÃO faça pitch, NÃO peça reunião na primeira mensagem. Nada de "somos especialistas em X, Y, Z".
+- Evite também o vazio: só "Olá, tudo bem?" não serve.
+- Apresentação, se houver: "Sou o <nome do remetente>, da <empresa>". Nunca use outro nome de pessoa para o remetente.
+FOLLOW-UP (com histórico): a conversa é UMA só entre WhatsApp e e-mail. Considere tudo o que já foi enviado em qualquer canal.
+- Nunca recomece como primeiro contato ("Oi, tudo bem?" de novo). Não repita frases, argumentos nem a apresentação.
+- O e-mail não pode ser o WhatsApp em versão maior: traga um ângulo novo e útil, curto.
+- Último contato: educado, sem insistir, porta aberta.
+FORMATO:
+- WhatsApp: sem formatação, no máximo 1 emoji; termina com uma pergunta simples (só uma).
+- E-mail: comece com "Assunto: ...", até 90 palavras no corpo, assinatura com o nome do remetente.
 - LinkedIn: até 300 caracteres.
-- Se faltar um dado do remetente, use um marcador entre colchetes, como [SEU NOME].
-- Nunca prometa resultados nem cite informações que não estejam no input.`,
+- Nunca use colchetes nem marcadores como [SEU NOME]. Nunca prometa resultados, nem cite análise de site/redes que não esteja no input.
+- Nomes próprios com só a inicial maiúscula na mensagem (ex.: "Sou o Beelie, da Oxycom"), mesmo que venham em maiúsculas no input.`,
     schema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
     user: (input) => {
       const { company, channel, options } = input as { company: Json; channel: string; options: Json };
@@ -125,8 +139,9 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
         `Canal: ${channel}`,
         `Momento da cadência: ${stage}`,
         `Variação: ${options.variant}`,
-        `Remetente: ${options.senderName || '[SEU NOME]'}, empresa ${options.senderCompany || '[SUA EMPRESA]'}, oferta: ${options.offer || '[SEU SERVIÇO]'}`,
-        options.contactName ? `Contato: ${options.contactName}${options.contactRole ? `, ${options.contactRole}` : ''} (use o primeiro nome)` : 'Contato: não informado (cumprimente a equipe da empresa)',
+        `Remetente (SDR): ${options.senderName || 'Beelie'}, da ${options.senderCompany || 'empresa'}${options.offer ? `; oferta (contexto, não liste no primeiro contato): ${options.offer}` : ''}`,
+        options.brief ? `Memória da conversa com este lead (siga o objetivo do estágio):\n${options.brief}` : '',
+        options.contactName ? `Contato: ${options.contactName}${options.contactRole ? `, ${options.contactRole}` : ''} (use o primeiro nome)` : 'Contato: nome desconhecido (pergunte se fala com quem cuida da área; não invente nome)',
         options.instructions ? `Instruções do usuário: ${options.instructions}` : '',
         Array.isArray(options.notes) && options.notes.length ? `Observações do usuário sobre o lead (use só se ajudar; não invente além disso):\n- ${(options.notes as string[]).join('\n- ')}` : '',
         options.campaignName ? `Campanha: ${options.campaignName}` : '',
@@ -138,7 +153,7 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
             ].join('\n')
           : '',
         `Empresa alvo (dados reais encontrados): ${JSON.stringify(stripInternal(company))}`,
-        'Nunca use só "Olá {nome}, tudo bem?": cite pelo menos um dado real da empresa (segmento, cidade ou site).',
+        'Cite no máximo um dado real da empresa (segmento, cidade ou site) e só o que está acima.',
       ]
         .filter(Boolean)
         .join('\n');
@@ -161,7 +176,20 @@ Categorias:
 - nao_identificado: não dá para saber
 Na dúvida entre nao_interessado e sem_contato, prefira sem_contato se houver pedido para parar de receber.
 suggestedAction: uma frase curta e prática do que o vendedor deve fazer agora.
-followUpDays: só para "posteriormente", em quantos dias retomar (use o prazo citado; sem prazo, 30).`,
+followUpDays: só para "posteriormente", em quantos dias retomar (use o prazo citado; sem prazo, 30).
+
+Análise de SDR (use a CONVERSA para entender a que pergunta a pessoa respondeu):
+intent: positivo, neutro, interessado, pediu_explicacao, respondeu_pergunta, contato_errado, indicou_outro_contato, objecao, sem_interesse, nao_contatar, preco, reuniao (aceitou ou pediu conversar), resposta_automatica, fora_do_escritorio.
+extracted: SÓ o que a pessoa disse nesta resposta, sem inferir.
+- contact_name / contact_role / email / phone: dados de QUEM ESTÁ RESPONDENDO. Ex.: "Meu nome é Ricardo" → contact_name Ricardo (confirmado). Resposta curta "Mariana" logo após "como posso te chamar?" → contact_name Mariana (confirmado).
+- referred_name / referred_role / referred_contact: OUTRA pessoa indicada ("quem cuida é a Fernanda"). Nunca coloque o indicado em contact_name.
+- is_right_person: "sim" ou "nao" (se a pessoa disse se cuida da área perguntada).
+- need, problem, area, interest, timing, best_time, preferred_channel, website, objection: só se ditos.
+- certainty: "confirmado" quando a pessoa afirmou; "provavel" quando é só indício (ex.: nome deduzido de um e-mail joao.silva@ → provavel).
+- Valores curtos: nome só o nome ("Ricardo", não a frase).
+needArea: área da necessidade, se houver (${Object.keys(NEED_AREAS).join(', ')}), senão null.
+temperature: frio (só educação, pouco interesse), morno (explica a situação, responde, tem curiosidade), quente (pergunta como funciona, preço ou prazo, mostra problema real ou aceita conversar).
+stage: estágio sugerido (${BEELIE_STAGES.map((x) => x.id).join(', ')}). Só "reuniao" se a pessoa aceitou ou pediu conversar.`,
     schema: {
       type: 'object',
       properties: {
@@ -170,19 +198,51 @@ followUpDays: só para "posteriormente", em quantos dias retomar (use o prazo ci
         summary: { type: 'string', description: 'Resumo em até 20 palavras.' },
         suggestedAction: { type: 'string', description: 'Próxima ação sugerida, uma frase.' },
         followUpDays: { type: 'integer' },
+        intent: { type: 'string', enum: [...BEELIE_INTENTS] },
+        extracted: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              field: { type: 'string', enum: [...FACT_FIELDS] },
+              value: { type: 'string' },
+              certainty: { type: 'string', enum: ['confirmado', 'provavel'] },
+            },
+            required: ['field', 'value', 'certainty'],
+          },
+        },
+        needArea: { type: ['string', 'null'], enum: [...Object.keys(NEED_AREAS), null] },
+        temperature: { type: 'string', enum: ['frio', 'morno', 'quente'] },
+        stage: { type: 'string', enum: BEELIE_STAGES.map((x) => x.id) },
       },
-      required: ['category', 'confidence', 'summary', 'suggestedAction'],
+      required: ['category', 'confidence', 'summary', 'suggestedAction', 'intent', 'extracted', 'needArea', 'temperature', 'stage'],
     },
     user: (input) => {
-      const { text, context } = input as { text: string; context?: string };
-      return [context ? `Contexto: ${context}` : '', `Resposta do lead:\n${text}`].filter(Boolean).join('\n\n');
+      const { text, context, conversation, brief } = input as { text: string; context?: string; conversation?: { from: string; text: string }[]; brief?: string };
+      return [
+        context ? `Contexto: ${context}` : '',
+        brief ? `O que já se sabe do lead:\n${brief}` : '',
+        conversation?.length ? `Conversa anterior (mais antiga primeiro):\n${conversation.map((m) => `[${m.from === 'lead' ? 'Lead' : 'Beelie'}] ${m.text}`).join('\n')}` : '',
+        `Resposta do lead (analise ESTA):\n${text}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
     },
     output: (raw) => raw,
   },
 
   suggestReply: {
-    system: `Você escreve a próxima resposta de uma conversa comercial B2B pelo WhatsApp ou e-mail, para o vendedor revisar e enviar.
-Siga a PERSONA, use só a BASE DE CONHECIMENTO e os PLAYBOOKS fornecidos na mensagem. Eles definem tom, o que dizer e o que perguntar.
+    system: `Você é o SDR (nome do assistente na PERSONA, da empresa do vendedor) e escreve a próxima mensagem de uma conversa comercial B2B pelo WhatsApp ou e-mail.
+Siga a PERSONA, use só a BASE DE CONHECIMENTO e os PLAYBOOKS fornecidos. Eles definem tom, o que dizer e o que perguntar.
+Conduza a conversa por estágios, um passo por vez, guiado pela MEMÓRIA DO LEAD (estágio atual, objetivo, o que já se sabe):
+- Identificação: confirme se fala com a pessoa certa; se ela confirmou e o nome é desconhecido, pergunte com naturalidade ("Perfeito! Com quem eu falo?" ou "Como posso te chamar?").
+- Outra pessoa indicada: NÃO continue o pitch. Agradeça e peça o contato dela ou pergunte se prefere que fale com ela por outro canal.
+- Engajamento: apresente-se uma vez ("Sou o <nome>, da <empresa>") e diga em uma frase por que entrou em contato, com uma pergunta de descoberta.
+- Descoberta: entenda o contexto e a necessidade, uma pergunta por vez, sem interrogatório.
+- Oportunidade: conecte a necessidade encontrada a UMA solução da base. Nunca liste todos os serviços.
+- Qualificação: entenda prioridade/prazo/quem decide, com leveza.
+- Reunião: a conversa é consequência do interesse. Só convide quando houver interesse claro ou o lead pedir; não proponha reunião no começo da conversa.
+- NUNCA pergunte de novo o que a memória diz que já se sabe. Use o primeiro nome quando conhecido.
 Regras que valem acima de tudo:
 - Nunca invente preços, prazos, clientes, cases, números ou serviços que não estejam no input. Na dúvida, diga que um especialista confirma.
 - Responda à ÚLTIMA mensagem do lead. Tom humano e natural, frases curtas, sem formatação.
@@ -196,6 +256,8 @@ Regras que valem acima de tudo:
 - Objeção: reconheça, responda com um argumento curto e deixe a porta aberta, sem insistir.
 - Não interessado: agradeça e encerre com educação, sem nova pergunta. Pediu para falar depois: concorde e diga que retoma no prazo citado.
 - Não repita a apresentação nem frases já enviadas. Nunca use colchetes nem marcadores como [SEU NOME].
+- Nunca invente nome, cargo, problema, orçamento, necessidade, análise de site/redes ou resultado. Se não souber, pergunte com naturalidade.
+- Nomes próprios com só a inicial maiúscula na mensagem (ex.: "Sou o Beelie, da Oxycom"), mesmo que venham em maiúsculas no input.
 intent:
 - continuar: segue a conversa (entendendo o cenário ou respondendo dúvida)
 - propor_conversa: a mensagem propõe a conversa com o vendedor/especialista
@@ -221,6 +283,7 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         company: Json;
         conversation: { from: 'vendedor' | 'lead'; date: string; text: string }[];
         assistant?: { name?: string; persona?: string; knowledge?: string; playbooks?: string };
+        brief?: string;
       };
       const cut = (t: string | undefined, n: number) => (t ?? '').trim().slice(0, n);
       return [
@@ -229,14 +292,15 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         i.assistant?.playbooks ? `PLAYBOOKS:\n${cut(i.assistant.playbooks, 6000)}` : '',
         '---',
         `Canal: ${i.channel}`,
-        `Vendedor: ${i.sender.name || 'não informado (não se apresente pelo nome dele)'}${i.sender.company ? `, empresa ${i.sender.company}` : ''}`,
+        `Você (SDR): ${i.assistant?.name || i.sender.name || 'Beelie'}${i.sender.company ? `, da ${i.sender.company}` : ''}. O vendedor/especialista humano continua a conversa quando necessário.`,
         i.sender.offer ? `Oferta (perfil do vendedor): ${i.sender.offer}` : '',
         i.contact?.name ? `Contato no lead: ${i.contact.name}${i.contact.role ? `, ${i.contact.role}` : ''} (use o primeiro nome)` : '',
         i.category ? `Classificação da última resposta: ${i.category}` : '',
+        i.brief ? `MEMÓRIA DO LEAD (siga o objetivo do estágio; não pergunte o que já se sabe):\n${i.brief}` : '',
         `Empresa do lead (dados reais): ${JSON.stringify(stripInternal(i.company))}`,
         'Conversa até agora (mais antiga primeiro):',
-        ...i.conversation.map((m) => `[${m.from === 'vendedor' ? 'Vendedor' : 'Lead'}, ${m.date}] ${m.text}`),
-        'Escreva a próxima mensagem do vendedor.',
+        ...i.conversation.map((m) => `[${m.from === 'vendedor' ? 'Você' : 'Lead'}, ${m.date}] ${m.text}`),
+        'Escreva a sua próxima mensagem.',
       ]
         .filter(Boolean)
         .join('\n');

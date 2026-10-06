@@ -23,7 +23,8 @@ import type { ResultsSnapshot } from '@/core/providers/types';
 import { digits, normalize, uid } from '@/core/utils';
 import { leadContext, type LeadHunterService } from '../leadHunterService';
 import { WhatsAppService } from '../whatsapp/whatsAppService';
-import { DEFAULT_ASSISTANT, loadAssistant } from '@/services/assistant/assistantSettings';
+import { DEFAULT_ASSISTANT, loadAssistant, sdrName } from '@/services/assistant/assistantSettings';
+import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel } from '../../../supabase/functions/_shared/automation/beelie.ts';
 
 type SendStep = Extract<CadenceStep, { type: 'send' }>;
 
@@ -271,7 +272,7 @@ export class AutomationService {
     const stage = messageStage(cad.steps, stepIndex);
     const at = this.nowIso();
     if (step.mode === 'template' && step.template.trim()) {
-      const data = this.templateData(lead, c);
+      const data = { ...this.templateData(lead, c), remetente: await sdrName() };
       const body = renderTemplate(step.template, data);
       const subject = step.subject ? renderTemplate(step.subject, data).text : undefined;
       const text = step.channel === 'email' ? withOptOutFooter(body.text) : body.text;
@@ -280,7 +281,7 @@ export class AutomationService {
     const p = this.svc.profile;
     const raw = await this.svc.ai.generateApproach(c, step.channel, {
       variant: 0,
-      senderName: p.fullName,
+      senderName: await sdrName(),
       senderCompany: p.companyName,
       offer: p.offer,
       contactName: lead.contactName,
@@ -473,7 +474,7 @@ export class AutomationService {
       const r =
         channel === 'whatsapp'
           ? await this.svc.providers.whatsappSender!.send({ to: c.whatsapp!, text: draft.body, templateName: eff.step.whatsappTemplate })
-          : await this.svc.providers.emailSender!.send({ from: msg.sender!, fromName: p.fullName || p.companyName, to: lead.email!, subject: draft.subject || `Contato — ${p.companyName}`, text: draft.body });
+          : await this.svc.providers.emailSender!.send({ from: msg.sender!, fromName: p.companyName ? `${await sdrName()} | ${p.companyName}` : await sdrName(), to: lead.email!, subject: draft.subject || `Contato — ${p.companyName}`, text: draft.body });
       const sentAt = this.nowIso();
       this.repo.batch(() => {
         this.repo.update('messages', msg.id, { status: 'sent', externalId: r.externalId, provider: r.provider, sentAt });
@@ -534,8 +535,14 @@ export class AutomationService {
     if (!lead || !c) throw new Error('Lead não encontrado.');
     const text = body.trim();
     if (!text) throw new Error('A resposta está vazia.');
-    const cls = await this.svc.ai.classifyReply(text, `Empresa ${c.tradeName ?? c.legalName}, etapa atual: ${lead.stage}`);
+    const history = this.conversation(leadId).slice(-10);
+    const cls = await this.svc.ai.classifyReply(text, `Empresa ${c.tradeName ?? c.legalName}, etapa atual: ${lead.stage}`, {
+      conversation: history.map((m) => ({ from: m.from === 'lead' ? 'lead' : 'beelie', text: m.text })),
+      brief: beelieBrief(lead.beelie, lead),
+    });
     const name = c.tradeName ?? c.legalName;
+    const lastOutbound = [...history].reverse().find((m) => m.from === 'vendedor')?.text;
+    const signals = combineSignals(cls.signals, analyzeSignalsRules(text, lastOutbound, { companyName: name, category: cls.category }));
     const active = this.db.enrollments.filter((e) => e.leadId === leadId && (e.status === 'ativa' || e.status === 'pausada'));
     const enr = active[0];
     const at = this.nowIso();
@@ -571,6 +578,7 @@ export class AutomationService {
         suggestedAction: cls.suggestedAction,
       });
       this.actOnReply(cls, lead, c, name, active, camp?.ownerName, camp?.id, channel);
+      this.applyBeelie(leadId, signals, at, name, camp?.ownerName, camp?.id, cls.category === 'reuniao');
     });
     await this.svc.rescore(leadId);
     // Sugestão de resposta para o usuário revisar. Falha aqui não afeta o registro da resposta.
@@ -589,11 +597,8 @@ export class AutomationService {
     const c = lead && this.companyOf(lead);
     if (!lead || !c || this.svc.suppressionFor(c, lead)) return null;
     const when = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const out = this.db.messages
-      .filter((m) => m.leadId === leadId && m.channel === channel && (m.sentAt || m.status === 'opened_whatsapp'))
-      .map((m) => ({ from: 'vendedor' as const, at: m.sentAt ?? m.updatedAt, text: m.finalContent.slice(0, 800) }));
-    const ins = this.db.inbound.filter((r) => r.leadId === leadId && r.channel === channel).map((r) => ({ from: 'lead' as const, at: r.receivedAt, text: r.body.slice(0, 800) }));
-    const conv = [...out, ...ins].sort((a, b) => a.at.localeCompare(b.at)).slice(-12);
+    // Conversa única entre WhatsApp e e-mail: o Beelie lembra de tudo o que já foi dito.
+    const conv = this.conversation(leadId).slice(-12);
     if (!conv.length || conv[conv.length - 1].from !== 'lead') return null;
     const p = this.svc.profile;
     const assistant = await loadAssistant()
@@ -603,10 +608,11 @@ export class AutomationService {
       assistant,
       channel,
       category,
-      sender: { name: p.fullName, company: p.companyName, offer: p.offer },
+      brief: beelieBrief(lead.beelie, lead),
+      sender: { name: await sdrName(), company: p.companyName, offer: p.offer },
       contact: { name: lead.contactName, role: lead.contactRole },
       company: c,
-      conversation: conv.map((m) => ({ from: m.from, date: when(m.at), text: m.text })),
+      conversation: conv.map((m) => ({ from: m.from, date: `${when(m.at)}, ${m.channel === 'email' ? 'e-mail' : 'WhatsApp'}`, text: m.text })),
     });
     const body = s.message?.trim();
     if (!body) return null;
@@ -633,6 +639,56 @@ export class AutomationService {
       this.svc.log(leadId, 'message_generated', 'IA sugeriu uma resposta para você revisar', { messageId: msg.id, kind: 'reply_suggestion', note: s.note, intent: s.intent });
     });
     return msg;
+  }
+
+  /** Conversa do lead (WhatsApp + e-mail), em ordem cronológica. */
+  conversation(leadId: string) {
+    const out = this.db.messages
+      .filter((m) => m.leadId === leadId && (m.sentAt || m.status === 'opened_whatsapp'))
+      .map((m) => ({ from: 'vendedor' as const, at: m.sentAt ?? m.updatedAt, channel: m.channel, text: m.finalContent.slice(0, 800) }));
+    const ins = this.db.inbound.filter((r) => r.leadId === leadId).map((r) => ({ from: 'lead' as const, at: r.receivedAt, channel: r.channel, text: r.body.slice(0, 800) }));
+    return [...out, ...ins].sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  /**
+   * Beelie: atualiza a memória do lead e o cadastro (só dado confirmado e não corrigido por pessoa),
+   * registra quem foi indicado e, quando o lead aceita conversar, cria a tarefa de agendar.
+   */
+  private applyBeelie(leadId: string, signals: ReturnType<typeof combineSignals>, at: string, companyName: string, ownerName?: string, campaignId?: string, meetingTaskByDecision = false) {
+    const lead = this.db.leads.find((l) => l.id === leadId);
+    if (!lead) return;
+    const r = mergeIntel(lead.beelie, lead, signals, at, { companyName });
+    this.repo.update('leads', leadId, { ...r.patch, beelie: r.intel });
+    const applied = r.learned.filter((l) => l.applied);
+    if (applied.length) this.svc.log(leadId, 'lead_updated', `Cadastro atualizado pelo Beelie: ${applied.map((l) => `${l.label} → ${l.value}`).join(', ')}`, { kind: 'beelie_update', fields: applied });
+    const noted = r.learned.filter((l) => !l.applied);
+    if (noted.length) this.svc.log(leadId, 'lead_updated', `Beelie identificou: ${noted.map((l) => `${l.label}: ${l.value}`).join(' · ')}`, { kind: 'beelie_note', fields: noted });
+    this.svc.log(leadId, 'lead_updated', `Beelie: ${stageLabel(r.intel.stage)} · ${r.intel.temperature}${r.intel.needArea ? ` · ${NEED_AREAS[r.intel.needArea]}` : ''}`, { kind: 'beelie_stage', stage: r.intel.stage, temperature: r.intel.temperature, intent: signals.intent });
+    if (r.referred) {
+      this.createTask({
+        leadId,
+        campaignId,
+        title: `Falar com ${r.referred.name} (${companyName})`,
+        description: `Indicada na conversa como responsável${r.referred.role ? ` (${r.referred.role})` : ''}.${r.referred.contact ? ` Contato: ${r.referred.contact}.` : ' Contato ainda não informado.'}`,
+        source: 'resposta',
+        ownerName,
+      });
+    }
+    if (r.meetingReached) {
+      const fresh = this.db.leads.find((l) => l.id === leadId);
+      if (fresh && !ADVANCED_STAGES.includes(fresh.stage) && fresh.stage !== 'reuniao') this.svc.changeStage(leadId, 'reuniao');
+      const open = this.db.tasks.some((t) => t.leadId === leadId && t.status === 'aberta' && t.title.startsWith('Agendar reunião'));
+      if (!open && !meetingTaskByDecision) {
+        this.createTask({
+          leadId,
+          campaignId,
+          title: `Agendar reunião com ${r.patch.contactName ?? lead.contactName ?? companyName}`,
+          description: `O lead aceitou conversar. Combine o horário e confirme com a pessoa.${r.intel.need ? ` Necessidade: ${r.intel.need}.` : ''}`,
+          source: 'resposta',
+          ownerName,
+        });
+      }
+    }
   }
 
   /** Próxima ação sugerida pela IA vira a "próxima ação" do lead; "falar depois" agenda a data. */

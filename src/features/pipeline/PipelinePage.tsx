@@ -16,6 +16,7 @@ import { useApp, useService } from '@/store/AppStore';
 import { useLeadRows, type LeadRow } from '@/store/selectors';
 import { STAGES, stageLabel, type LeadStage } from '@/core/types';
 import { PageHeader, ScoreBadge, cx } from '@/components/ui';
+import { TemperatureChip } from '@/features/leads/BeeliePanel';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
 
 export function PipelinePage() {
@@ -113,6 +114,7 @@ function Card({ row, overlay, handleProps }: { row: LeadRow; overlay?: boolean; 
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         <ScoreBadge score={lead.currentScore} tier={lead.scoreTier} />
+        <TemperatureChip lead={lead} />
         {!overlay && (
           <>
             <label htmlFor={`st-${lead.id}`} className="sr-only">Mover para etapa</label>

@@ -1,3 +1,4 @@
+import type { ConversationSignals } from '../../../supabase/functions/_shared/automation/beelie.ts';
 import type {
   AnalysisSections,
   Channel,
@@ -54,6 +55,8 @@ export interface ApproachOptions {
   /** Observações (notas) do usuário sobre o lead. */
   notes?: string[];
   campaignName?: string;
+  /** Memória do Beelie sobre o lead (estágio, o que já se sabe). */
+  brief?: string;
 }
 
 /** Números consolidados para a "leitura inteligente" do dashboard. */
@@ -93,7 +96,11 @@ export interface AIProvider {
   adjustScore(company: Company, ruleScore: number, icp: string): Promise<ScoreAdjustment>;
   generateApproach(company: Company, channel: Channel, options: ApproachOptions): Promise<string>;
   /** Devolve a análise da resposta. Saídas antigas (só `classification`) são normalizadas pelo AIService. */
-  classifyReply(text: string, context?: string): Promise<Partial<ReplyAnalysis> & { classification?: ReplyClass }>;
+  classifyReply(
+    text: string,
+    context?: string,
+    extra?: { conversation?: { from: 'lead' | 'beelie'; text: string }[]; brief?: string },
+  ): Promise<Partial<ReplyAnalysis> & { classification?: ReplyClass } & Partial<ConversationSignals>>;
   summarizeResults(snapshot: ResultsSnapshot): Promise<string[]>;
   /** Próxima resposta da conversa, para o vendedor revisar (nunca enviada sozinha). */
   suggestReply(input: ReplySuggestionInput): Promise<ReplySuggestion>;
@@ -107,6 +114,8 @@ export interface ReplySuggestionInput {
   company: Company;
   /** Conversa em ordem cronológica; a última mensagem é do lead. */
   conversation: { from: 'vendedor' | 'lead'; date: string; text: string }[];
+  /** Memória do Beelie (estágio, o que já se sabe). */
+  brief?: string;
   /** Persona, base de conhecimento e playbooks do atendimento. */
   assistant?: { name: string; persona: string; knowledge: string; playbooks: string };
 }

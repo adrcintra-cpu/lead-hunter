@@ -12,6 +12,7 @@ import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { CadencePanel, ConversationPanel, CrmPanel, FollowUpPicker, LeadTasks, Timeline } from './LeadCrmPanels';
 import { parseSubject } from '../../../supabase/functions/_shared/automation/replies.ts';
 import { SendConnectedButton } from './SendConnectedButton';
+import { BeeliePanel } from './BeeliePanel';
 
 export function LeadDrawer({ leadId }: { leadId: string }) {
   const { close } = useLeadDrawer();
@@ -111,6 +112,7 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
           <ProvenanceTag kind="unavailable" />
         </div>
 
+        <BeeliePanel lead={lead} />
         <CadencePanel leadId={lead.id} />
         <LeadTasks leadId={lead.id} />
         <ConversationPanel row={row} />

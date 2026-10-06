@@ -243,7 +243,7 @@ function SendingSettings() {
         </div>
         <div>
           <label htmlFor="snd-sig" className="label">Assinatura dos e-mails</label>
-          <textarea id="snd-sig" rows={3} className="input py-2" value={f.signature} placeholder={'André Cintra\nSua Empresa · (19) 0000-0000'} onChange={(e) => setF({ ...f, signature: e.target.value })} />
+          <textarea id="snd-sig" rows={3} className="input py-2" value={f.signature} placeholder={'Beelie · Oxycom\n(19) 0000-0000 · oxycom.tech'} onChange={(e) => setF({ ...f, signature: e.target.value })} />
         </div>
         <SignatureImageFields
           ready={sigReady}

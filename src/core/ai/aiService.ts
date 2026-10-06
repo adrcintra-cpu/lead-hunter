@@ -1,3 +1,4 @@
+import type { ConversationSignals } from '../../../supabase/functions/_shared/automation/beelie.ts';
 import type { AnalysisSections, Channel, Company, CompanyField, LeadScore, ParsedCriteria, Profile } from '../types';
 import { nowIso, uid } from '../utils';
 import type { AIProvider, ApproachOptions, ReplySuggestion, ReplySuggestionInput } from '../providers/types';
@@ -99,10 +100,16 @@ export class AIService {
 
   /** Classifica a resposta do lead. Se a IA falhar, usa regras (nunca deixa a resposta sem classificação). */
   /** Classifica a resposta em uma das categorias, com resumo e próxima ação sugerida. */
-  async classifyReply(text: string, context?: string): Promise<ReplyAnalysis> {
+  async classifyReply(
+    text: string,
+    context?: string,
+    extra?: { conversation?: { from: 'lead' | 'beelie'; text: string }[]; brief?: string },
+  ): Promise<ReplyAnalysis & { signals?: Partial<ConversationSignals> }> {
     try {
-      const raw = await this.run('classifyReply', () => this.provider.classifyReply(text, context));
-      return normalizeAnalysis(raw, text);
+      const raw = await this.run('classifyReply', () => this.provider.classifyReply(text, context, extra));
+      // A análise de SDR (intenção, dados extraídos, estágio) segue junto; quem aplica é o AutomationService.
+      const signals: Partial<ConversationSignals> | undefined = raw.intent ? { intent: raw.intent, extracted: raw.extracted ?? [], needArea: raw.needArea, temperature: raw.temperature, stage: raw.stage } : undefined;
+      return { ...normalizeAnalysis(raw, text), signals };
     } catch {
       return analyzeReplyRules(text);
     }

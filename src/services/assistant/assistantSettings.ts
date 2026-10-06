@@ -62,7 +62,21 @@ export async function loadAssistant(): Promise<AssistantState> {
   return { settings: withDefaults(data), prefs, prefsAvailable: !pr.error, custom: !!data?.persona, available: true };
 }
 
+let sdrCache: { name: string; at: number } | null = null;
+/** Nome do SDR que conversa com os leads ("Beelie"), com só a inicial maiúscula. Cache de 5 min. */
+export async function sdrName(): Promise<string> {
+  if (sdrCache && Date.now() - sdrCache.at < 300_000) return sdrCache.name;
+  const raw = await loadAssistant()
+    .then((r) => r.settings.name)
+    .catch(() => DEFAULT_ASSISTANT.name);
+  const v = (raw || 'Beelie').trim();
+  const name = v.charAt(0).toUpperCase() + v.slice(1).toLowerCase();
+  sdrCache = { name, at: Date.now() };
+  return name;
+}
+
 export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs): Promise<void> {
+  sdrCache = null;
   const clean = { name: s.name.trim(), persona: s.persona.trim(), knowledge: s.knowledge.trim(), playbooks: s.playbooks.trim() };
   if (dataMode !== 'supabase' || !supabase) {
     try {

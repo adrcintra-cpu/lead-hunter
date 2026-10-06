@@ -7,6 +7,8 @@ import { formatCnpj, isValidCnpj } from '@/core/cnpj';
 import type { Engagement, ScoreExtras } from '@/core/scoring';
 import { DEFAULT_CADENCE } from '@/services/automation/defaultCadence';
 import { AutomationService } from '@/services/automation/automationService';
+import { sdrName } from '@/services/assistant/assistantSettings';
+import { beelieBrief, markHumanEdits } from '../../supabase/functions/_shared/automation/beelie.ts';
 import { WhatsAppService } from '@/services/whatsapp/whatsAppService';
 import {
   CLOSED_STAGES,
@@ -446,9 +448,12 @@ export class LeadHunterService {
     }
     if (!Object.keys(clean).length) return;
     const LABELS: Record<string, string> = { contactName: 'contato', contactRole: 'cargo', email: 'e-mail', tags: 'tags', ownerName: 'responsável', nextAction: 'próxima ação', nextActionAt: 'data da próxima ação' };
+    // Correção humana de nome, cargo ou e-mail: o Beelie não sobrescreve depois.
+    const human = (['contactName', 'contactRole', 'email'] as const).filter((k) => k in clean);
+    if (human.length) clean.beelie = markHumanEdits(lead.beelie, Object.fromEntries(human.map((k) => [k, (clean[k] as string | undefined) ?? ''])), nowIso());
     this.repo.batch(() => {
       this.repo.update('leads', leadId, clean as Partial<Lead>);
-      this.log(leadId, 'lead_updated', `Dados atualizados: ${Object.keys(clean).map((k) => LABELS[k] ?? k).join(', ')}`, { fields: Object.keys(clean) });
+      this.log(leadId, 'lead_updated', `Dados atualizados: ${Object.keys(clean).filter((k) => k !== 'beelie').map((k) => LABELS[k] ?? k).join(', ')}`, { fields: Object.keys(clean).filter((k) => k !== 'beelie') });
     });
   }
 
@@ -663,7 +668,8 @@ export class LeadHunterService {
     const followUp = conv.history.length > 0;
     const text = await this.ai.generateApproach(company, channel, {
       variant,
-      senderName: p.fullName,
+      // Quem prospecta é o Beelie (SDR), nunca o nome do usuário.
+      senderName: await sdrName(),
       senderCompany: p.companyName,
       offer: p.offer,
       contactName: lead.contactName,
@@ -786,7 +792,7 @@ export class LeadHunterService {
     const history = this.db.messages
       .filter((m) => m.leadId === leadId && when(m))
       .sort((a, b) => when(a)!.localeCompare(when(b)!))
-      .slice(-4)
+      .slice(-6)
       .map((m) => ({
         channel: channelLabel(m.channel),
         date: new Date(when(m)!).toLocaleDateString('pt-BR'),
@@ -799,7 +805,8 @@ export class LeadHunterService {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 3)
       .map((n) => n.body);
-    return { history, daysSinceLastContact, notes };
+    const brief = lead ? beelieBrief(lead.beelie, lead) : undefined;
+    return { history, daysSinceLastContact, notes, brief };
   }
 
   // ---------- Listas ----------

@@ -158,8 +158,8 @@ export const mockAIProvider: AIProvider = {
     const who = c.tradeName ?? c.legalName;
     const seg = c.segment.toLowerCase();
     const offer = o.offer || '[SEU SERVIÇO]';
-    const me = o.senderName || '[SEU NOME]';
-    const myCo = o.senderCompany || '[SUA EMPRESA]';
+    const me = o.senderName || 'Beelie';
+    const myCo = o.senderCompany || 'Oxycom';
     const first = o.contactName ? o.contactName.split(' ')[0] : '';
     const hello = first ? `Olá, ${first}` : `Olá, equipe ${who}`;
     // Só cita o que existe: cargo, cidade, segmento e site vêm da base.
@@ -181,7 +181,7 @@ export const mockAIProvider: AIProvider = {
       if (channel === 'email') {
         return [`Assunto: Re: ${who} — uma ideia rápida`, '', `${hello},`, '', `Escrevi ${when} e imagino que a semana esteja cheia.`, angle, 'Se não for prioridade agora, me diga e eu retomo em outro momento.', '', 'Abraço,', me, myCo].join('\n');
       }
-      return `${hello}! Te escrevi ${when}. ${angle} Faz sentido falarmos rapidinho?`;
+      return `${first ? `${first}, ` : ''}te escrevi ${when} e fiquei pensando numa coisa. ${angle} Faz sentido para vocês?`;
     }
 
     if (stage === 'acompanhamento') {
@@ -217,9 +217,17 @@ export const mockAIProvider: AIProvider = {
         ? `${hello}! Vi que a ${who} atua com ${seg} em ${c.city}. Trabalho com ${offer} para empresas do setor e gostaria de me conectar.`
         : `${hello}! Acompanho empresas de ${seg} no interior de SP e encontrei a ${who}. Trabalho com ${offer}; acho que temos assunto em comum.`;
     }
+    // Primeiro contato do Beelie: curto, contexto real e uma pergunta fácil (sem pitch, sem pedir reunião).
+    void role;
+    void site;
+    if (first) {
+      return v === 0
+        ? `Oi, ${first}! Tudo bem? Estou tentando entender uma coisa sobre a presença digital da ${who}. Você que cuida dessa parte por aí?`
+        : `Oi, ${first}! Tudo bem? Vi que a ${who} atua com ${seg} em ${c.city} e fiquei com uma dúvida rápida. É você quem cuida do marketing por aí?`;
+    }
     return v === 0
-      ? `${hello}! Aqui é ${me}, da ${myCo}. Vi que a ${who} atua com ${seg} na região de ${c.city}.${role} Trabalho com ${offer} para empresas do setor e queria entender se faz sentido uma conversa rápida. Posso enviar mais detalhes por aqui?`
-      : `${hello}, tudo bem? Sou ${me}, da ${myCo}. Encontrei a ${who} pesquisando empresas de ${seg} em ${c.city}. Ajudo negócios do setor com ${offer}. Topa uma conversa de 15 minutos esta semana?`;
+      ? `Oi! Tudo bem? Estou tentando falar com quem cuida da parte de marketing/comercial da ${who}. É você?`
+      : `Oi! Tudo bem? Vi que a ${who} atua com ${seg} em ${c.city}. Você sabe me dizer quem cuida do marketing por aí?`;
   },
 
   async classifyReply(text) {
@@ -252,8 +260,42 @@ export const mockAIProvider: AIProvider = {
     const hi = first ? `${first}, ` : '';
     const me = i.sender.name ? i.sender.name.split(' ')[0] : 'o responsável';
     if (/\b(robo|bot|ia|inteligencia artificial|automatic)/.test(last) || last.includes('e uma pessoa') || last.includes('voce e real')) {
-      const who = i.assistant?.name ? `a ${i.assistant.name}, assistente digital${i.sender.company ? ` da ${i.sender.company}` : ''}` : `o assistente do ${me}`;
-      return { message: `${hi}aqui é ${who}. O ${me} continua a conversa com você em seguida, tudo bem?`, intent: 'passar_para_vendedor', note: 'O lead perguntou se fala com uma pessoa: assuma a conversa.' };
+      const nm = i.assistant?.name ? i.assistant.name.charAt(0).toUpperCase() + i.assistant.name.slice(1).toLowerCase() : me;
+      return { message: `${hi}sou o ${nm}, assistente digital${i.sender.company ? ` da ${i.sender.company}` : ''}. Um especialista do nosso time continua a conversa com você pessoalmente, tudo bem?`, intent: 'passar_para_vendedor', note: 'O lead perguntou se fala com uma pessoa: assuma a conversa.' };
+    }
+    // Roteiro do Beelie pela memória do lead (mesmo objetivo da IA real).
+    const brief = i.brief ?? '';
+    const stageOf = /Estágio atual da conversa: ([^.]+)\./.exec(brief)?.[1] ?? '';
+    const sdr = i.assistant?.name ? i.assistant.name.charAt(0).toUpperCase() + i.assistant.name.slice(1).toLowerCase() : 'Beelie';
+    const co = i.sender.company || 'Oxycom';
+    const referred = /Indicou ([^.(,]+)/.exec(brief)?.[1]?.trim();
+    if (!['nao_interessado', 'sem_contato', 'posteriormente', 'ausente'].includes(i.category ?? '')) {
+      if (/Pessoa certa: NÃO/.test(brief)) {
+        return referred
+          ? { message: `Perfeito, obrigado! Você consegue me passar o contato da ${referred} ou prefere que eu fale com ela por outro canal?`, intent: 'continuar', note: `Indicou ${referred}: peça o contato.` }
+          : { message: 'Sem problemas, obrigado! Você sabe me dizer quem cuida dessa parte por aí?', intent: 'continuar', note: 'Contato errado: descubra quem é o responsável.' };
+      }
+      if (/Nome de quem responde: DESCONHECIDO/.test(brief) && /Pessoa certa: sim/.test(brief)) {
+        return { message: 'Perfeito! Com quem eu falo?', intent: 'continuar', note: 'Pessoa certa: descubra o nome.' };
+      }
+      if (stageOf === 'Engajamento') {
+        const q = i.company.website ? 'hoje vocês usam o site mais como apresentação ou ele também gera oportunidades comerciais?' : 'hoje como vocês costumam conseguir novos clientes?';
+        return { message: `Prazer${first ? `, ${first}` : ''}! Sou o ${sdr}, da ${co}. Queria entender uma coisa: ${q}`, intent: 'continuar', note: 'Engajamento: uma pergunta de descoberta.' };
+      }
+      if (stageOf === 'Descoberta' || stageOf === 'Oportunidade') {
+        const need = /Necessidade identificada: ([^.]+)\./.exec(brief)?.[1];
+        return {
+          message: need ? `Entendi. Perguntei porque é justamente aí que normalmente encontramos espaço para melhorar (${need.toLowerCase()}). Hoje isso é uma prioridade para vocês?` : 'Entendi. E hoje o que mais incomoda vocês nessa parte?',
+          intent: 'continuar',
+          note: 'Conecte a necessidade a uma solução, sem listar serviços.',
+        };
+      }
+      if (stageOf === 'Qualificação') {
+        return { message: 'Faz sentido. Acho que consigo te mostrar algumas possibilidades específicas para isso. Quer que a gente marque uma conversa rápida?', intent: 'propor_conversa', note: 'Lead quente: proponha a conversa.' };
+      }
+      if (stageOf === 'Reunião') {
+        return { message: `Combinado${first ? `, ${first}` : ''}! Vou alinhar o melhor horário com nosso especialista e te confirmo por aqui.`, intent: 'confirmar_conversa', note: 'Aceitou conversar: combine o horário.' };
+      }
     }
     switch (i.category) {
       case 'nao_interessado':
