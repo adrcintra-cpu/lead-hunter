@@ -1,4 +1,4 @@
-import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, type WASocket, type proto } from '@whiskeysockets/baileys';
+import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, generateMessageIDV2, type WASocket, type proto } from '@whiskeysockets/baileys';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import { clearAuthState, useDatabaseAuthState } from './authState.js';
@@ -69,7 +69,7 @@ export class SessionManager {
   constructor(private db: SupabaseClient) {
     this.inbound = new InboundRelay(
       db,
-      (userId, phone, text, o) => this.sendMessage(userId, phone, text, { ...o, typing: true }),
+      (userId, phone, text, o) => this.sendMessage(userId, phone, text, { ...o, typing: true, own: true }),
       (userId, raw) => this.transcribeIncoming(userId, raw),
     );
   }
@@ -301,7 +301,7 @@ export class SessionManager {
     userId: string,
     rawPhone: string,
     message: string,
-    opts: { audio?: boolean; voice?: string; typing?: boolean } = {},
+    opts: { audio?: boolean; voice?: string; typing?: boolean; /** Enviada pelo BEELIE (resposta automática ou campanha): o eco não cancela a resposta automática. */ own?: boolean } = {},
   ): Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }> {
     const s = this.sessions.get(userId);
     if (!s?.sock || s.status !== 'conectado') return { ok: false, error: 'WhatsApp não conectado. Conecte em Configurações → WhatsApp.' };
@@ -334,9 +334,12 @@ export class SessionManager {
         await new Promise((r) => setTimeout(r, Math.min(5000, 1000 + text.length * 25)));
         await s.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
       }
+      // O id é gerado antes do envio: o eco da própria mensagem chega antes de sendMessage terminar.
+      const messageId = opts.own ? generateMessageIDV2(s.sock.user?.id) : undefined;
+      if (messageId) this.inbound.markOwn(messageId);
       const sent = audio
-        ? await s.sock.sendMessage(jid, { audio, mimetype: 'audio/ogg; codecs=opus', ptt: true })
-        : await s.sock.sendMessage(jid, { text });
+        ? await s.sock.sendMessage(jid, { audio, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { messageId })
+        : await s.sock.sendMessage(jid, { text }, { messageId });
       remember(s, sent?.key?.id, sent?.message);
       s.sentToday += 1;
       this.set(s, { lastSeenAt: new Date().toISOString() });

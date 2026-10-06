@@ -184,6 +184,13 @@ export class InboundRelay {
     return leadId ?? null;
   }
 
+  /** Registra uma mensagem enviada pelo próprio serviço (resposta automática ou campanha). */
+  markOwn(id: string) {
+    if (!id) return;
+    this.ownIds.add(id);
+    if (this.ownIds.size > 500) this.ownIds.delete(this.ownIds.values().next().value as string);
+  }
+
   private chatKey(userId: string, phone: string) {
     return `${userId}:${phoneKey(phone)}`;
   }
@@ -216,6 +223,11 @@ export class InboundRelay {
     const t = setTimeout(async () => {
       this.pending.delete(key);
       let r = await this.send!(userId, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
+      // Outra mensagem acabou de sair (ex.: campanha para outro lead): espera o intervalo mínimo e tenta de novo.
+      for (let i = 0; i < 3 && !r.ok && /^Aguarde (\d+) s/.test(r.error); i++) {
+        await new Promise((ok) => setTimeout(ok, (Number(/^Aguarde (\d+) s/.exec(r.ok ? '' : r.error)?.[1] ?? 10) + 1) * 1000));
+        r = await this.send!(userId, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
+      }
       if (!r.ok && auto.format === 'audio' && /udio|OPENAI/i.test(r.error)) {
         // A voz falhou (chave, crédito ou instabilidade): o lead recebe em texto em vez de ficar sem resposta.
         log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'áudio indisponível: resposta enviada em texto');
@@ -227,10 +239,7 @@ export class InboundRelay {
         await this.post({ action: 'auto_failed', ownerId: userId, leadId, messageId: auto.messageId, error: r.error }).catch(() => undefined);
         return;
       }
-      if (r.id) {
-        this.ownIds.add(r.id);
-        if (this.ownIds.size > 500) this.ownIds.delete(this.ownIds.values().next().value as string);
-      }
+      if (r.id) this.markOwn(r.id);
       log.info({ user: maskUser(userId), to: maskPhone(phone), audio: auto.format === 'audio' }, 'O BEELIE respondeu automaticamente');
       await this.post({ action: 'sent', ownerId: userId, leadId, messageId: auto.messageId, externalId: r.id, to: r.to, format: auto.format, intent: auto.intent }).catch((err) =>
         log.error({ err: err instanceof Error ? err.message : String(err) }, 'falha ao registrar envio automático'),

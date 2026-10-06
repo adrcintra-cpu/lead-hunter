@@ -21,7 +21,7 @@ const db = createClient(config.supabaseUrl, config.supabaseServiceKey, {
 });
 const manager = new SessionManager(db);
 const campaigns = new CampaignQueue(
-  (u, phone, text) => manager.sendMessage(u, phone, text, { typing: true }),
+  (u, phone, text) => manager.sendMessage(u, phone, text, { typing: true, own: true }),
   (u) => manager.isConnected(u),
 );
 
