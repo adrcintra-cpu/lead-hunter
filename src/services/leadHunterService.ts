@@ -2,7 +2,7 @@ import { AIService } from '@/core/ai/aiService';
 import type { ProviderSet } from '@/core/providers/types';
 import { unsupportedCriteria } from '@/core/providers/types';
 import { MOCK_SUPPRESSED_PHONE } from '@/core/providers/mock/mockCompanies';
-import { applyCompanyData, mergeInto, toCompany } from '@/core/scoring';
+import { applyCompanyData, mergeInto, ruleScore, toCompany } from '@/core/scoring';
 import { IdentityIndex, sameCompany } from '@/core/identity';
 import { formatCnpj, isValidCnpj } from '@/core/cnpj';
 import type { Engagement, ScoreExtras } from '@/core/scoring';
@@ -281,8 +281,19 @@ export class LeadHunterService {
 
       onStep('score');
       const profile = this.profile;
-      // Score em paralelo (até 5 por vez): com a Claude real, cada lead é uma chamada.
-      const fresh = candidates.filter((c) => c.isNew);
+      // Só a quantidade pedida vira lead: as melhores empresas novas pela pontuação de regras
+      // (sem custo de IA), com WhatsApp na frente quando preferencial. As demais são descartadas
+      // e podem aparecer numa próxima busca.
+      const waFirst = confirmed.whatsapp === 'preferencial';
+      const pre = (c: Candidate) => ruleScore(c.company, profile).total + (waFirst && c.company.whatsappStatus !== 'desconhecido' ? 1000 : 0);
+      const fresh = candidates
+        .filter((c) => c.isNew)
+        .map((c) => ({ c, p: pre(c) }))
+        .sort((a, b) => b.p - a.p)
+        .slice(0, Math.max(1, confirmed.quantity))
+        .map((x) => x.c);
+      const keep = new Set<Candidate>([...fresh, ...candidates.filter((c) => !c.isNew)]);
+      // Score em paralelo (até 5 por vez): com a Claude real, cada lead é uma chamada (só dos que ficam).
       const scores = new Map<Candidate, LeadScore>();
       const leadIds = new Map<Candidate, string>(fresh.map((c) => [c, uid('lead')]));
       for (let i = 0; i < fresh.length; i += 5) {
@@ -293,6 +304,7 @@ export class LeadHunterService {
 
       const results: { company: Company; lead: Lead; isNew: boolean; provider: string }[] = [];
       for (const cand of candidates) {
+        if (!keep.has(cand)) continue;
         if (cand.isNew) {
           const score = scores.get(cand)!;
           const lead: Lead = {
@@ -336,7 +348,8 @@ export class LeadHunterService {
         }
         return b.lead.currentScore - a.lead.currentScore;
       });
-      const limited = results.slice(0, confirmed.quantity);
+      // Novos (até a quantidade pedida) + os que você já tinha, marcados como "já existia".
+      const limited = results;
 
       this.repo.batch(() => {
         limited.forEach((r, i) =>

@@ -406,7 +406,7 @@ export function CampaignDetailPage() {
             <span>
               <span className="font-bold">Entrada automática</span>
               <span className="block text-ink-faint">
-                Empresas novas encontradas pelas buscas (inclusive as agendadas) que se encaixam no público acima, com score mínimo {camp.audience.minScore || 0}, entram sozinhas nesta campanha enquanto ela estiver ativa. A campanha não finaliza sozinha.
+                Empresas novas encontradas pelas buscas (inclusive as agendadas) que se encaixam no público acima, com score mínimo {camp.audience.minScore || 0}, entram sozinhas nesta campanha enquanto ela estiver ativa. Se a empresa se encaixar em mais de uma campanha, entra na de público mais específico (mais filtros). A campanha não finaliza sozinha.
               </span>
             </span>
           </label>

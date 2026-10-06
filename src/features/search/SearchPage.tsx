@@ -305,7 +305,7 @@ function CriteriaReview({
             <span className="text-sm text-ink-faint">km</span>
           </div>
         </Field>
-        <Field label="Quantidade" htmlFor="c-qty">
+        <Field label="Leads novos (máx.)" htmlFor="c-qty">
           <input id="c-qty" type="number" min={1} max={200} className="input" value={c.quantity} onChange={(e) => set('quantity', Number(e.target.value) || 1)} />
         </Field>
         <Field label="Possui site" htmlFor="c-site">

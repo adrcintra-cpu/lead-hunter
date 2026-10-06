@@ -725,7 +725,15 @@ export class AutomationService {
     if (!leadIds.length) return [];
     const wanted = new Set(leadIds);
     const out: { campaign: string; count: number }[] = [];
-    const camps = this.db.campaigns.filter((c) => c.autoEnroll && c.status === 'ativa');
+    // Lead que se encaixa em mais de uma campanha vai para a de público mais específico
+    // (mais filtros); empate: a criada primeiro.
+    const specificity = (c: Campaign) => {
+      const a = c.audience;
+      return (a.segments.length ? 1 : 0) + (a.cities.length ? 1 : 0) + (a.tags.length ? 1 : 0) + (a.listId ? 1 : 0) + (a.stages.length ? 1 : 0) + (a.minScore > 0 ? 1 : 0);
+    };
+    const camps = this.db.campaigns
+      .filter((c) => c.autoEnroll && c.status === 'ativa')
+      .sort((x, y) => specificity(y) - specificity(x) || x.createdAt.localeCompare(y.createdAt));
     this.repo.batch(() => {
       for (const camp of camps) {
         const cad = this.db.cadences.find((c) => c.id === camp.cadenceId);
