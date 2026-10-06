@@ -46,7 +46,31 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return json as T;
 }
 
+/** Amostra da voz da IA (MP3). Devolve um endereço local para tocar no navegador. */
+async function voicePreview(voice: string, name: string): Promise<string> {
+  if (!whatsappQrAvailable || !supabase) throw new Error('Serviço de WhatsApp não configurado.');
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error('Faça login de novo para ouvir a voz.');
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/whatsapp/voice-preview`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice, name }),
+    });
+  } catch {
+    throw new Error('Serviço de WhatsApp fora do ar. Tente de novo em instantes.');
+  }
+  if (!res.ok) {
+    const json = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(json?.error ?? `Erro ${res.status} ao gerar a amostra.`);
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
 export const whatsappClient = {
+  voicePreview,
   status: () => call<WaStatusView>('/whatsapp/status'),
   connect: () => call<WaStatusView>('/whatsapp/connect', {}),
   test: () => call<{ ok: boolean; message: string }>('/whatsapp/test', {}),

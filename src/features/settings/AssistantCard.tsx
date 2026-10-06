@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Bot } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bot, Play, Square } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { ConfirmDialog, ErrorBox, Spinner, cx } from '@/components/ui';
 import { DEFAULT_ASSISTANT, DEFAULT_PREFS, VOICES, loadAssistant, resetAssistant, saveAssistant, savePrefs, type AssistantPrefs, type AssistantSettings } from '@/services/assistant/assistantSettings';
-import { whatsappQrAvailable } from '@/lib/whatsappClient';
+import { whatsappClient, whatsappQrAvailable } from '@/lib/whatsappClient';
 import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection';
 
 type Tab = 'persona' | 'knowledge' | 'playbooks';
@@ -27,6 +27,36 @@ export function AssistantCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
+  const [preview, setPreview] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const player = useRef<HTMLAudioElement | null>(null);
+
+  function stopPreview() {
+    player.current?.pause();
+    player.current = null;
+    setPreview('idle');
+  }
+
+  async function playPreview() {
+    if (preview === 'loading') return;
+    if (preview === 'playing') return stopPreview();
+    setPreview('loading');
+    try {
+      const url = await whatsappClient.voicePreview(prefs.voice, s?.name || 'BEELIE');
+      const audio = new Audio(url);
+      player.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (player.current === audio) stopPreview();
+      };
+      await audio.play();
+      setPreview('playing');
+    } catch (e) {
+      setPreview('idle');
+      toast(e instanceof Error ? e.message : 'Não foi possível tocar a amostra.', 'error');
+    }
+  }
+
+  useEffect(() => () => player.current?.pause(), []);
 
   const reload = () =>
     loadAssistant()
@@ -146,9 +176,32 @@ export function AssistantCard() {
               </div>
               <div>
                 <label htmlFor="as-voice" className="label">Voz</label>
-                <select id="as-voice" className="input w-auto" value={prefs.voice} disabled={!prefsAvailable} onChange={(e) => void updatePrefs({ ...prefs, voice: e.target.value })}>
-                  {VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-                </select>
+                <div className="flex items-center gap-2">
+                  <select
+                    id="as-voice"
+                    className="input w-auto"
+                    value={prefs.voice}
+                    disabled={!prefsAvailable}
+                    onChange={(e) => {
+                      stopPreview();
+                      void updatePrefs({ ...prefs, voice: e.target.value });
+                    }}
+                  >
+                    {VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                  </select>
+                  {whatsappQrAvailable && (
+                    <button
+                      type="button"
+                      className="btn-outline min-h-[40px] px-3"
+                      onClick={() => void playPreview()}
+                      disabled={conn?.audio === false}
+                      title={conn?.audio === false ? 'Configure OPENAI_API_KEY no Railway para ouvir as vozes.' : 'Ouvir uma frase nesta voz'}
+                    >
+                      {preview === 'loading' ? <Spinner /> : preview === 'playing' ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      {preview === 'playing' ? 'Parar' : 'Ouvir'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <p className="mt-2 text-xs text-ink-faint">O formato é o padrão. Em cada conversa, o {s.name || 'assistente'} responde em áudio quando o lead pede ou manda áudio, e volta ao texto se o lead pedir. Se a voz falhar, a resposta sai em texto.</p>

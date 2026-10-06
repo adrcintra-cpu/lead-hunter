@@ -5,7 +5,7 @@ import { log } from './log.js';
 import { SessionManager } from './sessionManager.js';
 import { CampaignQueue } from './campaignQueue.js';
 import { timingSafeEqual } from 'node:crypto';
-import { ttsAvailable } from './tts.js';
+import { ttsAvailable, voicePreview } from './tts.js';
 
 /**
  * Serviço de WhatsApp do Lead Hunter (conexão por QR code).
@@ -121,7 +121,7 @@ async function authenticate(req: IncomingMessage): Promise<string> {
 }
 
 /** Limite simples por usuário e por tipo de rota (janela de 1 minuto). */
-const LIMITS: Record<string, number> = { status: 60, connect: 6, test: 10, disconnect: 6, send: 10 };
+const LIMITS: Record<string, number> = { status: 60, connect: 6, test: 10, disconnect: 6, send: 10, preview: 12 };
 const hits = new Map<string, { count: number; reset: number }>();
 function rateLimit(userId: string, kind: string) {
   const key = `${userId}:${kind}`;
@@ -181,6 +181,18 @@ const server = createServer(async (req, res) => {
     }
     if (path === '/health') return send(res, 200, { ok: true });
     if (path === '/internal/campaign-send') return await campaignSend(req, res);
+    if (path === '/whatsapp/voice-preview') {
+      // Amostra da voz da IA (MP3), para ouvir antes de escolher. Exige login, como as outras rotas.
+      if (req.method !== 'POST') throw new HttpError(405, 'Método não permitido.');
+      const userId = await authenticate(req);
+      rateLimit(userId, 'preview');
+      if (!ttsAvailable()) throw new HttpError(409, 'Voz da IA não configurada: adicione OPENAI_API_KEY no Railway.');
+      const b = await readJson(req);
+      const audio = await voicePreview(typeof b.voice === 'string' ? b.voice.slice(0, 20) : '', typeof b.name === 'string' ? b.name : '');
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': String(audio.length), 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
+      res.end(audio);
+      return;
+    }
     const route = routes[path];
     if (!route) throw new HttpError(404, 'Rota não encontrada.');
     if (req.method !== route.method) throw new HttpError(405, 'Método não permitido.');

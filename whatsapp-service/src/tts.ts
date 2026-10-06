@@ -15,7 +15,7 @@ export const ttsAvailable = () => !!config.openaiKey;
  * Texto → áudio de WhatsApp (Ogg/Opus, o formato da mensagem de voz).
  * Usa a API de voz da OpenAI; a chave fica só no servidor (OPENAI_API_KEY).
  */
-export async function textToSpeech(text: string, voice?: string): Promise<Buffer> {
+export async function textToSpeech(text: string, voice?: string, format: 'opus' | 'mp3' = 'opus'): Promise<Buffer> {
   if (!config.openaiKey) throw new Error('Áudio indisponível: configure OPENAI_API_KEY no Railway.');
   const v = VOICES.includes(voice as (typeof VOICES)[number]) ? voice : 'cedar';
   const res = await fetch('https://api.openai.com/v1/audio/speech', {
@@ -25,7 +25,7 @@ export async function textToSpeech(text: string, voice?: string): Promise<Buffer
       model: config.ttsModel,
       voice: v,
       input: text.slice(0, 1500),
-      response_format: 'opus',
+      response_format: format,
       instructions: SPEAKING_STYLE,
     }),
   });
@@ -34,6 +34,21 @@ export async function textToSpeech(text: string, voice?: string): Promise<Buffer
     throw new Error(`Falha ao gerar o áudio (${res.status}). ${detail}`);
   }
   return Buffer.from(await res.arrayBuffer());
+}
+
+/** Amostra de voz para ouvir antes de escolher (MP3: toca em qualquer navegador). Guardada em memória por voz e nome. */
+const previews = new Map<string, Buffer>();
+export async function voicePreview(voice: string, name: string): Promise<Buffer> {
+  const v = VOICES.includes(voice as (typeof VOICES)[number]) ? voice : 'cedar';
+  const who = name.replace(/[^\p{L}\p{N} ._-]/gu, '').trim().slice(0, 30) || 'BEELIE';
+  const key = `${v}|${who}`;
+  const hit = previews.get(key);
+  if (hit) return hit;
+  const text = `Oi, tudo bem? Aqui é o ${who}, assistente da OXYCOM. Vi que vocês estão crescendo e pensei numa ideia rápida que pode ajudar a gerar mais clientes. Faz sentido a gente bater um papo de quinze minutinhos essa semana?`;
+  const audio = await textToSpeech(text, v, 'mp3');
+  previews.set(key, audio);
+  if (previews.size > 60) previews.delete(previews.keys().next().value as string);
+  return audio;
 }
 
 /** Áudios recebidos maiores que isso não são transcritos (o lead vê a resposta, você ouve no WhatsApp). */
