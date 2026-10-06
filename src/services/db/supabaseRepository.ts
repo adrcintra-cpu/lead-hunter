@@ -125,6 +125,8 @@ export class SupabaseRepository implements Repository {
   private batching = 0;
   private dirty = false;
   private queue: Promise<void> = Promise.resolve();
+  /** As colunas da imagem da assinatura existem (migration 900 aplicada). */
+  private signatureCols = false;
 
   constructor(
     private client: SupabaseClient,
@@ -155,6 +157,7 @@ export class SupabaseRepository implements Repository {
     const { data: p, error } = await this.client.from('profiles').select('*').eq('id', this.user.id).maybeSingle();
     if (error) throw new Error(`Falha ao carregar o perfil: ${error.message}`);
     if (p) {
+      this.signatureCols = 'signature_image_url' in p;
       next.profile = {
         id: p.id,
         email: this.user.email,
@@ -167,6 +170,10 @@ export class SupabaseRepository implements Repository {
         signature: p.signature ?? undefined,
         sendWindow: p.send_window ?? undefined,
         whatsappQrCampaigns: typeof p.whatsapp_qr_campaigns === 'boolean' ? p.whatsapp_qr_campaigns : undefined,
+        // Chaves só existem quando as colunas existem: a tela usa isso para avisar da migration.
+        ...('signature_image_url' in p
+          ? { signatureImageUrl: p.signature_image_url ?? '', signatureLinkUrl: p.signature_link_url ?? '', signatureImageWidth: p.signature_image_width ?? undefined }
+          : {}),
         createdAt: p.created_at,
         updatedAt: p.updated_at,
       };
@@ -271,6 +278,10 @@ export class SupabaseRepository implements Repository {
       send_window: profile.sendWindow ?? null,
       // Só grava quando a coluna existe (migration aplicada) e o valor foi definido na tela.
       ...(profile.whatsappQrCampaigns !== undefined ? { whatsapp_qr_campaigns: profile.whatsappQrCampaigns } : {}),
+      // Assinatura com imagem: só grava quando a tela definiu (colunas da migration 900).
+      ...(this.signatureCols
+        ? { signature_image_url: profile.signatureImageUrl || null, signature_link_url: profile.signatureLinkUrl || null, signature_image_width: profile.signatureImageWidth ?? null }
+        : {}),
     };
     // O perfil é criado pelo banco no cadastro (trigger handle_new_user): aqui só atualizamos.
     // Se por algum motivo ainda não existir, cria (permitido pela policy "perfil próprio: criar").

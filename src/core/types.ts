@@ -439,6 +439,10 @@ export interface Profile {
   sendWindow?: SendWindow;
   /** Etapas de WhatsApp das campanhas saem sozinhas pelo WhatsApp conectado (QR). Indefinido = ligado (ou coluna ainda não criada). */
   whatsappQrCampaigns?: boolean;
+  /** Imagem da assinatura dos e-mails (https) e o link ao clicar nela. */
+  signatureImageUrl?: string;
+  signatureLinkUrl?: string;
+  signatureImageWidth?: number;
   createdAt: string;
   updatedAt: string;
 }

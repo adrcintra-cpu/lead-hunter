@@ -7,7 +7,7 @@ import { PROMPT_VERSION } from '../ai/prompts.ts';
 import { withDefaults } from '../ai/assistantDefaults.ts';
 import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
-import { sendEmail } from '../channels/resend.ts';
+import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
@@ -422,7 +422,8 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
       r = await sendWhatsapp({ to: c.whatsapp, text: draft.body, templateName: eff.step.whatsappTemplate });
     } else {
       if (!sender) throw new Error('Remetente de e-mail não configurado (Configurações → Envio).');
-      r = await sendEmail({ from: sender, fromName: p.full_name || p.company_name || undefined, to: lead.email, subject: draft.subject || `Contato — ${p.company_name ?? ''}`.trim(), text: draft.body });
+      const html = emailHtml(draft.body, p.signature, { imageUrl: p.signature_image_url, linkUrl: p.signature_link_url, width: p.signature_image_width }) ?? undefined;
+      r = await sendEmail({ from: sender, fromName: p.full_name || p.company_name || undefined, to: lead.email, subject: draft.subject || `Contato — ${p.company_name ?? ''}`.trim(), text: draft.body, html });
     }
     const sentAt = new Date().toISOString();
     await db.from('messages').update({ status: 'sent', external_id: r.externalId, provider: r.provider, sent_at: sentAt }).eq('id', msg.id);

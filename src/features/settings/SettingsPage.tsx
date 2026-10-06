@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { ShieldOff, Trash2 } from 'lucide-react';
+import { ImagePlus, ShieldOff, Trash2 } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
-import { dataMode } from '@/lib/supabase';
+import { dataMode, supabase } from '@/lib/supabase';
 import { formatDateTime } from '@/core/utils';
 import { DEFAULT_SEND_WINDOW } from '@/core/types';
-import { ConfirmDialog, Modal, PageHeader, Spinner, ThemeSwitcher } from '@/components/ui';
+import { ConfirmDialog, Modal, PageHeader, Spinner, ThemeSwitcher, cx } from '@/components/ui';
 import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
 import { AssistantCard } from './AssistantCard';
 import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection';
@@ -197,10 +197,24 @@ function SendingSettings() {
   const { toast } = useApp();
   const p = db.profile!;
   const w = p.sendWindow ?? DEFAULT_SEND_WINDOW;
-  const [f, setF] = useState({ senderEmail: p.senderEmail ?? '', signature: p.signature ?? '', start: w.startHour, end: w.endHour, weekdays: w.weekdaysOnly, qr: p.whatsappQrCampaigns !== false });
+  const [f, setF] = useState({
+    senderEmail: p.senderEmail ?? '',
+    signature: p.signature ?? '',
+    start: w.startHour,
+    end: w.endHour,
+    weekdays: w.weekdaysOnly,
+    qr: p.whatsappQrCampaigns !== false,
+    img: p.signatureImageUrl ?? '',
+    link: p.signatureLinkUrl ?? '',
+    width: p.signatureImageWidth ?? 200,
+  });
+  // No modo real, as colunas da imagem precisam existir (migration 900); no modo de teste, sempre.
+  const sigReady = dataMode === 'mock' || 'signatureImageUrl' in p;
+  const imgOk = !f.img || /^https:\/\/\S+$/i.test(f.img.trim());
+  const linkOk = !f.link || /^(https?:\/\/|mailto:)\S+$/i.test(f.link.trim());
   const conn = useWhatsAppConnection();
   const qrReady = whatsappQrAvailable && conn?.status === 'conectado';
-  const valid = f.start < f.end && f.start >= 0 && f.end <= 24 && (!f.senderEmail || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.senderEmail));
+  const valid = f.start < f.end && f.start >= 0 && f.end <= 24 && (!f.senderEmail || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.senderEmail)) && imgOk && linkOk;
   return (
     <section className="card px-5 py-5">
       <h2 className="text-[15px] font-extrabold">Envio das campanhas</h2>
@@ -217,6 +231,7 @@ function SendingSettings() {
             signature: f.signature.trim() || undefined,
             sendWindow: { startHour: Number(f.start), endHour: Number(f.end), weekdaysOnly: f.weekdays },
             ...(whatsappQrAvailable ? { whatsappQrCampaigns: f.qr } : {}),
+            ...(sigReady ? { signatureImageUrl: f.img.trim(), signatureLinkUrl: f.link.trim(), signatureImageWidth: Math.min(600, Math.max(60, Number(f.width) || 200)) } : {}),
           });
           toast('Configurações de envio salvas.', 'success');
         }}
@@ -230,6 +245,17 @@ function SendingSettings() {
           <label htmlFor="snd-sig" className="label">Assinatura dos e-mails</label>
           <textarea id="snd-sig" rows={3} className="input py-2" value={f.signature} placeholder={'André Cintra\nSua Empresa · (19) 0000-0000'} onChange={(e) => setF({ ...f, signature: e.target.value })} />
         </div>
+        <SignatureImageFields
+          ready={sigReady}
+          userId={p.id}
+          signature={f.signature}
+          img={f.img}
+          link={f.link}
+          width={f.width}
+          imgOk={imgOk}
+          linkOk={linkOk}
+          onChange={(patch) => setF({ ...f, ...patch })}
+        />
         <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
           <div>
             <label htmlFor="snd-start" className="label">Enviar das</label>
@@ -255,7 +281,7 @@ function SendingSettings() {
             </span>
           </label>
         )}
-        {!valid && <p className="text-xs text-bad sm:col-span-2">Confira o e-mail e o horário (início antes do fim).</p>}
+        {!valid && <p className="text-xs text-bad sm:col-span-2">Confira o e-mail, o horário (início antes do fim) e os endereços da imagem e do link.</p>}
         <div className="sm:col-span-2">
           <button type="submit" className="btn-primary" disabled={!valid}>Salvar envio</button>
         </div>
@@ -332,5 +358,93 @@ function StartFresh() {
         </Modal>
       )}
     </section>
+  );
+}
+
+/** Imagem com link na assinatura dos e-mails: envia o arquivo (Supabase Storage) ou cola um endereço https. */
+function SignatureImageFields(props: {
+  ready: boolean;
+  userId: string;
+  signature: string;
+  img: string;
+  link: string;
+  width: number;
+  imgOk: boolean;
+  linkOk: boolean;
+  onChange: (patch: Partial<{ img: string; link: string; width: number }>) => void;
+}) {
+  const { toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const canUpload = dataMode === 'supabase' && !!supabase;
+
+  async function upload(file: File) {
+    if (!supabase) return;
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return toast('Use uma imagem PNG, JPG, GIF ou WebP.', 'error');
+    if (file.size > 1024 * 1024) return toast('A imagem precisa ter até 1 MB.', 'error');
+    setBusy(true);
+    try {
+      const ext = file.type.split('/')[1].replace('jpeg', 'jpg');
+      const path = `${props.userId}/assinatura-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('assinaturas').upload(path, file, { contentType: file.type, cacheControl: '31536000', upsert: false });
+      if (error) throw new Error(/bucket|not found/i.test(error.message) ? 'Falta aplicar a migration da assinatura (npx supabase db push).' : error.message);
+      const { data } = supabase.storage.from('assinaturas').getPublicUrl(path);
+      props.onChange({ img: data.publicUrl });
+      toast('Imagem enviada. Clique em Salvar envio para usar.', 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Não foi possível enviar a imagem.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!props.ready) {
+    return (
+      <div className="rounded-lg border border-dashed border-line px-3 py-2.5 text-xs text-warn sm:col-span-2">
+        Para colocar uma imagem com link na assinatura, aplique a migration nova (npx supabase db push) e recarregue a página.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-line p-4 sm:col-span-2">
+      <div className="flex items-center gap-2 text-sm font-bold"><ImagePlus className="h-4 w-4" /> Imagem na assinatura (opcional)</div>
+      <p className="mt-0.5 text-xs text-ink-faint">Logo ou banner que aparece logo abaixo da assinatura. Clicando nela, o lead abre o link (seu site, agenda, WhatsApp…).</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_110px]">
+        <div>
+          <label htmlFor="sig-img" className="label">Imagem (endereço https)</label>
+          <div className="flex gap-2">
+            <input id="sig-img" className="input" placeholder="https://…/logo.png" value={props.img} onChange={(e) => props.onChange({ img: e.target.value })} />
+            {canUpload && (
+              <label className={cx('btn-outline min-h-[40px] shrink-0 cursor-pointer px-3', busy && 'pointer-events-none opacity-60')}>
+                {busy ? <Spinner /> : 'Enviar'}
+                <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="sr-only" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void upload(file); }} />
+              </label>
+            )}
+          </div>
+          {!props.imgOk && <p className="mt-1 text-xs text-bad">Use um endereço que comece com https://</p>}
+        </div>
+        <div>
+          <label htmlFor="sig-link" className="label">Link ao clicar</label>
+          <input id="sig-link" className="input" placeholder="https://oxycom.tech" value={props.link} onChange={(e) => props.onChange({ link: e.target.value })} />
+          {!props.linkOk && <p className="mt-1 text-xs text-bad">Use https://, http:// ou mailto:</p>}
+        </div>
+        <div>
+          <label htmlFor="sig-w" className="label">Largura (px)</label>
+          <input id="sig-w" type="number" min={60} max={600} className="input" value={props.width} onChange={(e) => props.onChange({ width: Number(e.target.value) })} />
+        </div>
+      </div>
+      {props.img && props.imgOk && (
+        <div className="mt-3 rounded-lg border border-line bg-white px-4 py-3 text-[13px] leading-relaxed text-[#1f1f1f]">
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-[#888]">Prévia</div>
+          <div className="whitespace-pre-line">{props.signature || 'Sua assinatura'}</div>
+          <a href={props.link || undefined} target="_blank" rel="noopener noreferrer" onClick={(e) => !props.link && e.preventDefault()}>
+            <img src={props.img} alt="Imagem da assinatura" style={{ width: Math.min(600, Math.max(60, Number(props.width) || 200)), maxWidth: '100%', height: 'auto', margin: '12px 0 4px', display: 'block' }} />
+          </a>
+          {props.img && (
+            <button type="button" className="btn-ghost mt-1 min-h-[30px] px-2 text-xs text-bad" onClick={() => props.onChange({ img: '' })}>Remover imagem</button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
