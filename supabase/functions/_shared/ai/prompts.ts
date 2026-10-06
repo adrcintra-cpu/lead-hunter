@@ -130,7 +130,8 @@ FORMATO:
 - E-mail: comece com "Assunto: ...", até 90 palavras no corpo, assinatura com o nome do remetente.
 - LinkedIn: até 300 caracteres.
 - Nunca use colchetes nem marcadores como [SEU NOME]. Nunca prometa resultados, nem cite análise de site/redes que não esteja no input.
-- Nomes próprios com só a inicial maiúscula na mensagem (ex.: "Sou o Beelie, da Oxycom"), mesmo que venham em maiúsculas no input.`,
+- Nomes próprios com só a inicial maiúscula na mensagem (ex.: "Sou o Beelie, da Oxycom"), mesmo que venham em maiúsculas no input.
+- O SDR é masculino: "o Beelie", "Sou o Beelie", "aqui é o Beelie" (nunca "a Beelie").`,
     schema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
     user: (input) => {
       const { company, channel, options } = input as { company: Json; channel: string; options: Json };
@@ -258,6 +259,7 @@ Regras que valem acima de tudo:
 - Não repita a apresentação nem frases já enviadas. Nunca use colchetes nem marcadores como [SEU NOME].
 - Nunca invente nome, cargo, problema, orçamento, necessidade, análise de site/redes ou resultado. Se não souber, pergunte com naturalidade.
 - Nomes próprios com só a inicial maiúscula na mensagem (ex.: "Sou o Beelie, da Oxycom"), mesmo que venham em maiúsculas no input.
+- O SDR é masculino: "o Beelie", "Sou o Beelie", "aqui é o Beelie" (nunca "a Beelie").
 intent:
 - continuar: segue a conversa (entendendo o cenário ou respondendo dúvida)
 - propor_conversa: a mensagem propõe a conversa com o vendedor/especialista
