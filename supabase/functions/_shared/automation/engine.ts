@@ -9,7 +9,7 @@ import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
-import { ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
+import { siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
@@ -623,7 +623,11 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       inbound: lead.origin === INBOUND_ORIGIN,
     });
     await logRun(db, ownerId, 'suggestReply', started, 'ok', run.usage);
-    const body = run.output.message?.trim();
+    // Despedida com o site da empresa (uma vez por conversa).
+    const raw = run.output.message?.trim();
+    const body = raw
+      ? withSiteInvite(raw, run.output.intent, siteFromKnowledge(assistant.knowledge), conversation.filter((m) => m.from === 'vendedor').map((m) => m.text))
+      : raw;
     if (!body) return null;
     // Uma sugestão por vez: a anterior, se não foi enviada, é substituída.
     await db.from('messages').delete().eq('lead_id', lead.id).eq('channel', channel).eq('status', 'draft').like('template', 'IA — resposta sugerida%');

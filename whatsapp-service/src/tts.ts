@@ -24,7 +24,8 @@ export async function textToSpeech(text: string, voice?: string, format: 'opus' 
     body: JSON.stringify({
       model: config.ttsModel,
       voice: v,
-      input: text.slice(0, 1500),
+      // Endereço falado sem "https://" ("oxycom.tech" soa natural; o protocolo não).
+      input: text.replace(/https?:\/\//g, '').slice(0, 1500),
       response_format: format,
       instructions: SPEAKING_STYLE,
     }),

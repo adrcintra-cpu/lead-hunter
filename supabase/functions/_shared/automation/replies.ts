@@ -214,3 +214,25 @@ export function replyDecision(cat: ReplyCategory | ReplyClass, companyName: stri
       return pause('lead respondeu', 'respondeu', `Ler resposta de ${companyName}`, 'A IA não conseguiu classificar com segurança.');
   }
 }
+
+/**
+ * Site da empresa a partir da base de conhecimento do assistente (linha "Site: oxycom.tech").
+ * Sem a linha, nada é inventado.
+ */
+export function siteFromKnowledge(knowledge?: string | null): string | null {
+  const m = /^\s*(?:site|website)\s*:\s*(?:https?:\/\/)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(\/\S*)?\s*$/im.exec(knowledge ?? '');
+  return m ? `https://${m[1].toLowerCase()}${m[2] ?? ''}` : null;
+}
+
+/**
+ * Fim de conversa (lead recusou, pediu para falar depois ou a conversa foi confirmada):
+ * o Beelie se despede convidando a conhecer o site. Só uma vez por conversa e nunca para quem pediu
+ * para não receber mensagens.
+ */
+export function withSiteInvite(body: string, intent: string, site: string | null, alreadySent: string[]): string {
+  if (!site || !['encerrar', 'confirmar_conversa'].includes(intent)) return body;
+  const host = site.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase();
+  const mentioned = (t: string) => t.toLowerCase().includes(host);
+  if (mentioned(body) || alreadySent.some(mentioned)) return body;
+  return `${body.trim()}\n\nSe quiser saber mais sobre a gente, é só acessar ${site}`;
+}
