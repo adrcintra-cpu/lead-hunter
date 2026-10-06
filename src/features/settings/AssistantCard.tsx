@@ -106,7 +106,18 @@ export function AssistantCard() {
     setPrefs(next);
     try {
       await savePrefs(s, next, custom);
-      toast(next.autoReply !== prev.autoReply ? (next.autoReply ? `O ${s.name || 'assistente'} vai responder sozinho.` : `Respostas automáticas desligadas: o ${s.name || 'assistente'} só sugere.`) : 'Preferência salva.', 'success');
+      toast(
+        next.autoReply !== prev.autoReply
+          ? next.autoReply
+            ? `O ${s.name || 'assistente'} vai responder sozinho.`
+            : `Respostas automáticas desligadas: o ${s.name || 'assistente'} só sugere.`
+          : next.answerUnknown !== prev.answerUnknown
+            ? next.answerUnknown
+              ? `O ${s.name || 'assistente'} vai atender quem chamar pedindo um serviço.`
+              : `O ${s.name || 'assistente'} volta a falar só com leads.`
+            : 'Preferência salva.',
+        'success',
+      );
     } catch (e) {
       setPrefs(prev);
       toast(e instanceof Error ? e.message : 'Não foi possível salvar.', 'error');
@@ -151,7 +162,7 @@ export function AssistantCard() {
               <span>
                 <span className="block text-sm font-bold">O {s.name || 'assistente'} conversa sozinho no WhatsApp conectado</span>
                 <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">
-                  Quando o lead responde, ele responde em cerca de 15 a 30 segundos, buscando entender o cenário e marcar uma conversa com você. Responde das 8h às 21h, todos os dias (ou no horário de Envio das campanhas, se for mais amplo), no máximo 15 vezes por lead em 24 h, e para se você escrever para o lead pelo celular. Pedido de reunião, proposta ou preço vira tarefa para você. Desligado: ele só sugere e você envia.
+                  Quando o lead responde, ele responde em cerca de 10 a 25 segundos, buscando entender o cenário e marcar uma conversa com você. Responde das 8h às 21h, todos os dias (ou no horário de Envio das campanhas, se for mais amplo), no máximo 15 vezes por lead em 24 h, e para se você escrever para o lead pelo celular. Pedido de reunião, proposta ou preço vira tarefa para você. Desligado: ele só sugere e você envia.
                 </span>
               </span>
             </label>
@@ -208,6 +219,24 @@ export function AssistantCard() {
             {prefs.replyFormat === 'audio' && whatsappQrAvailable && conn && conn.audio === false && (
               <p className="mt-2 text-xs text-warn">A voz da IA ainda não está configurada no servidor: adicione OPENAI_API_KEY nas variáveis do Railway. Até lá, as respostas automáticas em áudio falham e ficam prontas para você enviar.</p>
             )}
+            <label className="mt-4 flex items-start gap-3 border-t border-line pt-4">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-[rgb(var(--accent))]"
+                checked={!!prefs.answerUnknown}
+                disabled={!prefsAvailable || prefs.answerUnknown === undefined}
+                onChange={(e) => void updatePrefs({ ...prefs, answerUnknown: e.target.checked })}
+              />
+              <span>
+                <span className="block text-sm font-bold">Atender quem chama sem ser lead</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">
+                  Quando um número que não é lead escreve pedindo orçamento, preço ou um serviço, o {s.name || 'assistente'} cria o lead e responde. Contatos salvos na agenda do WhatsApp, números para quem você já escreveu, grupos, áudios e números de fora do Brasil são ignorados, e conversa pessoal não é gravada. Até 30 leads novos por dia. Como ele ainda pode confundir alguma mensagem pessoal, deixe desligado se o número for muito usado para assuntos pessoais.
+                </span>
+                {prefs.answerUnknown === undefined && prefsAvailable && (
+                  <span className="mt-1 block text-xs text-warn">Falta aplicar a migration desta opção (npx supabase db push).</span>
+                )}
+              </span>
+            </label>
             {!prefsAvailable && <p className="mt-2 text-xs text-warn">Falta aplicar a migration da conversa automática (npx supabase db push). Até lá, vale o padrão: o {s.name || 'assistente'} responde sozinho, em texto.</p>}
           </div>
 

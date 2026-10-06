@@ -121,7 +121,47 @@ export class InboundRelay {
     /** Transcreve um áudio recebido (baixa a mídia pela sessão do usuário). Sem ele, o áudio vira um aviso. */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private transcriber?: (userId: string, raw: any) => Promise<string | null>,
+    /** O número já é contato seu (agenda ou conversa anterior)? Esses nunca viram lead sozinhos. */
+    private isKnownContact?: (userId: string, phone: string) => boolean,
   ) {}
+
+  private unknownCfg = new Map<string, { on: boolean; at: number }>();
+
+  /** Opção "Atender quem chama sem ser lead" (cache de 1 min; sem a coluna, desligada). */
+  private async answersUnknown(userId: string): Promise<boolean> {
+    const c = this.unknownCfg.get(userId);
+    if (c && Date.now() - c.at < 60_000) return c.on;
+    const { data, error } = await this.db.from('assistant_settings').select('answer_unknown').eq('owner_id', userId).maybeSingle();
+    const on = !error && data?.answer_unknown === true;
+    this.unknownCfg.set(userId, { on, at: Date.now() });
+    return on;
+  }
+
+  /** Número que não é lead: com a opção ligada, a Edge Function decide se é contato comercial. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async handleUnknown(userId: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'ignored'> {
+    const skip = (why: string) => {
+      log.info({ user: maskUser(userId), why }, 'mensagem de contato que não é lead (ignorada)');
+      return 'ignored' as const;
+    };
+    if (!(await this.answersUnknown(userId))) return skip('opção desligada');
+    if (this.isKnownContact?.(userId, m.phone)) return skip('contato seu');
+    // Só texto de agora: áudio, imagem e histórico de quem não é lead não são processados.
+    if (m.text.startsWith('[')) return skip('não é texto');
+    if (Date.now() - Date.parse(m.at) > 15 * 60_000) return skip('mensagem antiga');
+    if (!m.phone.startsWith('55')) return skip('número de fora do Brasil');
+    const name = typeof raw?.pushName === 'string' ? raw.pushName.slice(0, 60) : undefined;
+    const res = await this.post({ action: 'unknown', ownerId: userId, from: m.phone, body: m.text, name, externalId: m.id, receivedAt: m.at });
+    if (!res.ok) throw new Error(`função respondeu ${res.status}`);
+    const data = (await res.json().catch(() => ({}))) as { leadId?: string | null; created?: boolean; auto?: AutoReply | null };
+    if (!data.leadId) return skip('não é contato comercial');
+    // Daqui em diante o número é lead: as próximas mensagens seguem o caminho normal.
+    const idx = this.indexes.get(userId);
+    if (idx) idx.map.set(phoneKey(m.phone), data.leadId);
+    log.info({ user: maskUser(userId), from: maskPhone(m.phone), created: !!data.created }, 'contato novo virou lead');
+    if (data.auto?.body && data.auto.messageId) this.schedule(userId, data.leadId, m.phone, data.auto);
+    return 'forwarded';
+  }
 
   get enabled() {
     return !!config.inboundSecret;
@@ -189,6 +229,10 @@ export class InboundRelay {
     if (!id) return;
     this.ownIds.add(id);
     if (this.ownIds.size > 500) this.ownIds.delete(this.ownIds.values().next().value as string);
+  }
+
+  isOwn(id: string) {
+    return !!id && this.ownIds.has(id);
   }
 
   private chatKey(userId: string, phone: string) {
@@ -282,10 +326,8 @@ export class InboundRelay {
     }
     try {
       const leadId = await this.findLead(userId, m.phone);
-      if (!leadId) {
-        log.info({ user: maskUser(userId) }, 'mensagem de contato que não é lead (ignorada)');
-        return 'ignored'; // conversa pessoal: não sai daqui
-      }
+      // Não é lead: conversa pessoal não sai daqui, a menos que a opção de atender desconhecidos esteja ligada.
+      if (!leadId) return await this.handleUnknown(userId, m, raw);
       const body = (await this.audioText(userId, raw)) ?? m.text;
       const res = await this.post({ ownerId: userId, leadId, from: m.phone, body, externalId: m.id, receivedAt: m.at });
       if (!res.ok) throw new Error(`função respondeu ${res.status}`);

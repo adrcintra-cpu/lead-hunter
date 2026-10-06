@@ -11,6 +11,11 @@ export interface AssistantPrefs {
   autoReply: boolean;
   replyFormat: 'texto' | 'audio';
   voice: string;
+  /**
+   * Atender quem chama sem ser lead (mensagem comercial vira lead). Desligado por padrão.
+   * undefined = coluna ainda não existe no banco (migration não aplicada): não é salvo.
+   */
+  answerUnknown?: boolean;
 }
 
 export const DEFAULT_PREFS: AssistantPrefs = { autoReply: true, replyFormat: 'texto', voice: 'cedar' };
@@ -48,7 +53,7 @@ export async function loadAssistant(): Promise<AssistantState> {
     try {
       const raw = localStorage.getItem(LOCAL_KEY);
       const saved = raw ? JSON.parse(raw) : null;
-      return { settings: withDefaults(saved), prefs: { ...DEFAULT_PREFS, ...(saved?.prefs ?? {}) }, prefsAvailable: true, custom: !!saved?.persona, available: true };
+      return { settings: withDefaults(saved), prefs: { ...DEFAULT_PREFS, answerUnknown: false, ...(saved?.prefs ?? {}) }, prefsAvailable: true, custom: !!saved?.persona, available: true };
     } catch {
       return { settings: DEFAULT_ASSISTANT, prefs: DEFAULT_PREFS, prefsAvailable: true, custom: false, available: true };
     }
@@ -58,7 +63,9 @@ export async function loadAssistant(): Promise<AssistantState> {
   const pr = await supabase.from('assistant_settings').select('auto_reply, reply_format, voice').maybeSingle();
   const prefs: AssistantPrefs = pr.data
     ? { autoReply: pr.data.auto_reply !== false, replyFormat: pr.data.reply_format === 'audio' ? 'audio' : 'texto', voice: pr.data.voice || 'cedar' }
-    : DEFAULT_PREFS;
+    : { ...DEFAULT_PREFS };
+  const un = await supabase.from('assistant_settings').select('answer_unknown').maybeSingle();
+  if (!un.error) prefs.answerUnknown = un.data?.answer_unknown === true;
   return { settings: withDefaults(data), prefs, prefsAvailable: !pr.error, custom: !!data?.persona, available: true };
 }
 
@@ -90,6 +97,7 @@ export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs
   if (!u.user) throw new Error('Faça login de novo.');
   const row: Record<string, unknown> = { owner_id: u.user.id, ...clean, updated_at: new Date().toISOString() };
   if (prefs) Object.assign(row, { auto_reply: prefs.autoReply, reply_format: prefs.replyFormat, voice: prefs.voice });
+  if (prefs?.answerUnknown !== undefined) row.answer_unknown = prefs.answerUnknown;
   const { error } = await supabase.from('assistant_settings').upsert(row);
   if (error) throw new Error(missingTable(error.message) ? 'Falta aplicar a migration do assistente (npx supabase db push).' : error.message);
 }

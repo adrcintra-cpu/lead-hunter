@@ -2,7 +2,7 @@ import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLa
 import type { SupabaseClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import { clearAuthState, useDatabaseAuthState } from './authState.js';
-import { InboundRelay } from './inbound.js';
+import { InboundRelay, phoneKey } from './inbound.js';
 import { MAX_TRANSCRIBE_SECONDS, textToSpeech, transcribe, ttsAvailable } from './tts.js';
 import { config } from './config.js';
 import { libLogger, log, maskPhone, maskUser } from './log.js';
@@ -43,6 +43,12 @@ interface Session {
    * reenvia a partir daqui. Sem isso, a mensagem fica presa para sempre.
    */
   sent: Map<string, proto.IMessage>;
+  /**
+   * Números que já são contatos seus (salvos na agenda do WhatsApp ou com conversa anterior).
+   * Só a chave do número fica em memória, nunca nome ou conteúdo. Usado para que "atender quem
+   * chama sem ser lead" não responda família, amigos e fornecedores.
+   */
+  known: Set<string>;
 }
 
 /** Quantas mensagens enviadas guardar por sessão para reenvio. */
@@ -71,6 +77,7 @@ export class SessionManager {
       db,
       (userId, phone, text, o) => this.sendMessage(userId, phone, text, { ...o, typing: true, own: true }),
       (userId, raw) => this.transcribeIncoming(userId, raw),
+      (userId, phone) => this.sessions.get(userId)?.known.has(phoneKey(phone)) ?? false,
     );
   }
 
@@ -93,6 +100,7 @@ export class SessionManager {
         sentDay: '',
         sentToday: 0,
         sent: new Map(),
+        known: new Set(),
       };
       this.sessions.set(userId, s);
     }
@@ -171,6 +179,27 @@ export class SessionManager {
 
       sock.ev.on('creds.update', auth.saveCreds);
 
+      // Contatos salvos e conversas que já existiam: guardados só como chave do número (ver `known`).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const learn = (c: any, saved: boolean) => {
+        if (!c || (saved && !c.name)) return;
+        for (const jid of [c.phoneNumber, c.id]) {
+          if (typeof jid === 'string' && jid.endsWith('@s.whatsapp.net')) {
+            const d = jid.split(/[:@]/)[0].replace(/\D/g, '');
+            if (d) s.known.add(phoneKey(d));
+          }
+        }
+        if (s.known.size > 20000) s.known.delete(s.known.values().next().value as string);
+      };
+      sock.ev.on('contacts.upsert', (list) => list.forEach((c) => learn(c, true)));
+      sock.ev.on('contacts.update', (list) => list.forEach((c) => learn(c, true)));
+      sock.ev.on('messaging-history.set', ({ contacts, chats }) => {
+        (contacts ?? []).forEach((c) => learn(c, true));
+        // Conversa que já existia antes de conectar: não é um contato novo.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (chats ?? []).forEach((c: any) => learn({ id: c.id, phoneNumber: c.pnJid ?? c.phoneNumber }, false));
+      });
+
       // Respostas recebidas: só as de leads seguem (ver inbound.ts). 'notify' = mensagem nova, não histórico.
       sock.ev.on('messages.upsert', ({ messages, type }) => {
         if (s.sock !== sock) return;
@@ -178,6 +207,8 @@ export class SessionManager {
           // Você escreveu no celular para esse contato: a resposta automática pendente é cancelada.
           if (m.key?.fromMe) {
             remember(s, m.key.id, m.message);
+            // Você escreveu para esse número (não foi o Beelie): é um contato seu.
+            if (!this.inbound.isOwn(m.key.id ?? '')) learn({ id: m.key.remoteJid, phoneNumber: m.key.remoteJidAlt }, false);
             this.inbound.cancelFor(userId, m);
           }
           else if (type === 'notify') void this.inbound.handle(userId, m);

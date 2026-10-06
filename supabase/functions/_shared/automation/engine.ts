@@ -11,6 +11,7 @@ import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
+import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -618,6 +619,8 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       conversation,
       assistant,
       brief: beelieBrief(lead.beelie, { contactName: lead.contact_name, contactRole: lead.contact_role, email: lead.email }),
+      // Lead que chamou sozinho: o Beelie não fez abordagem e ainda não conhece a empresa.
+      inbound: lead.origin === INBOUND_ORIGIN,
     });
     await logRun(db, ownerId, 'suggestReply', started, 'ok', run.usage);
     const body = run.output.message?.trim();

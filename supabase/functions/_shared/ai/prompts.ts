@@ -286,6 +286,7 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         conversation: { from: 'vendedor' | 'lead'; date: string; text: string }[];
         assistant?: { name?: string; persona?: string; knowledge?: string; playbooks?: string };
         brief?: string;
+        inbound?: boolean;
       };
       const cut = (t: string | undefined, n: number) => (t ?? '').trim().slice(0, n);
       return [
@@ -298,6 +299,9 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         i.sender.offer ? `Oferta (perfil do vendedor): ${i.sender.offer}` : '',
         i.contact?.name ? `Contato no lead: ${i.contact.name}${i.contact.role ? `, ${i.contact.role}` : ''} (use o primeiro nome)` : '',
         i.category ? `Classificação da última resposta: ${i.category}` : '',
+        i.inbound
+          ? 'IMPORTANTE: o lead procurou a empresa por conta própria (não houve abordagem antes). Agradeça o contato, apresente-se uma vez e ajude com o que ele pediu. Ainda não se sabe o nome da pessoa nem a empresa dela: descubra com naturalidade, uma pergunta por vez. Não diga que viu algo sobre a empresa dele.'
+          : '',
         i.brief ? `MEMÓRIA DO LEAD (siga o objetivo do estágio; não pergunte o que já se sabe):\n${i.brief}` : '',
         `Empresa do lead (dados reais): ${JSON.stringify(stripInternal(i.company))}`,
         'Conversa até agora (mais antiga primeiro):',
@@ -308,6 +312,36 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         .join('\n');
     },
     output: (raw) => ({ message: String(raw.message ?? '').trim(), intent: String(raw.intent ?? 'continuar'), note: String(raw.note ?? '') }),
+  },
+
+  screenInbound: {
+    system: `Você faz a triagem de mensagens que chegam no WhatsApp comercial de uma empresa, de números que ainda não são clientes nem leads. ${RULES}
+O mesmo número também recebe mensagens pessoais (família, amigos), de fornecedores e de golpes/spam: essas NÃO são comerciais.
+commercial = true só quando a pessoa procura a empresa como possível cliente: pede orçamento, preço, informação sobre um serviço que a empresa oferece, quer contratar, viu anúncio/site e quer saber mais.
+commercial = false para conversa pessoal, cobrança, entrega, fornecedor oferecendo algo, vaga de emprego, propaganda, golpe, ou quando não dá para saber.
+companyName / contactName / city: só se a pessoa disse na mensagem; senão null. Nunca deduza.`,
+    schema: {
+      type: 'object',
+      properties: {
+        commercial: { type: 'boolean' },
+        reason: { type: 'string', description: 'Motivo em até 12 palavras.' },
+        companyName: { type: ['string', 'null'] },
+        contactName: { type: ['string', 'null'] },
+        city: { type: ['string', 'null'] },
+      },
+      required: ['commercial', 'reason', 'companyName', 'contactName', 'city'],
+    },
+    user: (input) => {
+      const i = input as { text: string; offer?: string; company?: string };
+      return [i.company ? `Empresa que recebeu: ${i.company}` : '', i.offer ? `O que ela oferece: ${i.offer}` : '', `Mensagem recebida:\n${i.text}`].filter(Boolean).join('\n\n');
+    },
+    output: (raw) => ({
+      commercial: raw.commercial === true,
+      reason: String(raw.reason ?? ''),
+      companyName: typeof raw.companyName === 'string' && raw.companyName.trim() ? raw.companyName.trim().slice(0, 120) : null,
+      contactName: typeof raw.contactName === 'string' && raw.contactName.trim() ? raw.contactName.trim().slice(0, 60) : null,
+      city: typeof raw.city === 'string' && raw.city.trim() ? raw.city.trim().slice(0, 60) : null,
+    }),
   },
 
   summarizeResults: {

@@ -7,12 +7,14 @@
 //                Se a resposta automática estiver ligada, devolve `auto` para o serviço enviar.
 //   sent         o serviço enviou a resposta automática → marca como enviada.
 //   auto_failed  o envio automático falhou → registra; a mensagem fica para você enviar.
+//   unknown      número que não é lead escreveu: com a opção ligada e mensagem comercial, vira lead e segue como resposta.
 // Publicar sem verificação de JWT: supabase functions deploy whatsapp-qr-inbound --no-verify-jwt
 
 import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent } from '../_shared/automation/engine.ts';
 import { inWindow } from '../_shared/automation/planner.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from '../_shared/automation/types.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
+import { handleUnknown } from '../_shared/automation/unknownInbound.ts';
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
@@ -63,10 +65,36 @@ Deno.serve(async (req) => {
     return new Response('JSON inválido', { status: 400 });
   }
   const ownerId = String(b.ownerId ?? '');
-  const leadId = String(b.leadId ?? '');
-  if (!UUID.test(ownerId) || !UUID.test(leadId)) return new Response('Dados inválidos', { status: 400 });
-
+  if (!UUID.test(ownerId)) return new Response('Dados inválidos', { status: 400 });
   const db = adminClient();
+
+  if (b.action === 'unknown') {
+    const body = typeof b.body === 'string' ? b.body.slice(0, 4000) : '';
+    const from = String(b.from ?? '').replace(/\D/g, '').slice(0, 20);
+    if (!body.trim() || !from) return new Response('Dados inválidos', { status: 400 });
+    try {
+      const r = await handleUnknown(db, ownerId, from, body, typeof b.name === 'string' ? b.name : undefined);
+      // Não comercial: nada é gravado (a mensagem pessoal não fica no sistema).
+      if (!r.leadId) return Response.json({ ok: true, leadId: null });
+      const result: Row | null = await handleInbound(db, {
+        ownerId,
+        leadId: r.leadId,
+        channel: 'whatsapp',
+        from,
+        body,
+        externalId: typeof b.externalId === 'string' && b.externalId ? `qr:${b.externalId.slice(0, 100)}` : undefined,
+        receivedAt: typeof b.receivedAt === 'string' ? b.receivedAt : undefined,
+      });
+      const auto = result?.suggestion ? await autoDecision(db, ownerId, r.leadId, result.suggestion) : null;
+      return Response.json({ ok: true, leadId: r.leadId, created: r.created, auto });
+    } catch (err) {
+      console.error('unknown', err instanceof Error ? err.message : String(err));
+      return Response.json({ error: 'Falha ao registrar o contato.' }, { status: 500 });
+    }
+  }
+
+  const leadId = String(b.leadId ?? '');
+  if (!UUID.test(leadId)) return new Response('Dados inválidos', { status: 400 });
   // O lead precisa ser do mesmo usuário da sessão de WhatsApp.
   const { data: lead } = await db.from('leads').select('id').eq('id', leadId).eq('owner_id', ownerId).maybeSingle();
   if (!lead) return new Response('Lead não encontrado', { status: 404 });
