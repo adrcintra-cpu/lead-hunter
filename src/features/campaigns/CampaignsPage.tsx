@@ -194,8 +194,14 @@ export function CampaignDetailPage() {
 
   const cad = db.cadences.find((c) => c.id === camp.cadenceId);
   const editable = camp.status === 'rascunho';
+  /** Campanha em andamento: dá para mudar o público e adicionar leads (canal e cadência continuam travados). */
+  const live = camp.status === 'ativa' || camp.status === 'pausada' || camp.status === 'agendada';
+  const audienceEditable = camp.status !== 'finalizada';
   const m = auto.campaignMetrics(camp.id);
   const pending = enrollments.filter((e) => e.status === 'pendente');
+  // Leads do público que ainda não estão nesta campanha (os que "Preparar mensagens" vai incluir).
+  const inCampaign = new Set(enrollments.map((e) => e.leadId));
+  const toPrepare = audience.filter((l) => !inCampaign.has(l.id));
   const set = (patch: Partial<Campaign>) => auto.updateCampaign(camp.id, patch);
   const setAud = (patch: Partial<CampaignAudience>) => set({ audience: { ...camp.audience, ...patch } });
   const segments = [...new Set(db.companies.map((c) => c.segment))].sort();
@@ -219,8 +225,12 @@ export function CampaignDetailPage() {
 
   function activate(when?: string) {
     try {
+      const wasLive = live;
       auto.activateCampaign(camp!.id, when);
-      toast(when ? 'Campanha agendada.' : 'Campanha ativada. Os envios respeitam a janela de horário.', 'success');
+      toast(
+        wasLive ? 'Leads adicionados à campanha. Os envios respeitam a janela de horário.' : when ? 'Campanha agendada.' : 'Campanha ativada. Os envios respeitam a janela de horário.',
+        'success',
+      );
       if (auto.runsLocally) auto.tick();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Falha ao ativar.', 'error');
@@ -270,7 +280,11 @@ export function CampaignDetailPage() {
 
       <section className="card px-5 py-5">
         <h2 className="text-[15px] font-extrabold">Configuração</h2>
-        {!editable && <p className="mt-1 text-xs text-ink-faint">Público e cadência ficam travados depois da ativação.</p>}
+        {!editable && (
+          <p className="mt-1 text-xs text-ink-faint">
+            {live ? 'Canal e cadência ficam travados depois da ativação. O público pode mudar a qualquer momento: vale para os leads que você adicionar.' : 'Campanha finalizada: só nome, responsável e objetivo podem mudar.'}
+          </p>
+        )}
         <div className="mt-4 grid gap-3.5 sm:grid-cols-2">
           <div>
             <label htmlFor="c-name" className="label">Nome</label>
@@ -307,16 +321,16 @@ export function CampaignDetailPage() {
         <div className="mt-3 grid gap-3.5 sm:grid-cols-2">
           <div>
             <label htmlFor="a-seg" className="label">Segmentos (vazio = todos)</label>
-            <input id="a-seg" list="segments" className="input" disabled={!editable} value={camp.audience.segments.join(', ')} placeholder="Ex.: Agronegócio, Indústria" onChange={(e) => setAud({ segments: splitList(e.target.value) })} />
+            <input id="a-seg" list="segments" className="input" disabled={!audienceEditable} value={camp.audience.segments.join(', ')} placeholder="Ex.: Agronegócio, Indústria" onChange={(e) => setAud({ segments: splitList(e.target.value) })} />
             <datalist id="segments">{segments.map((s) => <option key={s} value={s} />)}</datalist>
           </div>
           <div>
             <label htmlFor="a-city" className="label">Cidades (vazio = todas)</label>
-            <input id="a-city" className="input" disabled={!editable} value={camp.audience.cities.join(', ')} placeholder="Ex.: Campinas, Limeira" onChange={(e) => setAud({ cities: splitList(e.target.value) })} />
+            <input id="a-city" className="input" disabled={!audienceEditable} value={camp.audience.cities.join(', ')} placeholder="Ex.: Campinas, Limeira" onChange={(e) => setAud({ cities: splitList(e.target.value) })} />
           </div>
           <div>
             <label htmlFor="a-score" className="label">Score mínimo</label>
-            <select id="a-score" className="input" disabled={!editable} value={camp.audience.minScore} onChange={(e) => setAud({ minScore: Number(e.target.value) })}>
+            <select id="a-score" className="input" disabled={!audienceEditable} value={camp.audience.minScore} onChange={(e) => setAud({ minScore: Number(e.target.value) })}>
               <option value={0}>Qualquer</option>
               <option value={50}>50+ (morno e quente)</option>
               <option value={80}>80+ (só quentes)</option>
@@ -324,16 +338,16 @@ export function CampaignDetailPage() {
           </div>
           <div>
             <label htmlFor="a-tags" className="label">Tags (qualquer uma)</label>
-            <input id="a-tags" className="input" disabled={!editable} value={camp.audience.tags.join(', ')} placeholder="Ex.: prioridade" onChange={(e) => setAud({ tags: splitList(e.target.value) })} />
+            <input id="a-tags" className="input" disabled={!audienceEditable} value={camp.audience.tags.join(', ')} placeholder="Ex.: prioridade" onChange={(e) => setAud({ tags: splitList(e.target.value) })} />
           </div>
           <div>
             <label htmlFor="a-list" className="label">Lista</label>
-            <select id="a-list" className="input" disabled={!editable} value={camp.audience.listId ?? ''} onChange={(e) => setAud({ listId: e.target.value || undefined })}>
+            <select id="a-list" className="input" disabled={!audienceEditable} value={camp.audience.listId ?? ''} onChange={(e) => setAud({ listId: e.target.value || undefined })}>
               <option value="">Todas as listas</option>
               {db.lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
-          <fieldset disabled={!editable}>
+          <fieldset disabled={!audienceEditable}>
             <legend className="label">Etapas do pipeline</legend>
             <div className="flex flex-wrap gap-1.5">
               {STAGES.filter((s) => !['cliente', 'nao_interessado'].includes(s.id)).map((s) => {
@@ -372,7 +386,7 @@ export function CampaignDetailPage() {
               value={camp.dailyLimitWhatsapp ?? ''}
               onChange={(e) => set({ dailyLimitWhatsapp: Number(e.target.value) > 0 ? Math.round(Number(e.target.value)) : undefined })}
             />
-            <p className="mt-1 text-xs text-ink-faint">Mensagens prontas na fila de Tarefas por dia. Hoje: {auto.sentToday(camp.id, 'whatsapp')}.</p>
+            <p className="mt-1 text-xs text-ink-faint">Mensagens de WhatsApp por dia. Hoje: {auto.sentToday(camp.id, 'whatsapp')}.</p>
           </div>
           <div>
             <label htmlFor="c-lim-em" className="label">Limite diário de e-mail</label>
@@ -410,20 +424,27 @@ export function CampaignDetailPage() {
         )}
       </section>
 
-      {(editable || pending.length > 0) && (
+      {(editable || live || pending.length > 0) && (
         <section className="card px-5 py-5">
-          <h2 className="text-[15px] font-extrabold">Revisar e ativar</h2>
+          <h2 className="text-[15px] font-extrabold">{live ? 'Adicionar leads' : 'Revisar e ativar'}</h2>
           <p className="mt-1 text-[13px] text-ink-faint">
-            “Preparar mensagens” cria a primeira mensagem de cada lead com os dados reais disponíveis. Revise e edite antes de ativar. As mensagens seguintes são escritas na hora do envio.
+            “Preparar mensagens” cria a primeira mensagem de cada lead do público que ainda não está na campanha, com os dados reais disponíveis. Revise e edite antes de {live ? 'adicionar' : 'ativar'}. As mensagens seguintes são escritas na hora do envio.
+            {camp.status === 'pausada' && ' Com a campanha pausada, os leads adicionados começam quando você retomar.'}
           </p>
           <div className="mt-4 flex flex-wrap items-end gap-2">
-            <button type="button" className="btn-outline" onClick={prepare} disabled={!!busy || audience.length === 0}>
-              {busy ? <Spinner /> : <Sparkles className="h-4 w-4" />} {busy || `Preparar mensagens (${audience.length})`}
+            <button type="button" className="btn-outline" onClick={prepare} disabled={!!busy || toPrepare.length === 0}>
+              {busy ? <Spinner /> : <Sparkles className="h-4 w-4" />} {busy || `Preparar mensagens (${toPrepare.length})`}
             </button>
-            <button type="button" className="btn-primary" onClick={() => activate()} disabled={(!pending.length && !camp.autoEnroll) || !!busy}>
-              <Play className="h-4 w-4" /> Ativar agora ({pending.length})
-            </button>
-            <div className="flex items-end gap-2">
+            {live ? (
+              <button type="button" className="btn-primary" onClick={() => activate()} disabled={!pending.length || !!busy}>
+                <Play className="h-4 w-4" /> Adicionar à campanha ({pending.length})
+              </button>
+            ) : (
+              <button type="button" className="btn-primary" onClick={() => activate()} disabled={(!pending.length && !camp.autoEnroll) || !!busy}>
+                <Play className="h-4 w-4" /> Ativar agora ({pending.length})
+              </button>
+            )}
+            {!live && <div className="flex items-end gap-2">
               <div>
                 <label htmlFor="c-when" className="label">Ou agendar para</label>
                 <input id="c-when" type="datetime-local" className="input" value={schedule} onChange={(e) => setSchedule(e.target.value)} />
@@ -431,7 +452,7 @@ export function CampaignDetailPage() {
               <button type="button" className="btn-outline" disabled={(!pending.length && !camp.autoEnroll) || !schedule} onClick={() => activate(new Date(schedule).toISOString())}>
                 <CalendarClock className="h-4 w-4" /> Agendar
               </button>
-            </div>
+            </div>}
           </div>
         </section>
       )}

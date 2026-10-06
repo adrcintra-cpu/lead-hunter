@@ -196,12 +196,18 @@ export class AutomationService {
     const pending = this.db.enrollments.filter((e) => e.campaignId === campaignId && e.status === 'pendente');
     if (!pending.length && !camp.autoEnroll) throw new Error('Nenhum lead preparado. Clique em “Preparar mensagens” primeiro.');
     const now = this.svc.now();
-    const start = scheduledAt && new Date(scheduledAt) > now ? scheduledAt : now.toISOString();
-    const scheduled = start !== now.toISOString();
+    // Campanha já em andamento: só entram os leads preparados, sem mexer na campanha.
+    const live = camp.status === 'ativa' || camp.status === 'pausada' || camp.status === 'agendada';
+    if (live && !pending.length) throw new Error('Nenhum lead preparado. Clique em “Preparar mensagens” primeiro.');
+    const liveStart = camp.status === 'agendada' && camp.scheduledAt && new Date(camp.scheduledAt) > now ? camp.scheduledAt : now.toISOString();
+    const start = live ? liveStart : scheduledAt && new Date(scheduledAt) > now ? scheduledAt : now.toISOString();
+    const scheduled = live ? camp.status === 'agendada' : start !== now.toISOString();
     this.repo.batch(() => {
-      this.repo.update('campaigns', campaignId, { status: scheduled ? 'agendada' : 'ativa', scheduledAt: scheduled ? start : undefined, startedAt: scheduled ? undefined : start });
+      if (!live) this.repo.update('campaigns', campaignId, { status: scheduled ? 'agendada' : 'ativa', scheduledAt: scheduled ? start : undefined, startedAt: scheduled ? undefined : start });
       for (const e of pending) {
-        this.repo.update('enrollments', e.id, { status: 'ativa', nextRunAt: start, startedAt: start });
+        // Pausada: os novos ficam pausados junto e começam quando a campanha for retomada.
+        if (camp.status === 'pausada') this.repo.update('enrollments', e.id, { status: 'pausada', stopReason: 'Campanha pausada', nextRunAt: start, startedAt: start });
+        else this.repo.update('enrollments', e.id, { status: 'ativa', nextRunAt: start, startedAt: start });
         const lead = this.db.leads.find((l) => l.id === e.leadId);
         this.svc.log(e.leadId, 'campaign_enrolled', `Entrou na campanha “${camp.name}”${scheduled ? ` (início ${new Date(start).toLocaleString('pt-BR')})` : ''}`, { campaignId });
         if (lead && (lead.stage === 'novo' || lead.stage === 'qualificado')) this.svc.changeStage(lead.id, 'em_cadencia');
