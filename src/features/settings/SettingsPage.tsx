@@ -4,7 +4,7 @@ import { useApp, useDb, useService } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { formatDateTime } from '@/core/utils';
 import { DEFAULT_SEND_WINDOW } from '@/core/types';
-import { ConfirmDialog, PageHeader, ThemeSwitcher } from '@/components/ui';
+import { ConfirmDialog, Modal, PageHeader, Spinner, ThemeSwitcher } from '@/components/ui';
 import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
 import { AssistantCard } from './AssistantCard';
 import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection';
@@ -159,6 +159,7 @@ export function SettingsPage() {
         </ul>
       </section>
 
+      {dataMode !== 'mock' && <StartFresh />}
       {dataMode === 'mock' && (
         <section className="card border-bad/30 px-5 py-5">
           <h2 className="text-[15px] font-extrabold">Dados locais</h2>
@@ -269,6 +270,67 @@ function SendingSettings() {
           <div className="text-ink-faint">{service.automation.runsLocally ? 'Simulado no modo de teste' : 'Resend, via servidor'}</div>
         </div>
       </div>
+    </section>
+  );
+}
+
+/** Começar do zero no modo real: apaga leads, campanhas e testes; mantém configurações. Pede para digitar APAGAR. */
+function StartFresh() {
+  const db = useDb();
+  const service = useService();
+  const { toast } = useApp();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const counts = { leads: db.leads.length, campaigns: db.campaigns.length, searches: db.searches.length, tasks: db.tasks.length };
+
+  async function run() {
+    setBusy(true);
+    try {
+      await service.startFresh();
+      toast('Tudo limpo. O Lead Hunter está pronto para começar.', 'success');
+      setOpen(false);
+      setTyped('');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Não foi possível apagar tudo.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card border-bad/30 px-5 py-5">
+      <h2 className="text-[15px] font-extrabold">Começar do zero</h2>
+      <p className="mt-1 text-[13px] text-ink-faint">
+        Apaga todos os leads, campanhas, buscas feitas, listas, tarefas e mensagens (inclusive os testes). Continuam: seu perfil, as cadências, as buscas salvas,
+        o assistente de IA, a conexão do WhatsApp, as configurações de envio e a lista de supressão (opt-out).
+      </p>
+      <p className="mt-2 text-[13px]">
+        Hoje: <strong>{counts.leads}</strong> leads · <strong>{counts.campaigns}</strong> campanhas · <strong>{counts.searches}</strong> buscas · <strong>{counts.tasks}</strong> tarefas
+      </p>
+      <button type="button" className="btn-outline mt-3 text-bad" onClick={() => setOpen(true)} disabled={!counts.leads && !counts.campaigns && !counts.searches && !counts.tasks}>
+        Apagar leads, campanhas e testes
+      </button>
+      {open && (
+        <Modal
+          title="Apagar tudo e começar do zero?"
+          onClose={() => !busy && setOpen(false)}
+          footer={
+            <>
+              <button type="button" className="btn-ghost" onClick={() => setOpen(false)} disabled={busy}>Cancelar</button>
+              <button type="button" className="btn bg-bad text-white hover:opacity-90 dark:text-bg" disabled={typed.trim().toUpperCase() !== 'APAGAR' || busy} onClick={() => void run()}>
+                {busy && <Spinner />} Apagar tudo
+              </button>
+            </>
+          }
+        >
+          <p className="text-sm text-ink-soft">
+            Serão apagados {counts.leads} leads e {counts.campaigns} campanhas, com histórico, mensagens e tarefas. Isso não pode ser desfeito.
+          </p>
+          <label htmlFor="fresh-confirm" className="label mt-3">Para confirmar, digite APAGAR</label>
+          <input id="fresh-confirm" className="input" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+        </Modal>
+      )}
     </section>
   );
 }

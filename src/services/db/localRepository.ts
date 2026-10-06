@@ -1,5 +1,6 @@
 import { LEGACY_STAGES, type Profile } from '@/core/types';
 import { APPEND_ONLY, emptyDb, type DbState, type Repository, type TableName, type Tables } from './schema';
+import { purgeState, type PurgeRequest } from './purge';
 
 /**
  * Persistência local, por usuário, no localStorage.
@@ -105,6 +106,11 @@ export class LocalRepository implements Repository {
 
   reset() {
     this.state = { ...emptyDb(), profile: this.state.profile };
+    this.commit();
+  }
+
+  async purge(req: PurgeRequest) {
+    this.state = purgeState(this.state, req);
     this.commit();
   }
 }

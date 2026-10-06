@@ -910,6 +910,24 @@ export class LeadHunterService {
     this.repo.reset();
     this.ensureDefaultCadence();
   }
+
+  /**
+   * Exclui leads (com a empresa e tudo ligado a eles: histórico, mensagens, tarefas, inscrições em campanhas).
+   * A lista de supressão (opt-out) continua: quem pediu para não receber mensagens segue bloqueado.
+   */
+  async deleteLeads(leadIds: string[]): Promise<number> {
+    const ids = new Set(leadIds);
+    const companyIds = Array.from(new Set(this.db.leads.filter((l) => ids.has(l.id)).map((l) => l.companyId)));
+    if (!companyIds.length) return 0;
+    await this.repo.purge({ companyIds });
+    return ids.size;
+  }
+
+  /** Começar do zero: apaga todos os leads, campanhas, buscas, listas, tarefas e mensagens. Mantém perfil, cadências, buscas salvas, assistente e opt-outs. */
+  async startFresh() {
+    await this.repo.purge({ everything: true });
+    this.ensureDefaultCadence();
+  }
 }
 
 /** Campos reais do lead que a IA pode usar para personalizar ("contexto utilizado"). */

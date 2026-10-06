@@ -38,7 +38,32 @@ export function CampaignsPage() {
   const db = useDb();
   const service = useService();
   const navigate = useNavigate();
+  const { toast } = useApp();
   const auto = service.automation;
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const allSelected = db.campaigns.length > 0 && db.campaigns.every((c) => selected.has(c.id));
+
+  async function deleteSelected() {
+    setDeleting(true);
+    try {
+      const n = await auto.deleteCampaigns(Array.from(selected));
+      setSelected(new Set());
+      toast(n === 1 ? 'Campanha excluída.' : `${n} campanhas excluídas.`, 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Não foi possível excluir.', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  }
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-5">
       <PageHeader
@@ -73,11 +98,39 @@ export function CampaignsPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-2 font-semibold text-ink-soft">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={() => setSelected(allSelected ? new Set() : new Set(db.campaigns.map((c) => c.id)))}
+                className="h-4 w-4 accent-[rgb(var(--accent))]"
+              />
+              Selecionar todas
+            </label>
+            {selected.size > 0 && (
+              <>
+                <span className="font-semibold text-accent-strong">{selected.size} selecionada{selected.size > 1 ? 's' : ''}</span>
+                <button type="button" className="btn-outline min-h-[36px] text-bad" onClick={() => setConfirmDelete(true)} disabled={deleting}>
+                  {deleting ? <Spinner /> : <Trash2 className="h-4 w-4" />} Excluir
+                </button>
+                <button type="button" className="btn-ghost min-h-[36px]" onClick={() => setSelected(new Set())}>Cancelar</button>
+              </>
+            )}
+          </div>
           {db.campaigns.map((c) => {
             const m = auto.campaignMetrics(c.id);
             const cad = db.cadences.find((x) => x.id === c.cadenceId);
             return (
-              <Link key={c.id} to={`/campanhas/${c.id}`} className="card flex flex-col gap-3 px-5 py-4 transition-colors hover:border-accent">
+              <div key={c.id} className={cx('card flex items-start gap-3 py-4 pl-4 pr-5 transition-colors hover:border-accent', selected.has(c.id) && 'border-accent')}>
+                <input
+                  type="checkbox"
+                  aria-label={`Selecionar ${c.name}`}
+                  checked={selected.has(c.id)}
+                  onChange={() => toggle(c.id)}
+                  className="mt-1.5 h-4 w-4 shrink-0 accent-[rgb(var(--accent))]"
+                />
+              <Link to={`/campanhas/${c.id}`} className="flex min-w-0 flex-1 flex-col gap-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -100,9 +153,20 @@ export function CampaignsPage() {
                   <Metric label="Interessados" value={m.interested} />
                 </div>
               </Link>
+              </div>
             );
           })}
         </div>
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={selected.size === 1 ? 'Excluir esta campanha?' : `Excluir ${selected.size} campanhas?`}
+          confirmLabel="Excluir"
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={() => void deleteSelected()}
+        >
+          As campanhas são excluídas e os envios delas param na hora. Os leads continuam, com o histórico das mensagens já enviadas.
+        </ConfirmDialog>
       )}
     </div>
   );
@@ -186,9 +250,7 @@ export function CampaignDetailPage() {
           {camp.status !== 'rascunho' && camp.status !== 'finalizada' && (
             <button type="button" className="btn-ghost text-bad" onClick={() => setConfirm('finish')}><Square className="h-4 w-4" /> Finalizar</button>
           )}
-          {editable && (
-            <button type="button" className="btn-ghost text-bad" onClick={() => setConfirm('delete')}><Trash2 className="h-4 w-4" /> Excluir</button>
-          )}
+          <button type="button" className="btn-ghost text-bad" onClick={() => setConfirm('delete')}><Trash2 className="h-4 w-4" /> Excluir</button>
         </div>
       </div>
 
@@ -408,14 +470,19 @@ export function CampaignDetailPage() {
               auto.finishCampaign(camp.id);
               toast('Campanha finalizada. Nenhum envio novo será feito.');
             } else {
-              auto.deleteCampaign(camp.id);
+              void auto
+                .deleteCampaign(camp.id)
+                .then(() => toast('Campanha excluída.', 'success'))
+                .catch((e: unknown) => toast(e instanceof Error ? e.message : 'Não foi possível excluir.', 'error'));
               navigate('/campanhas');
             }
           }}
         >
           {confirm === 'finish'
             ? 'Todas as cadências desta campanha serão encerradas. O histórico e as métricas continuam disponíveis.'
-            : 'A campanha e os rascunhos de mensagem serão excluídos.'}
+            : camp.status === 'rascunho'
+              ? 'A campanha e os rascunhos de mensagem serão excluídos.'
+              : 'A campanha é excluída e os envios param na hora. Os leads continuam, com o histórico das mensagens já enviadas.'}
         </ConfirmDialog>
       )}
     </div>

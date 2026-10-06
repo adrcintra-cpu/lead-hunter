@@ -22,6 +22,8 @@ import type {
   SuppressionEntry,
 } from '@/core/types';
 
+import type { PurgeRequest } from './purge';
+
 /** Uma "tabela" por coleção, como no Postgres. */
 export interface Tables {
   companies: Company;
@@ -72,6 +74,8 @@ export interface Repository {
   setProfile(profile: Profile): void;
   batch(fn: () => void): void;
   reset(): void;
+  /** Exclusão em massa pedida pelo usuário (leads, campanhas ou tudo). Ver purge.ts. */
+  purge(req: PurgeRequest): Promise<void>;
   /** Só no modo de teste: avança o relógio simulado. */
   setClockOffset?(ms: number): void;
 }

@@ -93,14 +93,27 @@ export class AutomationService {
     this.repo.update('campaigns', id, patch);
   }
 
-  deleteCampaign(id: string) {
-    const c = this.db.campaigns.find((x) => x.id === id);
-    if (!c) return;
-    if (c.status !== 'rascunho') throw new Error('Só campanhas em rascunho podem ser excluídas. Finalize a campanha.');
+  /**
+   * Exclui campanhas (qualquer status): as inscrições saem junto e os envios param.
+   * Leads em cadência voltam para "Qualificado"; mensagens e tarefas ficam no histórico, sem o vínculo.
+   */
+  async deleteCampaigns(ids: string[]) {
+    const set = new Set(ids);
+    const camps = this.db.campaigns.filter((c) => set.has(c.id));
+    if (!camps.length) return 0;
+    const inCadence = new Set(this.db.enrollments.filter((e) => set.has(e.campaignId) && (e.status === 'ativa' || e.status === 'pausada')).map((e) => e.leadId));
+    const otherActive = new Set(this.db.enrollments.filter((e) => !set.has(e.campaignId) && (e.status === 'ativa' || e.status === 'pausada')).map((e) => e.leadId));
+    await this.repo.purge({ campaignIds: camps.map((c) => c.id) });
     this.repo.batch(() => {
-      this.db.enrollments.filter((e) => e.campaignId === id).forEach((e) => this.repo.remove('enrollments', e.id));
-      this.repo.remove('campaigns', id);
+      for (const lead of this.db.leads) {
+        if (inCadence.has(lead.id) && !otherActive.has(lead.id) && lead.stage === 'em_cadencia') this.repo.update('leads', lead.id, { stage: 'qualificado' });
+      }
     });
+    return camps.length;
+  }
+
+  deleteCampaign(id: string) {
+    return this.deleteCampaigns([id]);
   }
 
   private companyOf(lead: Lead): Company | undefined {

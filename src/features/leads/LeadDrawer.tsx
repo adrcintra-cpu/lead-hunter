@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
-import { Check, Copy, ExternalLink, Mail, MessageCircle, Pencil, RefreshCw, ShieldOff, Sparkles, X } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Check, Copy, ExternalLink, Mail, MessageCircle, Pencil, RefreshCw, ShieldOff, Sparkles, Trash2, X } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRow, type LeadRow } from '@/store/selectors';
 import { ANALYSIS_SECTIONS, STAGES, type Channel, type CompanyField, type LeadStage, type Message } from '@/core/types';
 import { TIER_LABEL } from '@/core/scoring';
 import { formatDate, formatDateTime } from '@/core/utils';
 import { channelLabel } from '@/services/leadHunterService';
-import { cx, EmptyState, ErrorBox, ProvenanceTag, Skeleton, Spinner, type ProvenanceKind } from '@/components/ui';
+import { ConfirmDialog, cx, EmptyState, ErrorBox, ProvenanceTag, Skeleton, Spinner, type ProvenanceKind } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { CadencePanel, ConversationPanel, CrmPanel, FollowUpPicker, LeadTasks, Timeline } from './LeadCrmPanels';
 import { parseSubject } from '../../../supabase/functions/_shared/automation/replies.ts';
@@ -42,10 +42,29 @@ export function LeadDrawer({ leadId }: { leadId: string }) {
 export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow; onClose?: () => void; standalone?: boolean }) {
   const { lead, company: c, score } = row;
   const service = useService();
+  const { toast } = useApp();
+  const navigate = useNavigate();
   const name = c.tradeName ?? c.legalName;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function remove() {
+    try {
+      await service.deleteLeads([lead.id]);
+      toast('Lead excluído.', 'success');
+      if (onClose) onClose();
+      else navigate('/leads');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Não foi possível excluir.', 'error');
+    }
+  }
 
   return (
     <>
+      {confirmDelete && (
+        <ConfirmDialog title={`Excluir ${name}?`} confirmLabel="Excluir" onClose={() => setConfirmDelete(false)} onConfirm={() => void remove()}>
+          A empresa, o histórico, as mensagens, as tarefas e a participação em campanhas serão apagados. Isso não pode ser desfeito.
+        </ConfirmDialog>
+      )}
       <header className={cx('z-10 flex items-start justify-between gap-3 border-b border-line bg-surface px-6 py-4', !standalone && 'sticky top-0')}>
         <div className="min-w-0">
           <h2 className="text-xl font-extrabold tracking-tight">{name}</h2>
@@ -71,6 +90,9 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
               <ExternalLink className="h-4 w-4" />
             </Link>
           )}
+          <button type="button" onClick={() => setConfirmDelete(true)} className="btn-ghost min-h-[38px] px-2 text-bad" aria-label="Excluir lead" title="Excluir lead">
+            <Trash2 className="h-4 w-4" />
+          </button>
           {onClose && (
             <button type="button" onClick={onClose} className="btn-outline min-h-[38px] px-2" aria-label="Fechar">
               <X className="h-4 w-4" />

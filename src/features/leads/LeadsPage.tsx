@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ListPlus, Plus, Search as SearchIcon, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ListPlus, Plus, Search as SearchIcon, Trash2, X } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRows, type LeadRow } from '@/store/selectors';
 import { STAGES, stageLabel, type LeadStage } from '@/core/types';
 import { formatDate, normalize } from '@/core/utils';
-import { EmptyState, PageHeader, ScoreBadge, WhatsappBadge, cx } from '@/components/ui';
+import { ConfirmDialog, EmptyState, PageHeader, ScoreBadge, Spinner, WhatsappBadge, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { AddLeadDialog } from './AddLeadDialog';
 
@@ -37,6 +37,22 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'score', desc: true });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [listTarget, setListTarget] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function deleteSelected() {
+    const ids = Array.from(selected);
+    setDeleting(true);
+    try {
+      const n = await service.deleteLeads(ids);
+      setSelected(new Set());
+      toast(n === 1 ? 'Lead excluído.' : `${n} leads excluídos.`, 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Não foi possível excluir.', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const opts = useMemo(
     () => ({
@@ -185,8 +201,21 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
             <ListPlus className="h-4 w-4" /> Adicionar
           </button>
           {db.lists.length === 0 && <Link to="/listas" className="text-accent underline">Criar uma lista</Link>}
+          <button type="button" className="btn-outline min-h-[36px] text-bad" onClick={() => setConfirmDelete(true)} disabled={deleting}>
+            {deleting ? <Spinner /> : <Trash2 className="h-4 w-4" />} Excluir
+          </button>
           <button type="button" className="btn-ghost ml-auto min-h-[36px]" onClick={() => setSelected(new Set())}>Cancelar</button>
         </div>
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={selected.size === 1 ? 'Excluir este lead?' : `Excluir ${selected.size} leads?`}
+          confirmLabel="Excluir"
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={() => void deleteSelected()}
+        >
+          A empresa, o histórico, as mensagens, as tarefas e a participação em campanhas serão apagados. Isso não pode ser desfeito. Quem pediu para não receber mensagens continua na lista de supressão.
+        </ConfirmDialog>
       )}
 
       <div className="card overflow-x-auto">

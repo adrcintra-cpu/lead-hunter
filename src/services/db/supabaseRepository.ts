@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Profile } from '@/core/types';
 import { APPEND_ONLY, emptyDb, type DbState, type Repository, type TableName, type Tables } from './schema';
+import { chunks, purgeState, type PurgeRequest } from './purge';
 
 /**
  * Persistência no Supabase (Postgres + RLS).
@@ -296,5 +297,41 @@ export class SupabaseRepository implements Repository {
 
   reset() {
     throw new Error('Apagar todos os dados não está disponível no modo Supabase.');
+  }
+
+  /**
+   * Exclusão em massa. Apaga as empresas (o banco apaga em cascata leads, histórico, mensagens,
+   * tarefas e inscrições) e as campanhas (mensagens e tarefas só perdem o vínculo).
+   * A RLS garante que só os dados do próprio usuário são apagados. Espera o banco confirmar.
+   */
+  async purge(req: PurgeRequest) {
+    const before = this.state;
+    const companyIds = req.everything ? before.companies.map((c) => c.id) : (req.companyIds ?? []);
+    const campaignIds = req.everything ? before.campaigns.map((c) => c.id) : (req.campaignIds ?? []);
+    this.state = purgeState(before, req);
+    this.emit();
+    // Nenhum filtro "pega tudo" no Supabase: tudo é por id, em lotes, e a RLS limita ao dono.
+    const run = async (label: string, op: () => PromiseLike<{ error: { message: string } | null }>) => {
+      const { error } = await op();
+      if (error) throw new Error(`${label}: ${error.message}`);
+    };
+    await this.queue; // termina as gravações pendentes antes de apagar
+    try {
+      for (const ids of chunks(campaignIds)) await run('Excluir campanhas', () => this.client.from('campaigns').delete().in('id', ids));
+      for (const ids of chunks(companyIds)) await run('Excluir leads', () => this.client.from('companies').delete().in('id', ids));
+      if (req.everything) {
+        const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+        for (const part of chunks(ids(before.searches))) await run('Excluir histórico de buscas', () => this.client.from('searches').delete().in('id', part));
+        for (const part of chunks(ids(before.lists))) await run('Excluir listas', () => this.client.from('lists').delete().in('id', part));
+        for (const part of chunks(ids(before.tasks))) await run('Excluir tarefas', () => this.client.from('tasks').delete().in('id', part));
+        for (const part of chunks(ids(before.messages))) await run('Excluir mensagens', () => this.client.from('messages').delete().in('id', part));
+        // Respostas recebidas saem junto com os leads (cascata no banco).
+      }
+    } catch (e) {
+      // Falhou no meio: recarrega do banco para a tela mostrar o que de fato ficou.
+      this.onError(e instanceof Error ? e.message : String(e));
+      await this.load().catch(() => undefined);
+      throw e;
+    }
   }
 }
