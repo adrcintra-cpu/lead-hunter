@@ -3,6 +3,7 @@ import type { ProviderSet } from '@/core/providers/types';
 import { unsupportedCriteria } from '@/core/providers/types';
 import { MOCK_SUPPRESSED_PHONE } from '@/core/providers/mock/mockCompanies';
 import { applyCompanyData, mergeInto, toCompany } from '@/core/scoring';
+import { IdentityIndex, sameCompany } from '@/core/identity';
 import { formatCnpj, isValidCnpj } from '@/core/cnpj';
 import type { Engagement, ScoreExtras } from '@/core/scoring';
 import { DEFAULT_CADENCE } from '@/services/automation/defaultCadence';
@@ -27,7 +28,7 @@ import {
   type SearchCriteria,
   type Search,
 } from '@/core/types';
-import { digits, normalize, normalizeDomain, nowIso, uid } from '@/core/utils';
+import { digits, normalize, nowIso, uid } from '@/core/utils';
 import type { Repository } from './db/schema';
 
 export type SearchStep = 'providers' | 'enrich' | 'dedupe' | 'score' | 'done';
@@ -37,14 +38,6 @@ export interface ParseResult extends ParsedCriteria {
 }
 
 /** Todas as chaves que identificam a mesma empresa. */
-function identityKeys(c: Pick<RawCompany, 'cnpj' | 'website' | 'phone' | 'city'>): string[] {
-  const keys: string[] = [];
-  if (c.cnpj) keys.push(`cnpj:${digits(c.cnpj)}`);
-  if (c.website) keys.push(`web:${normalizeDomain(c.website)}`);
-  if (c.phone) keys.push(`tel:${digits(c.phone)}:${normalize(c.city)}`);
-  return keys;
-}
-
 /**
  * Regras de negócio do Lead Hunter. Fala com o repositório e com os providers;
  * a interface só chama métodos daqui.
@@ -254,21 +247,19 @@ export class LeadHunterService {
       // 1) Duplicados dentro da própria busca (qualquer chave em comum).
       const groups: RawCompany[][] = [];
       for (const r of raws) {
-        const keys = identityKeys(r);
-        const g = groups.find((grp) => grp.some((x) => identityKeys(x).some((k) => keys.includes(k))));
+        const g = groups.find((grp) => grp.some((x) => sameCompany(x, r)));
         if (g) g.push(r);
         else groups.push([r]);
       }
       const duplicates = raws.length - groups.length;
 
       // 2) Empresas que o usuário já tem.
-      const existingByKey = new Map<string, Company>();
-      for (const c of this.db.companies) for (const k of identityKeys(c)) existingByKey.set(k, c);
+      const existingIndex = new IdentityIndex<Company>(this.db.companies);
 
       type Candidate = { company: Company; isNew: boolean; provider: string; raws: RawCompany[] };
       const candidates: Candidate[] = groups.map((grp) => {
         const [first, ...rest] = grp;
-        const existing = grp.flatMap((r) => identityKeys(r)).map((k) => existingByKey.get(k)).find(Boolean);
+        const existing = grp.map((r) => existingIndex.find(r)).find(Boolean);
         let company = existing ? grp.reduce((acc, r) => mergeInto(acc, r), existing) : rest.reduce((acc, r) => mergeInto(acc, r), toCompany(first));
         for (const r of grp) {
           const extra = extras.get(r);
@@ -510,8 +501,7 @@ export class LeadHunterService {
       whatsappStatus: wa ? 'confirmado' : undefined,
       website: input.website?.trim() || undefined,
     };
-    const keys = identityKeys(raw);
-    const existing = this.db.companies.find((c) => identityKeys(c).some((k) => keys.includes(k)));
+    const existing = new IdentityIndex<Company>(this.db.companies).find(raw);
     const existingLead = existing && this.db.leads.find((l) => l.companyId === existing.id);
     if (existingLead) return { leadId: existingLead.id, existed: true };
 
@@ -643,7 +633,9 @@ export class LeadHunterService {
     const values = [company.phone, company.whatsapp].filter(Boolean).map((v) => digits(v!)).filter(Boolean);
     if (company.cnpj) values.push(digits(company.cnpj));
     const email = (lead ?? this.db.leads.find((l) => l.companyId === company.id))?.email?.trim().toLowerCase();
-    return this.db.suppression.find((s) => (s.kind === 'email' ? !!email && s.value === email : values.includes(digits(s.value))));
+    // Telefone com ou sem 55/0 é o mesmo número (mesma regra do agendador no servidor).
+    const same = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 10 && (a.endsWith(b) || b.endsWith(a)));
+    return this.db.suppression.find((s) => (s.kind === 'email' ? !!email && s.value === email : values.some((v) => same(v, digits(s.value)))));
   }
 
   addSuppression(kind: 'phone' | 'email' | 'cnpj', value: string, reason: string) {
