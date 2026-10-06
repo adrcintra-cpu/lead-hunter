@@ -59,6 +59,37 @@ async function createTask(db: Db, ownerId: string, t: { leadId?: string; campaig
   if (t.leadId) await log(db, ownerId, t.leadId, 'task_created', `Tarefa criada: ${t.title}${t.ownerName ? ` (para ${t.ownerName})` : ''}`);
 }
 
+/** Tarefas de conversa que têm vida própria (reunião aceita, falar com o indicado): nunca são fundidas. */
+const SPECIAL_TASK = /^(Agendar reunião|Falar com)/i;
+/** Peso do título: um pedido mais importante não é rebaixado por uma resposta seguinte. */
+const taskWeight = (title: string) => (/^(Enviar orçamento|Atendimento automático)/i.test(title) ? 2 : /^(Responder|Enviar informações|Tratar objeção)/i.test(title) ? 1 : 0);
+
+/**
+ * Uma tarefa de resposta aberta por lead: a resposta nova atualiza a tarefa existente
+ * (descrição, prazo e, se for mais importante, o título) em vez de criar outra.
+ */
+export async function upsertReplyTask(db: Db, ownerId: string, leadId: string, t: { title: string; description?: string; campaignId?: string | null; ownerName?: string | null; dueAt?: string }) {
+  if (SPECIAL_TASK.test(t.title)) {
+    const { data: same } = await db.from('tasks').select('id').eq('lead_id', leadId).eq('owner_id', ownerId).eq('status', 'aberta').eq('title', t.title).limit(1);
+    if (same?.length) return;
+    return createTask(db, ownerId, { leadId, campaignId: t.campaignId ?? undefined, title: t.title, description: t.description, source: 'resposta', ownerName: t.ownerName ?? undefined, dueAt: t.dueAt });
+  }
+  const { data: open } = await db
+    .from('tasks')
+    .select('id, title')
+    .eq('lead_id', leadId)
+    .eq('owner_id', ownerId)
+    .eq('source', 'resposta')
+    .eq('status', 'aberta')
+    .order('created_at', { ascending: false });
+  const current = ((open ?? []) as Row[]).find((x) => !SPECIAL_TASK.test(String(x.title ?? '')));
+  if (!current) {
+    return createTask(db, ownerId, { leadId, campaignId: t.campaignId ?? undefined, title: t.title, description: t.description, source: 'resposta', ownerName: t.ownerName ?? undefined, dueAt: t.dueAt });
+  }
+  const title = taskWeight(t.title) >= taskWeight(String(current.title)) ? t.title : current.title;
+  await db.from('tasks').update({ title, description: t.description ?? null, due_at: t.dueAt ?? null }).eq('id', current.id);
+}
+
 async function setStage(db: Db, leadId: string, stage: string) {
   // O trigger log_stage_change grava a atividade.
   await db.from('leads').update({ stage }).eq('id', leadId);
@@ -654,7 +685,7 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
 }
 
 /** Mesmo comportamento de AutomationService.receiveReply no app. */
-export async function handleInbound(db: Db, i: { ownerId: string; leadId: string; channel: SendChannel; from: string; body: string; externalId?: string; receivedAt?: string }) {
+export async function handleInbound(db: Db, i: { ownerId: string; leadId: string; channel: SendChannel; from: string; body: string; externalId?: string; receivedAt?: string; /** WhatsApp conectado: a tarefa só é criada depois de saber se o Beelie responde sozinho. */ deferTask?: boolean }) {
   const text = i.body.trim();
   if (!text) return null;
   if (i.externalId) {
@@ -760,11 +791,13 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
   if (d.stage && lead.stage !== d.stage.to && (d.stage.force || !ADVANCED_STAGES.includes(lead.stage))) await setStage(db, lead.id, d.stage.to);
   const suggestion = d.suppress ? null : await suggestReplyDraft(db, i.ownerId, lead, company, i.channel, cls.category, camp?.id);
   if (suggestion) await log(db, i.ownerId, lead.id, 'message_generated', 'IA sugeriu uma resposta', { kind: 'reply_suggestion', messageId: suggestion.id, note: suggestion.note, intent: suggestion.intent });
+  let task: { title: string; description: string; campaignId: string | null; ownerName: string | null; dueAt: string } | null = null;
   if (d.task) {
     const extra = suggestion ? ` Resposta da IA pronta no perfil do lead (Gerar abordagem).${suggestion.note ? ` ${suggestion.note}` : ''}` : '';
-    await createTask(db, i.ownerId, { leadId: lead.id, campaignId: camp?.id, title: d.task.title, description: `${d.task.description ?? ''}${extra}`.trim(), source: 'resposta', ownerName: camp?.owner_name ?? lead.owner_name, dueAt: at });
+    task = { title: d.task.title, description: `${d.task.description ?? ''}${extra}`.trim(), campaignId: camp?.id ?? null, ownerName: camp?.owner_name ?? lead.owner_name ?? null, dueAt: at };
+    if (!i.deferTask) await upsertReplyTask(db, i.ownerId, lead.id, task);
   }
-  return { ...(inbound as Row), suggestion, category: cls.category, beelie: intelResult?.intel ?? null };
+  return { ...(inbound as Row), suggestion, category: cls.category, beelie: intelResult?.intel ?? null, task: i.deferTask ? task : null };
 }
 
 /** Aplica a análise ao lead: memória (leads.beelie), cadastro, outro responsável e reunião. */
@@ -796,12 +829,10 @@ async function applyBeelie(db: Db, ownerId: string, lead: Row, company: Row, sig
       phone: c && !c.includes('@') ? c.replace(/\D/g, '') : null,
       source: 'conversa',
     }).then(() => undefined, () => undefined);
-    await createTask(db, ownerId, {
-      leadId: lead.id,
+    await upsertReplyTask(db, ownerId, lead.id, {
       campaignId: camp?.id,
       title: `Falar com ${r.referred.name} (${nameOf(company)})`,
       description: `Indicada na conversa como responsável${r.referred.role ? ` (${r.referred.role})` : ''}.${c ? ` Contato: ${c}.` : ' Contato ainda não informado.'}`,
-      source: 'resposta',
       ownerName: camp?.owner_name ?? lead.owner_name,
       dueAt: at,
     });

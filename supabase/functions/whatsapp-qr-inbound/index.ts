@@ -10,7 +10,7 @@
 //   unknown      número que não é lead escreveu: com a opção ligada e mensagem comercial, vira lead e segue como resposta.
 // Publicar sem verificação de JWT: supabase functions deploy whatsapp-qr-inbound --no-verify-jwt
 
-import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent } from '../_shared/automation/engine.ts';
+import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent, upsertReplyTask } from '../_shared/automation/engine.ts';
 import { inWindow } from '../_shared/automation/planner.ts';
 import { looksAutomated } from '../_shared/automation/replies.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from '../_shared/automation/types.ts';
@@ -97,8 +97,9 @@ Deno.serve(async (req) => {
         body,
         externalId: typeof b.externalId === 'string' && b.externalId ? `qr:${b.externalId.slice(0, 100)}` : undefined,
         receivedAt: typeof b.receivedAt === 'string' ? b.receivedAt : undefined,
+        deferTask: true,
       });
-      const auto = result?.suggestion ? await autoDecision(db, ownerId, r.leadId, result.suggestion, result.beelie?.lastIntent) : null;
+      const auto = await decideAndTask(db, ownerId, r.leadId, result);
       return Response.json({ ok: true, leadId: r.leadId, created: r.created, auto });
     } catch (err) {
       console.error('unknown', err instanceof Error ? err.message : String(err));
@@ -124,7 +125,10 @@ Deno.serve(async (req) => {
       return Response.json({ ok });
     }
     if (b.action === 'auto_failed') {
-      await log(db, ownerId, leadId, 'message_failed', `Resposta automática não enviada: ${String(b.error ?? 'erro').slice(0, 200)}. A mensagem ficou pronta para você enviar.`, { messageId: b.messageId });
+      const why = String(b.error ?? 'erro').slice(0, 200);
+      await log(db, ownerId, leadId, 'message_failed', `Resposta automática não enviada: ${why}. A mensagem ficou pronta para você enviar.`, { messageId: b.messageId });
+      const name = await companyName(db, leadId);
+      await upsertReplyTask(db, ownerId, leadId, { title: `Responder ${name}`, description: `O BEELIE não conseguiu enviar a resposta (${why}). A mensagem está pronta no perfil do lead (Gerar abordagem).`, dueAt: new Date().toISOString() });
       return Response.json({ ok: true });
     }
 
@@ -139,8 +143,9 @@ Deno.serve(async (req) => {
       body,
       externalId: typeof b.externalId === 'string' && b.externalId ? `qr:${b.externalId.slice(0, 100)}` : undefined,
       receivedAt: typeof b.receivedAt === 'string' ? b.receivedAt : undefined,
+      deferTask: true,
     });
-    const auto = result?.suggestion ? await autoDecision(db, ownerId, leadId, result.suggestion, result.beelie?.lastIntent) : null;
+    const auto = await decideAndTask(db, ownerId, leadId, result);
     return Response.json({ ok: true, auto });
   } catch (err) {
     console.error('inbound', err instanceof Error ? err.message : String(err));
@@ -148,13 +153,55 @@ Deno.serve(async (req) => {
   }
 });
 
+type AutoReply = { messageId: string; body: string; intent: string; format: 'texto' | 'audio'; voice: string; delaySec: number };
+type Skip = 'off' | 'horario' | 'limite' | 'robo';
+
+async function companyName(db: Row, leadId: string): Promise<string> {
+  const { data } = await db.from('leads').select('companies(legal_name, trade_name)').eq('id', leadId).maybeSingle();
+  const c = data?.companies;
+  return (c?.trade_name || c?.legal_name || 'o lead') as string;
+}
+
+/**
+ * Responde sozinho? E só cria tarefa quando você precisa entrar: pedido de orçamento ou reunião,
+ * pedido para o vendedor, sem resposta pronta, resposta automática desligada/fora do horário/limite,
+ * ou robô do outro lado. Conversa que o BEELIE está tocando fica só no histórico.
+ */
+export async function decideAndTask(db: Row, ownerId: string, leadId: string, result: Row | null): Promise<AutoReply | null> {
+  if (!result) return null;
+  const s = result.suggestion as { id: string; body: string; intent: string } | null;
+  const decision: AutoReply | Skip | null = s ? await autoDecision(db, ownerId, leadId, s, result.beelie?.lastIntent) : null;
+  const auto = decision && typeof decision === 'object' ? decision : null;
+  const task = result.task as { title: string; description: string; campaignId: string | null; ownerName: string | null; dueAt: string } | null;
+
+  if (decision === 'robo') {
+    const name = await companyName(db, leadId);
+    await upsertReplyTask(db, ownerId, leadId, {
+      title: `Atendimento automático: falar com ${name} por outro canal`,
+      description: 'Do outro lado responde um robô (menu, termos, avaliação). O BEELIE parou de responder sozinho. Tente telefone, e-mail ou Instagram para chegar a uma pessoa, ou exclua o lead se não fizer sentido.',
+      campaignId: task?.campaignId,
+      ownerName: task?.ownerName,
+      dueAt: new Date().toISOString(),
+    });
+    return null;
+  }
+  if (!task) return auto;
+  const human =
+    !auto ||
+    ['orcamento', 'reuniao'].includes(String(result.category)) ||
+    NEEDS_HUMAN.has(String(s?.intent ?? '')) ||
+    s?.intent === 'passar_para_vendedor';
+  if (human) await upsertReplyTask(db, ownerId, leadId, task);
+  return auto;
+}
+
 /** Decide se o BEELIE responde sozinho: ligado nas configurações, dentro do horário e do limite diário. */
-async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: string; body: string; intent: string }, lastIntent?: string) {
+async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: string; body: string; intent: string }, lastIntent?: string): Promise<AutoReply | Skip> {
   const { data: cfg } = await db.from('assistant_settings').select('auto_reply, reply_format, voice').eq('owner_id', ownerId).maybeSingle().then(
     (r: { data: Row | null }) => r,
     () => ({ data: null }),
   );
-  if (cfg && cfg.auto_reply === false) return null;
+  if (cfg && cfg.auto_reply === false) return 'off';
 
   // Quem puxou a conversa foi o lead: a janela de resposta é mais ampla que a das campanhas
   // (começa mais cedo e vai até 21h, todos os dias), mas nunca de madrugada.
@@ -163,7 +210,7 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
   const window: SendWindow = { startHour: Math.min(campaign.startHour, REPLY_WINDOW.startHour), endHour: Math.max(campaign.endHour, REPLY_WINDOW.endHour), weekdaysOnly: false };
   if (!inWindow(new Date(), window)) {
     await log(db, ownerId, leadId, 'lead_updated', `Fora do horário de resposta (${window.startHour}h às ${window.endHour}h): o BEELIE não respondeu sozinho. A resposta ficou pronta para você revisar e enviar.`, { kind: 'auto_reply_skipped', reason: 'fora_do_horario' });
-    return null;
+    return 'horario';
   }
   const since = new Date(Date.now() - 864e5).toISOString();
   const { count } = await db
@@ -175,7 +222,7 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     .gte('sent_at', since);
   if ((count ?? 0) >= MAX_AUTO_PER_DAY) {
     await log(db, ownerId, leadId, 'lead_updated', `Limite de ${MAX_AUTO_PER_DAY} respostas automáticas em 24 h atingido: assuma a conversa.`, { kind: 'auto_reply_skipped', reason: 'limite' });
-    return null;
+    return 'limite';
   }
   // Últimas mensagens do lead (mais recente primeiro): pedidos de áudio/texto valem para a conversa.
   const { data: recent } = await db
@@ -192,7 +239,7 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
   if (bot === 'stop') {
     const { count: noted } = await db.from('lead_activities').select('id', { count: 'exact', head: true }).eq('lead_id', leadId).eq('payload->>reason', 'robo').gte('created_at', since);
     if (!noted) await log(db, ownerId, leadId, 'lead_updated', 'Do outro lado é um atendimento automático (robô): o BEELIE parou de responder sozinho. Fale com a empresa por outro caminho ou responda o menu você mesmo.', { kind: 'auto_reply_skipped', reason: 'robo' });
-    return null;
+    return 'robo';
   }
   const format = bot === 'text' ? 'texto' : chooseFormat(bodies, cfg?.reply_format === 'audio' ? 'audio' : 'texto');
   return {
@@ -234,7 +281,9 @@ async function markAutoSent(db: Row, ownerId: string, leadId: string, b: Row) {
       .eq('source', 'resposta')
       .eq('status', 'aberta')
       .not('title', 'ilike', 'Agendar reunião%')
-      .not('title', 'ilike', 'Falar com%');
+      .not('title', 'ilike', 'Falar com%')
+      .not('title', 'ilike', 'Enviar orçamento%')
+      .not('title', 'ilike', 'Atendimento automático%');
   }
   return { ok: true };
 }
