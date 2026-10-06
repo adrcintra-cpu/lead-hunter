@@ -37,8 +37,9 @@ const ASKS_TEXT = W(
 );
 
 /**
- * Formato da resposta desta conversa: o pedido mais recente do lead vale (áudio ou texto);
- * sem pedido, se o lead mandou áudio, o BEELIE responde em áudio; senão, vale a configuração.
+ * Formato da resposta desta conversa: o BEELIE digita. Só responde em áudio quando o lead pede
+ * ("manda um áudio", "fala por áudio"), e volta ao texto se o lead pedir. O pedido mais recente vale.
+ * Lead mandar áudio não basta: ele entende o áudio e responde por escrito.
  */
 export function chooseFormat(recent: string[], configured: 'texto' | 'audio'): 'texto' | 'audio' {
   for (const body of recent) {
@@ -46,7 +47,6 @@ export function chooseFormat(recent: string[], configured: 'texto' | 'audio'): '
     if (ASKS_TEXT.test(t)) return 'texto';
     if (ASKS_AUDIO.test(t)) return 'audio';
   }
-  if (recent[0]?.startsWith('[Áudio transcrito]')) return 'audio';
   return configured;
 }
 

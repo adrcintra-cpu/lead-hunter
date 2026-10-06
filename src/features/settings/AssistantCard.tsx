@@ -215,7 +215,7 @@ export function AssistantCard() {
                 </div>
               </div>
             </div>
-            <p className="mt-2 text-xs text-ink-faint">O formato é o padrão. Em cada conversa, o {s.name || 'assistente'} responde em áudio quando o lead pede ou manda áudio, e volta ao texto se o lead pedir. Se a voz falhar, a resposta sai em texto.</p>
+            <p className="mt-2 text-xs text-ink-faint">Recomendado: Texto. O {s.name || 'assistente'} digita e só usa a voz quando o lead pede (“manda um áudio”, “fala por áudio”); volta ao texto se o lead pedir. Áudio recebido do lead é entendido e respondido por escrito. Se a voz falhar, a resposta sai em texto.</p>
             {prefs.replyFormat === 'audio' && whatsappQrAvailable && conn && conn.audio === false && (
               <p className="mt-2 text-xs text-warn">A voz da IA ainda não está configurada no servidor: adicione OPENAI_API_KEY nas variáveis do Railway. Até lá, as respostas automáticas em áudio falham e ficam prontas para você enviar.</p>
             )}
