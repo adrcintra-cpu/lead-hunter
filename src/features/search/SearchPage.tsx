@@ -9,7 +9,7 @@ import { MOCK_CITIES } from '@/core/providers/mock/mockCompanies';
 import type { ParseResult, SearchStep } from '@/services/leadHunterService';
 import { cx, EmptyState, ErrorBox, Modal, ScoreBadge, Spinner, WhatsappBadge } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
-import { AddToCampaign } from '../campaigns/AddToCampaign';
+import { ProspectButton } from '../campaigns/ProspectButton';
 import { dataMode } from '@/lib/supabase';
 
 const EXAMPLES = [
@@ -397,12 +397,19 @@ function SearchResults({ searchId, onNew }: { searchId: string; onNew: () => voi
           <Link to={`/leads?search=${search.id}`} className="btn-outline">Abrir na tabela</Link>
         </div>
       </div>
-      {rows.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px]">
-          <span className="text-ink-soft">Colocar {onlyNew ? 'as novas' : 'estas empresas'} ({rows.length}) numa campanha:</span>
-          <AddToCampaign leadIds={rows.map((x) => x.res.leadId)} />
-        </div>
-      )}
+      {rows.length > 0 && (() => {
+        const fresh = rows.filter((x) => !x.res.wasDuplicate);
+        const ids = (fresh.length ? fresh : rows).map((x) => x.res.leadId);
+        return (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3">
+            <div className="min-w-0 flex-1 text-[13px]">
+              <div className="font-bold text-ink">Próximo passo: prospectar</div>
+              <div className="text-ink-soft">O BEELIE escreve e envia a primeira mensagem de cada empresa sozinho, no horário de envio, e conversa com quem responder.</div>
+            </div>
+            <ProspectButton leadIds={ids} label={fresh.length ? `Prospectar ${fresh.length === 1 ? 'a nova' : `as ${fresh.length} novas`}` : `Prospectar (${ids.length})`} />
+          </div>
+        );
+      })()}
       {search.ignoredCriteria.length > 0 && (
         <div className="mt-3 rounded-lg bg-warn-soft px-3 py-2 text-[13px] text-warn">
           Ignorado por falta de provider: {search.ignoredCriteria.map((f) => FIELD_LABEL[f] ?? f).join(', ')}.

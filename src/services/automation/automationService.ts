@@ -1,4 +1,4 @@
-import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from '../../../supabase/functions/_shared/automation/planner.ts';
+import { nextDayWindow, nextWindowStart, plan, startOfDayBRT, type Effect, type PlanContext } from '../../../supabase/functions/_shared/automation/planner.ts';
 import { ADVANCED_STAGES, messageStage, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from '../../../supabase/functions/_shared/automation/replies.ts';
 import {
   CLOSED_STAGES,
@@ -183,7 +183,7 @@ export class AutomationService {
    * Em andamento: entram direto (pausada: ficam pausados até retomar); a mensagem é escrita na hora do envio.
    * Pula quem já está nela ou em outra cadência, quem fechou (cliente/não interessado) e quem pediu opt-out.
    */
-  async addLeadsToCampaign(campaignId: string, leadIds: string[], onProgress: (done: number, total: number) => void = () => {}) {
+  async addLeadsToCampaign(campaignId: string, leadIds: string[], onProgress: (done: number, total: number) => void = () => {}, opts: { skipDrafts?: boolean } = {}) {
     const camp = this.db.campaigns.find((c) => c.id === campaignId);
     const cad = camp && this.db.cadences.find((c) => c.id === camp.cadenceId);
     if (!camp || !cad) throw new Error('Campanha ou cadência não encontrada.');
@@ -209,7 +209,7 @@ export class AutomationService {
     for (let i = 0; i < ok.length; i += 4) {
       await Promise.all(
         ok.slice(i, i + 4).map(async (lead) => {
-          const draft = draftFirst && firstIdx >= 0 ? await this.compose(lead, cad, firstIdx, camp.name) : undefined;
+          const draft = draftFirst && !opts.skipDrafts && firstIdx >= 0 ? await this.compose(lead, cad, firstIdx, camp.name) : undefined;
           const at = this.nowIso();
           const base = { id: uid('enr'), campaignId, cadenceId: cad.id, leadId: lead.id, stepIndex: 0, createdAt: at, updatedAt: at };
           if (draftFirst) this.repo.insert('enrollments', { ...base, status: 'pendente', draft });
@@ -224,6 +224,42 @@ export class AutomationService {
       );
     }
     return { added: ok.length, skipped, pendingReview: draftFirst };
+  }
+
+  /** Nome da campanha padrão usada pelo botão "Prospectar". */
+  static readonly DEFAULT_CAMPAIGN = 'Prospecção';
+
+  /** Campanha padrão de prospecção: a existente (não finalizada) ou uma nova, já ativa. */
+  defaultCampaign(): Campaign {
+    const name = AutomationService.DEFAULT_CAMPAIGN;
+    const found = this.db.campaigns.find((c) => c.name === name && c.status !== 'finalizada');
+    if (found && found.status === 'rascunho') this.repo.update('campaigns', found.id, { status: 'ativa', startedAt: this.nowIso() });
+    if (found) return this.db.campaigns.find((x) => x.id === found.id)!;
+    const cad = this.db.cadences[0];
+    if (!cad) throw new Error('Nenhuma cadência cadastrada. Crie uma em Cadências.');
+    const c = this.createCampaign({
+      name,
+      objective: 'Prospecção automática do BEELIE a partir das buscas',
+      audience: { segments: [], cities: [], minScore: 0, stages: [], tags: [] },
+      channel: 'multicanal',
+      cadenceId: cad.id,
+      ownerName: this.svc.profile.fullName ?? '',
+    });
+    const at = this.nowIso();
+    this.repo.update('campaigns', c.id, { status: 'ativa', startedAt: at });
+    return this.db.campaigns.find((x) => x.id === c.id)!;
+  }
+
+  /**
+   * Um clique: os leads entram na prospecção e o BEELIE escreve e envia sozinho, no horário de envio.
+   * Devolve quando os envios começam (agora ou no início da próxima janela).
+   */
+  async prospect(leadIds: string[]) {
+    const camp = this.defaultCampaign();
+    const r = await this.addLeadsToCampaign(camp.id, leadIds);
+    const now = this.svc.now();
+    const startsAt = nextWindowStart(now, this.svc.profile.sendWindow ?? DEFAULT_SEND_WINDOW);
+    return { ...r, campaign: camp, paused: camp.status === 'pausada', startsAt: startsAt.getTime() <= now.getTime() ? null : startsAt.toISOString() };
   }
 
   editDraft(enrollmentId: string, body: string, subject?: string) {
@@ -243,11 +279,11 @@ export class AutomationService {
     const camp = this.db.campaigns.find((c) => c.id === campaignId);
     if (!camp) return;
     const pending = this.db.enrollments.filter((e) => e.campaignId === campaignId && e.status === 'pendente');
-    if (!pending.length && !camp.autoEnroll) throw new Error('Nenhum lead preparado. Clique em “Preparar mensagens” primeiro.');
+    if (!pending.length && !camp.autoEnroll) throw new Error('Nenhum lead no público desta campanha. Ajuste o público ou use “Prospectar” na busca.');
     const now = this.svc.now();
     // Campanha já em andamento: só entram os leads preparados, sem mexer na campanha.
     const live = camp.status === 'ativa' || camp.status === 'pausada' || camp.status === 'agendada';
-    if (live && !pending.length) throw new Error('Nenhum lead preparado. Clique em “Preparar mensagens” primeiro.');
+    if (live && !pending.length) throw new Error('Nenhum lead no público desta campanha. Ajuste o público ou use “Prospectar” na busca.');
     const liveStart = camp.status === 'agendada' && camp.scheduledAt && new Date(camp.scheduledAt) > now ? camp.scheduledAt : now.toISOString();
     const start = live ? liveStart : scheduledAt && new Date(scheduledAt) > now ? scheduledAt : now.toISOString();
     const scheduled = live ? camp.status === 'agendada' : start !== now.toISOString();

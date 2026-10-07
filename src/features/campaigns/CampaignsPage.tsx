@@ -223,6 +223,33 @@ export function CampaignDetailPage() {
     }
   }
 
+  /** Campanha em andamento: os preparados entram e o restante do público entra direto (mensagem escrita na hora). */
+  async function sendMore() {
+    setBusy('Adicionando…');
+    try {
+      if (pending.length) auto.activateCampaign(camp!.id);
+      const r = toPrepare.length ? await auto.addLeadsToCampaign(camp!.id, toPrepare.map((l) => l.id)) : { added: 0 };
+      if (auto.runsLocally) void auto.tick();
+      toast(`${pending.length + r.added} leads na fila de envio. Os envios respeitam o horário.`, 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Falha ao adicionar.', 'error');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  /** Rascunho: ativa e coloca todo o público na fila, sem precisar preparar antes. */
+  async function activateAll(when?: string) {
+    setBusy('Ativando…');
+    try {
+      // Inscreve o restante do público sem escrever mensagem agora (o BEELIE escreve na hora do envio) e ativa.
+      if (toPrepare.length) await auto.addLeadsToCampaign(camp!.id, toPrepare.map((l) => l.id), undefined, { skipDrafts: true });
+      activate(when);
+    } finally {
+      setBusy('');
+    }
+  }
+
   function activate(when?: string) {
     try {
       const wasLive = live;
@@ -424,35 +451,42 @@ export function CampaignDetailPage() {
         )}
       </section>
 
-      {(editable || live || pending.length > 0) && (
+      {live && (pending.length > 0 || toPrepare.length > 0) && (
+        <section className="card flex flex-wrap items-center gap-3 px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[15px] font-extrabold">Enviar para mais leads</h2>
+            <p className="mt-0.5 text-[13px] text-ink-faint">
+              {pending.length + toPrepare.length} {pending.length + toPrepare.length === 1 ? 'lead do público ainda não recebeu' : 'leads do público ainda não receberam'}. O BEELIE escreve e envia sozinho, no horário de envio.
+              {camp.status === 'pausada' && ' Com a campanha pausada, eles começam quando você retomar.'}
+            </p>
+          </div>
+          <button type="button" className="btn-primary" onClick={() => void sendMore()} disabled={!!busy}>
+            {busy ? <Spinner /> : <Play className="h-4 w-4" />} {busy || `Enviar (${pending.length + toPrepare.length})`}
+          </button>
+        </section>
+      )}
+      {!live && (editable || pending.length > 0) && (
         <section className="card px-5 py-5">
-          <h2 className="text-[15px] font-extrabold">{live ? 'Adicionar leads' : 'Revisar e ativar'}</h2>
+          <h2 className="text-[15px] font-extrabold">Ativar</h2>
           <p className="mt-1 text-[13px] text-ink-faint">
-            “Preparar mensagens” cria a primeira mensagem de cada lead do público que ainda não está na campanha, com os dados reais disponíveis. Revise e edite antes de {live ? 'adicionar' : 'ativar'}. As mensagens seguintes são escritas na hora do envio.
-            {camp.status === 'pausada' && ' Com a campanha pausada, os leads adicionados começam quando você retomar.'}
+            Ative e o BEELIE escreve e envia sozinho para os {toPrepare.length + pending.length} leads do público, no horário de envio. Se quiser ler as mensagens antes, use “Revisar primeiro”.
           </p>
           <div className="mt-4 flex flex-wrap items-end gap-2">
-            <button type="button" className="btn-outline" onClick={prepare} disabled={!!busy || toPrepare.length === 0}>
-              {busy ? <Spinner /> : <Sparkles className="h-4 w-4" />} {busy || `Preparar mensagens (${toPrepare.length})`}
+            <button type="button" className="btn-primary" onClick={() => void activateAll()} disabled={(!pending.length && !toPrepare.length && !camp.autoEnroll) || !!busy}>
+              {busy ? <Spinner /> : <Play className="h-4 w-4" />} {busy || `Ativar agora (${pending.length + toPrepare.length})`}
             </button>
-            {live ? (
-              <button type="button" className="btn-primary" onClick={() => activate()} disabled={!pending.length || !!busy}>
-                <Play className="h-4 w-4" /> Adicionar à campanha ({pending.length})
-              </button>
-            ) : (
-              <button type="button" className="btn-primary" onClick={() => activate()} disabled={(!pending.length && !camp.autoEnroll) || !!busy}>
-                <Play className="h-4 w-4" /> Ativar agora ({pending.length})
-              </button>
-            )}
-            {!live && <div className="flex items-end gap-2">
+            <button type="button" className="btn-outline" onClick={prepare} disabled={!!busy || toPrepare.length === 0}>
+              <Sparkles className="h-4 w-4" /> Revisar primeiro ({toPrepare.length})
+            </button>
+            <div className="flex items-end gap-2">
               <div>
                 <label htmlFor="c-when" className="label">Ou agendar para</label>
                 <input id="c-when" type="datetime-local" className="input" value={schedule} onChange={(e) => setSchedule(e.target.value)} />
               </div>
-              <button type="button" className="btn-outline" disabled={(!pending.length && !camp.autoEnroll) || !schedule} onClick={() => activate(new Date(schedule).toISOString())}>
+              <button type="button" className="btn-outline" disabled={(!pending.length && !toPrepare.length && !camp.autoEnroll) || !schedule || !!busy} onClick={() => void activateAll(new Date(schedule).toISOString())}>
                 <CalendarClock className="h-4 w-4" /> Agendar
               </button>
-            </div>}
+            </div>
           </div>
         </section>
       )}
@@ -462,7 +496,7 @@ export function CampaignDetailPage() {
           <h2 className="text-[15px] font-extrabold">Leads da campanha ({enrollments.length})</h2>
         </div>
         {enrollments.length === 0 ? (
-          <EmptyState title="Nenhum lead na campanha">Prepare as mensagens para incluir o público.</EmptyState>
+          <EmptyState title="Nenhum lead na campanha">Ative a campanha, ou use “Prospectar” nos resultados da busca ou na lista de leads.</EmptyState>
         ) : (
           <ul className="divide-y divide-line border-t border-line">
             {enrollments.map((e) => (
