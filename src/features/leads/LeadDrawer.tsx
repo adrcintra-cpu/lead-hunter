@@ -12,6 +12,8 @@ import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { CadencePanel, ConversationPanel, CrmPanel, FollowUpPicker, LeadTasks, Timeline } from './LeadCrmPanels';
 import { parseSubject } from '../../../supabase/functions/_shared/automation/replies.ts';
 import { SendConnectedButton } from './SendConnectedButton';
+import { Fold, PanelTitle, since } from './Fold';
+import { readIntel, stageLabel as beelieStageLabel, TEMPERATURE_LABEL } from '../../../supabase/functions/_shared/automation/beelie.ts';
 import { BeeliePanel } from './BeeliePanel';
 
 export function LeadDrawer({ leadId }: { leadId: string }) {
@@ -47,6 +49,8 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
   const navigate = useNavigate();
   const name = c.tradeName ?? c.legalName;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const db = useDb();
+  const ev = leadEvolution(db, lead);
 
   async function remove() {
     try {
@@ -112,17 +116,43 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
           <ProvenanceTag kind="unavailable" />
         </div>
 
-        <BeeliePanel lead={lead} />
-        <CadencePanel leadId={lead.id} />
-        <LeadTasks leadId={lead.id} />
-        <ConversationPanel row={row} />
-        <CrmPanel row={row} />
-        <CompanyFacts row={row} />
-        <AnalysisPanel row={row} />
-        <ApproachPanel row={row} />
-        <ListsPanel leadId={lead.id} />
-        <NotesAndHistory leadId={lead.id} />
-        <Timeline leadId={lead.id} />
+        <div className="flex flex-col gap-2.5">
+          <Fold leadId={lead.id} id="beelie" title="Inteligência comercial · Beelie" positive={ev.beelie.pos} summary={ev.beelie.summary}>
+            <BeeliePanel lead={lead} />
+          </Fold>
+          <Fold leadId={lead.id} id="campanha" title="Campanha e cadência" positive={ev.campanha.pos} negative={ev.campanha.neg} summary={ev.campanha.summary}>
+            <CadencePanel leadId={lead.id} />
+          </Fold>
+          {ev.tarefas.total > 0 && (
+            <Fold leadId={lead.id} id="tarefas" title="Tarefas" positive={ev.tarefas.pos} negative={ev.tarefas.neg} summary={ev.tarefas.summary}>
+              <LeadTasks leadId={lead.id} />
+            </Fold>
+          )}
+          <Fold leadId={lead.id} id="conversa" title="Mensagens e respostas" positive={ev.conversa.pos} negative={ev.conversa.neg} summary={ev.conversa.summary}>
+            <ConversationPanel row={row} />
+          </Fold>
+          <Fold leadId={lead.id} id="crm" title="Contato e CRM" summary={lead.contactName ?? undefined}>
+            <CrmPanel row={row} />
+          </Fold>
+          <Fold leadId={lead.id} id="empresa" title="Dados da empresa">
+            <CompanyFacts row={row} />
+          </Fold>
+          <Fold leadId={lead.id} id="analise" title="Análise da IA">
+            <AnalysisPanel row={row} />
+          </Fold>
+          <Fold leadId={lead.id} id="abordagem" title="Gerar abordagem">
+            <ApproachPanel row={row} />
+          </Fold>
+          <Fold leadId={lead.id} id="listas" title="Listas">
+            <ListsPanel leadId={lead.id} />
+          </Fold>
+          <Fold leadId={lead.id} id="notas" title="Notas">
+            <NotesAndHistory leadId={lead.id} />
+          </Fold>
+          <Fold leadId={lead.id} id="historico" title="Linha do tempo" positive={ev.historico.pos} negative={ev.historico.neg}>
+            <Timeline leadId={lead.id} />
+          </Fold>
+        </div>
       </div>
     </>
   );
@@ -222,7 +252,7 @@ function CompanyFacts({ row }: { row: LeadRow }) {
     .pop();
   return (
     <section>
-      <h3 className="mb-1 text-sm font-extrabold">Dados da empresa</h3>
+      <PanelTitle className="mb-1">Dados da empresa</PanelTitle>
       <dl>
         {FACT_FIELDS.map(({ field, label }) => {
           const raw = c[field as keyof typeof c] as string | undefined;
@@ -339,7 +369,7 @@ function AnalysisPanel({ row }: { row: LeadRow }) {
   return (
     <section>
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="text-sm font-extrabold">Análise da IA</h3>
+        <PanelTitle>Análise da IA</PanelTitle>
         {analysis && (
           <button type="button" className="btn-ghost min-h-[32px] px-2 text-xs" onClick={() => load(true)} disabled={busy}>
             {busy ? <Spinner className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />} Refazer
@@ -493,7 +523,7 @@ function ApproachPanel({ row }: { row: LeadRow }) {
 
   return (
     <section className="rounded-xl border border-line p-4">
-      <h3 className="text-sm font-extrabold">Gerar abordagem</h3>
+      <PanelTitle>Gerar abordagem</PanelTitle>
       <div role="radiogroup" aria-label="Canal" className="mt-3 flex flex-wrap gap-1.5">
         {CHANNELS.map((ch) => (
           <button
@@ -610,7 +640,7 @@ function ListsPanel({ leadId }: { leadId: string }) {
   if (db.lists.length === 0) {
     return (
       <section>
-        <h3 className="mb-1 text-sm font-extrabold">Listas</h3>
+        <PanelTitle className="mb-1">Listas</PanelTitle>
         <p className="text-[13px] text-ink-faint">
           Nenhuma lista criada. <Link to="/listas" className="text-accent underline">Criar lista</Link>
         </p>
@@ -619,7 +649,7 @@ function ListsPanel({ leadId }: { leadId: string }) {
   }
   return (
     <section>
-      <h3 className="mb-2 text-sm font-extrabold">Listas</h3>
+      <PanelTitle className="mb-2">Listas</PanelTitle>
       <div className="flex flex-wrap gap-1.5">
         {db.lists.map((l) => {
           const on = memberOf.has(l.id);
@@ -652,7 +682,7 @@ function NotesAndHistory({ leadId }: { leadId: string }) {
   return (
     <>
       <section>
-        <h3 className="mb-2 text-sm font-extrabold">Notas</h3>
+        <PanelTitle className="mb-2">Notas</PanelTitle>
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -678,4 +708,57 @@ function NotesAndHistory({ leadId }: { leadId: string }) {
       </section>
     </>
   );
+}
+
+/** Negativas nas respostas: recusa ou pedido para não receber mensagens. */
+const NEG_REPLY = new Set(['nao_interessado', 'opt_out']);
+const NEG_ACTIVITY = new Set(['message_failed', 'cadence_stopped']);
+
+/**
+ * Novidades de cada seção desde a última vez que ela foi aberta (azul = positivas, vermelho = negativas)
+ * e o resumo de uma linha mostrado com a seção fechada.
+ */
+function leadEvolution(db: ReturnType<typeof useDb>, lead: LeadRow['lead']) {
+  const id = lead.id;
+  const now = new Date().toISOString();
+  const after = (at: string | undefined, sec: string) => !!at && at > since(id, sec);
+
+  const intel = lead.beelie ? readIntel(lead.beelie) : null;
+  const beelie = {
+    pos: intel ? intel.learned.filter((l) => after(l.at, 'beelie')).length : 0,
+    summary: intel ? `${beelieStageLabel(intel.stage)} · ${TEMPERATURE_LABEL[intel.temperature]}` : undefined,
+  };
+
+  const msgs = db.messages.filter((m) => m.leadId === id);
+  const campMsgs = msgs.filter((m) => m.campaignId && after(m.sentAt ?? m.createdAt, 'campanha'));
+  const enr = db.enrollments.find((e) => e.leadId === id && (e.status === 'ativa' || e.status === 'pausada' || e.status === 'pendente'));
+  const camp = enr && db.campaigns.find((c) => c.id === enr.campaignId);
+  const campanha = {
+    pos: campMsgs.filter((m) => ['sent', 'delivered', 'read', 'replied'].includes(m.status)).length,
+    neg: campMsgs.filter((m) => m.status === 'failed').length,
+    summary: camp ? camp.name : 'Nenhuma campanha',
+  };
+
+  const tasks = db.tasks.filter((t) => t.leadId === id);
+  const open = tasks.filter((t) => t.status === 'aberta');
+  const tarefas = {
+    total: tasks.length,
+    pos: open.filter((t) => after(t.createdAt, 'tarefas')).length,
+    neg: open.filter((t) => t.dueAt && t.dueAt < now).length,
+    summary: open.length ? `${open.length} ${open.length === 1 ? 'aberta' : 'abertas'}` : 'nenhuma aberta',
+  };
+
+  const replies = db.inbound.filter((r) => r.leadId === id && after(r.receivedAt, 'conversa') && r.classification !== 'ausente');
+  const lastIn = db.inbound.filter((r) => r.leadId === id).map((r) => r.receivedAt).sort().pop();
+  const conversa = {
+    pos: replies.filter((r) => !NEG_REPLY.has(String(r.classification))).length,
+    neg: replies.filter((r) => NEG_REPLY.has(String(r.classification))).length + msgs.filter((m) => !m.campaignId && m.status === 'failed' && after(m.sentAt ?? m.createdAt, 'conversa')).length,
+    summary: lastIn ? `última resposta ${formatDateTime(lastIn)}` : msgs.some((m) => m.sentAt) ? 'sem resposta ainda' : undefined,
+  };
+
+  const acts = db.activities.filter((a) => a.leadId === id && after(a.createdAt, 'historico'));
+  const isNeg = (a: (typeof acts)[number]) => NEG_ACTIVITY.has(a.type) || (a.type === 'stage_changed' && /não interessado/i.test(a.description));
+  const historico = { pos: acts.filter((a) => !isNeg(a)).length, neg: acts.filter(isNeg).length };
+
+  return { beelie, campanha, tarefas, conversa, historico };
 }

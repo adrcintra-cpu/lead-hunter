@@ -2,6 +2,7 @@ import { Bot, Check } from 'lucide-react';
 import type { Lead } from '@/core/types';
 import { formatDateTime } from '@/core/utils';
 import { cx } from '@/components/ui';
+import { PanelTitle } from './Fold';
 import {
   BEELIE_STAGES,
   FACT_LABEL,
@@ -49,7 +50,7 @@ export function BeeliePanel({ lead }: { lead: Lead }) {
   return (
     <section className="rounded-xl border border-line p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-extrabold"><Bot className="h-4 w-4" /> Inteligência comercial · Beelie</h3>
+        <PanelTitle className="flex items-center gap-2"><Bot className="h-4 w-4" /> Inteligência comercial · Beelie</PanelTitle>
         <span className={cx('rounded-md px-2 py-0.5 text-xs font-bold', TEMP_CLASS[intel.temperature])}>{TEMPERATURE_LABEL[intel.temperature]}</span>
       </div>
 

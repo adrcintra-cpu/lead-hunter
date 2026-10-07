@@ -9,6 +9,7 @@ import { ENROLLMENT_STATUS_LABEL } from '@/services/automation/automationService
 import { formatDateTime } from '@/core/utils';
 import { cx, Spinner } from '@/components/ui';
 import { ProspectButton } from '../campaigns/ProspectButton';
+import { PanelTitle } from './Fold';
 import { TaskItem } from '@/features/tasks/TasksPage';
 
 /** Dados de CRM: contato, cargo, e-mail, tags, responsável, próxima ação e opt-in de WhatsApp. */
@@ -57,7 +58,7 @@ export function CrmPanel({ row }: { row: LeadRow }) {
 
   return (
     <section>
-      <h3 className="mb-2 text-sm font-extrabold">Contato e CRM</h3>
+      <PanelTitle className="mb-2">Contato e CRM</PanelTitle>
       <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
         <div>
           <label htmlFor="crm-name" className="label">Nome do contato</label>
@@ -144,7 +145,7 @@ export function CadencePanel({ leadId }: { leadId: string }) {
   if (!current) {
     return (
       <section>
-        <h3 className="mb-1 text-sm font-extrabold">Campanha e cadência</h3>
+        <PanelTitle className="mb-1">Campanha e cadência</PanelTitle>
         <p className="mb-2 text-[13px] text-ink-faint">Este lead não está em nenhuma campanha.</p>
         <ProspectButton leadIds={[leadId]} label="Prospectar este lead" />
       </section>
@@ -310,7 +311,7 @@ export function ConversationPanel({ row }: { row: LeadRow }) {
 
   return (
     <section>
-      <h3 className="mb-2 text-sm font-extrabold">Mensagens e respostas</h3>
+      <PanelTitle className="mb-2">Mensagens e respostas</PanelTitle>
       {items.length === 0 && <p className="text-[13px] text-ink-faint">Nenhuma mensagem enviada ainda.</p>}
       <ul className="flex flex-col gap-2">
         {items.map((it) => {
@@ -410,10 +411,10 @@ export function LeadTasks({ leadId }: { leadId: string }) {
   if (!tasks.length) return null;
   return (
     <section>
-      <h3 className="mb-1 flex items-center gap-2 text-sm font-extrabold">
+      <PanelTitle className="mb-1 flex items-center gap-2">
         <CheckCircle2 className="h-4 w-4" /> Tarefas
-      </h3>
-      <ul className="-mx-5 divide-y divide-line">{tasks.map((t) => <TaskItem key={t.id} t={t} showLead={false} />)}</ul>
+      </PanelTitle>
+      <ul className="-mx-4 divide-y divide-line">{tasks.map((t) => <TaskItem key={t.id} t={t} showLead={false} />)}</ul>
     </section>
   );
 }
@@ -437,7 +438,7 @@ export function Timeline({ leadId }: { leadId: string }) {
   const shown = all ? items : items.slice(-15);
   return (
     <section>
-      <h3 className="mb-1 text-sm font-extrabold">Linha do tempo</h3>
+      <PanelTitle className="mb-1">Linha do tempo</PanelTitle>
       {items.length > shown.length && (
         <button type="button" className="mb-1 text-xs font-semibold text-accent hover:underline" onClick={() => setAll(true)}>
           Mostrar {items.length - shown.length} eventos anteriores
