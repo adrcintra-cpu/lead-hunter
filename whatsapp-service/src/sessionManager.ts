@@ -202,9 +202,26 @@ export class SessionManager {
       });
 
       // Respostas recebidas: só as de leads seguem (ver inbound.ts). 'notify' = mensagem nova, não histórico.
+      // Conta comercial / privacidade nova: o WhatsApp manda o remetente como LID (@lid) e às vezes sem o número junto.
+      // Sem o número a mensagem não chega no lead: busca o número no mapeamento LID → telefone que a sessão guarda.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const withPhone = async (m: any) => {
+        const k = m?.key;
+        const jid: string = k?.remoteJid ?? '';
+        if (!jid.endsWith('@lid') || k.senderPn || k.remoteJidAlt) return m;
+        try {
+          const pn = await sock.signalRepository.lidMapping.getPNForLID(jid);
+          if (pn) k.remoteJidAlt = pn;
+          else log.warn({ user: maskUser(userId) }, 'número do remetente (LID) não encontrado');
+        } catch (err) {
+          log.warn({ user: maskUser(userId), err: err instanceof Error ? err.message : String(err) }, 'falha ao buscar o número do remetente (LID)');
+        }
+        return m;
+      };
       sock.ev.on('messages.upsert', ({ messages, type }) => {
         if (s.sock !== sock) return;
-        for (const m of messages) {
+        for (const raw of messages) void withPhone(raw).then((m) => {
+          if (s.sock !== sock) return;
           // Você escreveu no celular para esse contato: a resposta automática pendente é cancelada.
           if (m.key?.fromMe) {
             remember(s, m.key.id, m.message);
@@ -213,7 +230,7 @@ export class SessionManager {
             this.inbound.cancelFor(userId, m);
           }
           else if (type === 'notify') void this.inbound.handle(userId, m);
-        }
+        });
       });
 
       sock.ev.on('connection.update', async (u) => {
