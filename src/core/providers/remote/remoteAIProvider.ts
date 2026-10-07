@@ -28,7 +28,7 @@ export function createRemoteAIProvider(client: SupabaseClient): AIProvider {
   return {
     id: 'claude',
     model: 'claude (via Edge Function)',
-    promptVersion: 'v8',
+    promptVersion: 'v9',
     parseSearchQuery: (text) => call('parseSearchQuery', { text }),
     analyzeCompany: (company, icp) => call('analyzeCompany', { company, icp }),
     summarizeCompany: (company) => call('summarizeCompany', { company }),
