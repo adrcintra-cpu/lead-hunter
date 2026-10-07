@@ -159,8 +159,14 @@ export async function handleUnknown(db: Db, ownerId: string, from: string, text:
   if (((supp ?? []) as Row[]).some((s) => samePhone(s.value, national))) return { leadId: null, reason: 'opt-out' };
 
   // Empresa com esse número que o serviço ainda não conhecia (lead criado há pouco).
-  const { data: comps } = await db.from('companies').select('id, phone, whatsapp').eq('owner_id', ownerId);
-  const known = ((comps ?? []) as Row[]).find((c) => samePhone(c.whatsapp, national) || samePhone(c.phone, national));
+  // Em páginas: o banco devolve no máximo 1000 linhas por consulta.
+  let known: Row | undefined;
+  for (let from = 0; !known; from += 1000) {
+    const { data: comps } = await db.from('companies').select('id, phone, whatsapp').eq('owner_id', ownerId).order('id').range(from, from + 999);
+    const page = (comps ?? []) as Row[];
+    known = page.find((c) => samePhone(c.whatsapp, national) || samePhone(c.phone, national));
+    if (page.length < 1000) break;
+  }
   if (known) {
     const { data: l } = await db.from('leads').select('id').eq('owner_id', ownerId).eq('company_id', known.id).maybeSingle();
     if (l) return { leadId: l.id, created: false };

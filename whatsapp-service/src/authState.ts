@@ -54,8 +54,9 @@ export async function useDatabaseAuthState(db: SupabaseClient, userId: string) {
           if (e) log.error({ user: maskUser(userId), err: e.message }, 'falha ao gravar a sessão');
         }
       }
-      if (deletes.length) {
-        const { error: e } = await db.from('whatsapp_auth').delete().eq('user_id', userId).in('key', deletes);
+      // Em lotes: muitas chaves numa só lista estouram o tamanho da URL ("fetch failed").
+      for (let i = 0; i < deletes.length; i += 100) {
+        const { error: e } = await db.from('whatsapp_auth').delete().eq('user_id', userId).in('key', deletes.slice(i, i + 100));
         if (e) log.error({ user: maskUser(userId), err: e.message }, 'falha ao remover chaves da sessão');
       }
     });
