@@ -8,6 +8,7 @@ import { formatDate, normalize } from '@/core/utils';
 import { ConfirmDialog, EmptyState, PageHeader, ScoreBadge, Spinner, WhatsappBadge, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { AddLeadDialog } from './AddLeadDialog';
+import { AddToCampaign } from '../campaigns/AddToCampaign';
 
 type SortKey = 'empresa' | 'segmento' | 'cidade' | 'estado' | 'score' | 'status' | 'origem' | 'data';
 
@@ -201,6 +202,8 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
             <ListPlus className="h-4 w-4" /> Adicionar
           </button>
           {db.lists.length === 0 && <Link to="/listas" className="text-accent underline">Criar uma lista</Link>}
+          <span className="mx-1 hidden h-6 w-px bg-line sm:block" aria-hidden />
+          <AddToCampaign leadIds={Array.from(selected)} onDone={() => setSelected(new Set())} />
           <button type="button" className="btn-outline min-h-[36px] text-bad" onClick={() => setConfirmDelete(true)} disabled={deleting}>
             {deleting ? <Spinner /> : <Trash2 className="h-4 w-4" />} Excluir
           </button>

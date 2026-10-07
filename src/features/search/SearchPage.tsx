@@ -9,6 +9,7 @@ import { MOCK_CITIES } from '@/core/providers/mock/mockCompanies';
 import type { ParseResult, SearchStep } from '@/services/leadHunterService';
 import { cx, EmptyState, ErrorBox, Modal, ScoreBadge, Spinner, WhatsappBadge } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
+import { AddToCampaign } from '../campaigns/AddToCampaign';
 import { dataMode } from '@/lib/supabase';
 
 const EXAMPLES = [
@@ -396,6 +397,12 @@ function SearchResults({ searchId, onNew }: { searchId: string; onNew: () => voi
           <Link to={`/leads?search=${search.id}`} className="btn-outline">Abrir na tabela</Link>
         </div>
       </div>
+      {rows.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px]">
+          <span className="text-ink-soft">Colocar {onlyNew ? 'as novas' : 'estas empresas'} ({rows.length}) numa campanha:</span>
+          <AddToCampaign leadIds={rows.map((x) => x.res.leadId)} />
+        </div>
+      )}
       {search.ignoredCriteria.length > 0 && (
         <div className="mt-3 rounded-lg bg-warn-soft px-3 py-2 text-[13px] text-warn">
           Ignorado por falta de provider: {search.ignoredCriteria.map((f) => FIELD_LABEL[f] ?? f).join(', ')}.

@@ -8,6 +8,7 @@ import { describeStep } from '../../../supabase/functions/_shared/automation/pla
 import { ENROLLMENT_STATUS_LABEL } from '@/services/automation/automationService';
 import { formatDateTime } from '@/core/utils';
 import { cx, Spinner } from '@/components/ui';
+import { AddToCampaign } from '../campaigns/AddToCampaign';
 import { TaskItem } from '@/features/tasks/TasksPage';
 
 /** Dados de CRM: contato, cargo, e-mail, tags, responsável, próxima ação e opt-in de WhatsApp. */
@@ -144,9 +145,8 @@ export function CadencePanel({ leadId }: { leadId: string }) {
     return (
       <section>
         <h3 className="mb-1 text-sm font-extrabold">Campanha e cadência</h3>
-        <p className="text-[13px] text-ink-faint">
-          Este lead não está em nenhuma campanha. <Link to="/campanhas" className="text-accent underline">Ver campanhas</Link>
-        </p>
+        <p className="mb-2 text-[13px] text-ink-faint">Este lead não está em nenhuma campanha.</p>
+        <AddToCampaign leadIds={[leadId]} compact />
       </section>
     );
   }

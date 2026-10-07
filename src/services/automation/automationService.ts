@@ -177,6 +177,55 @@ export class AutomationService {
     return leads.length;
   }
 
+  /**
+   * Coloca leads escolhidos por você numa campanha, sem depender do filtro de público.
+   * Rascunho: entram com a primeira mensagem preparada, para revisar antes de ativar.
+   * Em andamento: entram direto (pausada: ficam pausados até retomar); a mensagem é escrita na hora do envio.
+   * Pula quem já está nela ou em outra cadência, quem fechou (cliente/não interessado) e quem pediu opt-out.
+   */
+  async addLeadsToCampaign(campaignId: string, leadIds: string[], onProgress: (done: number, total: number) => void = () => {}) {
+    const camp = this.db.campaigns.find((c) => c.id === campaignId);
+    const cad = camp && this.db.cadences.find((c) => c.id === camp.cadenceId);
+    if (!camp || !cad) throw new Error('Campanha ou cadência não encontrada.');
+    if (camp.status === 'finalizada') throw new Error('Campanha finalizada: escolha outra.');
+    const skipped: { leadId: string; reason: string }[] = [];
+    const ok: Lead[] = [];
+    for (const id of new Set(leadIds)) {
+      const lead = this.db.leads.find((l) => l.id === id);
+      const c = lead && this.companyOf(lead);
+      if (!lead || !c) continue;
+      const mine = this.db.enrollments.filter((e) => e.leadId === id);
+      if (mine.some((e) => e.campaignId === campaignId && e.status !== 'interrompida' && e.status !== 'concluida')) skipped.push({ leadId: id, reason: 'já está nesta campanha' });
+      else if (mine.some((e) => e.status === 'ativa' || e.status === 'pausada')) skipped.push({ leadId: id, reason: 'já está em outra campanha' });
+      else if (CLOSED_STAGES.includes(lead.stage)) skipped.push({ leadId: id, reason: 'cliente ou não interessado' });
+      else if (this.svc.suppressionFor(c, lead)) skipped.push({ leadId: id, reason: 'pediu para não ser contatado' });
+      else ok.push(lead);
+    }
+    const draftFirst = camp.status === 'rascunho';
+    const firstIdx = cad.steps.findIndex((s) => s.type === 'send');
+    const now = this.svc.now();
+    const start = camp.status === 'agendada' && camp.scheduledAt && new Date(camp.scheduledAt) > now ? camp.scheduledAt : now.toISOString();
+    let done = 0;
+    for (let i = 0; i < ok.length; i += 4) {
+      await Promise.all(
+        ok.slice(i, i + 4).map(async (lead) => {
+          const draft = draftFirst && firstIdx >= 0 ? await this.compose(lead, cad, firstIdx, camp.name) : undefined;
+          const at = this.nowIso();
+          const base = { id: uid('enr'), campaignId, cadenceId: cad.id, leadId: lead.id, stepIndex: 0, createdAt: at, updatedAt: at };
+          if (draftFirst) this.repo.insert('enrollments', { ...base, status: 'pendente', draft });
+          else {
+            const paused = camp.status === 'pausada';
+            this.repo.insert('enrollments', { ...base, status: paused ? 'pausada' : 'ativa', stopReason: paused ? 'Campanha pausada' : undefined, nextRunAt: start, startedAt: start });
+            this.svc.log(lead.id, 'campaign_enrolled', `Adicionado à campanha “${camp.name}”`, { campaignId });
+            if (lead.stage === 'novo' || lead.stage === 'qualificado') this.svc.changeStage(lead.id, 'em_cadencia');
+          }
+          onProgress(++done, ok.length);
+        }),
+      );
+    }
+    return { added: ok.length, skipped, pendingReview: draftFirst };
+  }
+
   editDraft(enrollmentId: string, body: string, subject?: string) {
     const e = this.db.enrollments.find((x) => x.id === enrollmentId);
     if (!e?.draft) return;
