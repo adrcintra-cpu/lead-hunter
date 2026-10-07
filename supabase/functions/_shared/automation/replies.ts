@@ -225,16 +225,37 @@ export function siteFromKnowledge(knowledge?: string | null): string | null {
 }
 
 /**
- * Fim de conversa (lead recusou, pediu para falar depois ou a conversa foi confirmada):
- * o Beelie se despede convidando a conhecer o site. Só uma vez por conversa e nunca para quem pediu
- * para não receber mensagens.
+ * Instagram da empresa a partir da base de conhecimento (linha "Instagram: https://www.instagram.com/perfil/"
+ * ou "Instagram: @perfil"). Sem a linha, nada é inventado.
  */
-export function withSiteInvite(body: string, intent: string, site: string | null, alreadySent: string[]): string {
-  if (!site || !['encerrar', 'confirmar_conversa'].includes(intent)) return body;
-  const host = site.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase();
-  const mentioned = (t: string) => t.toLowerCase().includes(host);
-  if (mentioned(body) || alreadySent.some(mentioned)) return body;
-  return `${body.trim()}\n\nSe quiser saber mais sobre a gente, é só acessar ${site}`;
+export function instagramFromKnowledge(knowledge?: string | null): string | null {
+  const m = /^\s*instagram\s*:\s*(?:(?:https?:\/\/)?(?:www\.)?instagram\.com\/|@)?([a-z0-9._]{1,30})\/?\s*$/im.exec(knowledge ?? '');
+  return m ? `https://www.instagram.com/${m[1].toLowerCase()}/` : null;
+}
+
+/**
+ * Fim de conversa (lead recusou, pediu para falar depois ou a conversa foi confirmada):
+ * o Beelie se despede convidando a conhecer o site e o Instagram. Só uma vez por conversa e nunca
+ * para quem pediu para não receber mensagens.
+ */
+export function withSiteInvite(body: string, intent: string, site: string | null, alreadySent: string[], instagram: string | null = null): string {
+  if ((!site && !instagram) || !['encerrar', 'confirmar_conversa'].includes(intent)) return body;
+  const hostOf = (u: string) => u.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '').toLowerCase();
+  // O endereço do Instagram contém o nome do site (instagram.com/oxycom.tech): ao procurar o site, ignora links do Instagram.
+  const said = (t: string, u: string) => {
+    const text = t.toLowerCase();
+    return (/instagram\.com\//i.test(u) ? text : text.replace(/instagram\.com\/\S*/g, '')).includes(hostOf(u));
+  };
+  const fresh = (u: string | null) => !!u && !said(body, u) && !alreadySent.some((t) => said(t, u));
+  const s = fresh(site) ? site : null;
+  const ig = fresh(instagram) ? instagram : null;
+  if (!s && !ig) return body;
+  const invite = s && ig
+    ? `Se quiser saber mais sobre a gente, é só acessar ${s} ou seguir no Instagram: ${ig}`
+    : s
+      ? `Se quiser saber mais sobre a gente, é só acessar ${s}`
+      : `Se quiser acompanhar a gente, estamos no Instagram: ${ig}`;
+  return `${body.trim()}\n\n${invite}`;
 }
 
 /**

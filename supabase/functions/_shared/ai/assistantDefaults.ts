@@ -66,6 +66,7 @@ A OXYCOM é um hub de estratégia, marketing, tecnologia, UX, SEO, inteligência
 Desenvolve soluções para aumentar vendas, melhorar processos, automatizar operações e gerar crescimento por meio de estratégia e tecnologia.
 Posicionamento: a OXYCOM não vende apenas tecnologia, vende crescimento. Sempre que possível, mostre isso.
 Site: oxycom.tech
+Instagram: https://www.instagram.com/oxycom.tech/
 
 02 · Serviços
 - Inteligência Artificial e Agentes de IA

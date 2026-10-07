@@ -9,7 +9,7 @@ import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
-import { siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
+import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
@@ -654,10 +654,10 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       inbound: lead.origin === INBOUND_ORIGIN,
     });
     await logRun(db, ownerId, 'suggestReply', started, 'ok', run.usage);
-    // Despedida com o site da empresa (uma vez por conversa).
+    // Despedida com o site e o Instagram da empresa (uma vez por conversa).
     const raw = run.output.message?.trim();
     const body = raw
-      ? withSiteInvite(raw, run.output.intent, siteFromKnowledge(assistant.knowledge), conversation.filter((m) => m.from === 'vendedor').map((m) => m.text))
+      ? withSiteInvite(raw, run.output.intent, siteFromKnowledge(assistant.knowledge), conversation.filter((m) => m.from === 'vendedor').map((m) => m.text), instagramFromKnowledge(assistant.knowledge))
       : raw;
     if (!body) return null;
     // Uma sugestão por vez: a anterior, se não foi enviada, é substituída.
