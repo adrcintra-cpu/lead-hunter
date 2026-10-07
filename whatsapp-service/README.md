@@ -122,3 +122,5 @@ As etapas de WhatsApp das campanhas saem sozinhas pelo número conectado (Config
 2. O agendador (`cadence-runner`) entrega cada mensagem em `/internal/campaign-send`, autenticado pelo `WHATSAPP_INBOUND_SECRET`.
 3. Este serviço envia uma de cada vez, com intervalo de 45 s a 2 min, e confirma no Supabase (`whatsapp-qr-inbound`).
 4. WhatsApp desconectado, número sem WhatsApp ou serviço reiniciado: a mensagem vira tarefa com link wa.me, como antes.
+
+<!-- deploy: índice de leads paginado (fd90bf1) -->
