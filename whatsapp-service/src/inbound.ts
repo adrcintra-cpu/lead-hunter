@@ -359,11 +359,16 @@ export class InboundRelay {
     const m = parseIncoming(raw);
     if (!m) {
       const jid: string = raw?.key?.remoteJid ?? '';
+      if (!jid.endsWith('@g.us') && !jid.endsWith('@broadcast') && !jid.endsWith('@newsletter')) {
+        const why = !textOf(raw?.message) ? 'sem texto (figurinha, reação ou tipo não suportado)' : 'mensagem antiga ou sem remetente';
+        log.info({ user: maskUser(userId), why }, 'mensagem recebida ignorada');
+      }
       if (jid.endsWith('@lid') && !raw?.key?.senderPn && !raw?.key?.remoteJidAlt && textOf(raw?.message)) log.warn({ user: maskUser(userId) }, 'mensagem ignorada: o WhatsApp não informou o número do remetente');
       return 'ignored';
     }
     try {
       const leadId = await this.findLead(userId, m.phone);
+      log.info({ user: maskUser(userId), from: maskPhone(m.phone), lead: !!leadId }, 'mensagem de WhatsApp recebida');
       // Não é lead: conversa pessoal não sai daqui, a menos que a opção de atender desconhecidos esteja ligada.
       if (!leadId) return await this.handleUnknown(userId, m, raw);
       const body = (await this.audioText(userId, raw)) ?? m.text;

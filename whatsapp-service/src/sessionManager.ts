@@ -242,7 +242,13 @@ export class SessionManager {
             if (!this.inbound.isOwn(m.key.id ?? '')) learn({ id: m.key.remoteJid, phoneNumber: m.key.remoteJidAlt }, false);
             this.inbound.cancelFor(userId, m);
           }
-          else if (type === 'notify') void this.inbound.handle(userId, m);
+          else {
+            // Diagnóstico sem conteúdo nem número: tipo do evento e do remetente.
+            const jid: string = m.key?.remoteJid ?? '';
+            const kind = jid.endsWith('@g.us') ? 'grupo' : jid.endsWith('@lid') ? 'lid' : jid.endsWith('@s.whatsapp.net') ? 'telefone' : 'outro';
+            if (kind !== 'grupo' && kind !== 'outro') log.info({ user: maskUser(userId), type, kind, alt: !!(m.key?.remoteJidAlt || m.key?.senderPn) }, 'mensagem recebida');
+            if (type === 'notify') void this.inbound.handle(userId, m);
+          }
         });
       });
 
