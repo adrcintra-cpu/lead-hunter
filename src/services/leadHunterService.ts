@@ -769,6 +769,13 @@ export class LeadHunterService {
       });
       const order: LeadStage[] = ['novo', 'qualificado', 'em_cadencia'];
       if (order.includes(lead.stage)) this.changeStage(lead.id, 'contatado');
+      // Resposta sugerida pela IA foi enviada: a conversa seguiu, as tarefas de "ler/responder" do lead são concluídas.
+      // Orçamento, reunião aceita e falar com indicado continuam abertas (precisam de você).
+      if (m.template?.startsWith('IA — resposta sugerida')) {
+        this.db.tasks
+          .filter((t) => t.leadId === lead.id && t.status === 'aberta' && t.source === 'resposta' && /^(Ler resposta|Responder|Enviar informações|Tratar objeção)/i.test(t.title))
+          .forEach((t) => this.automation.completeTask(t.id));
+      }
       // Tarefa de envio manual criada pela cadência: concluída junto.
       if (m.channel === 'whatsapp') {
         this.db.tasks

@@ -865,11 +865,29 @@ export class AutomationService {
     if (d.enrollments === 'pause') active.filter((e) => e.status === 'ativa').forEach((e) => this.setEnrollment(e, 'pausada', d.reason!));
     if (d.stage && lead.stage !== d.stage.to && (d.stage.force || !ADVANCED_STAGES.includes(lead.stage))) this.svc.changeStage(lead.id, d.stage.to);
     if (d.task) {
-      this.createTask({ leadId: lead.id, campaignId, title: d.task.title, description: d.task.description, source: 'resposta', ownerName: owner ?? lead.ownerName, dueAt: today.toISOString() });
+      this.upsertReplyTask({ leadId: lead.id, campaignId, title: d.task.title, description: d.task.description, source: 'resposta', ownerName: owner ?? lead.ownerName, dueAt: today.toISOString() });
     }
   }
 
   // ---------- Tarefas ----------
+
+  /**
+   * Uma tarefa de resposta aberta por lead (igual ao servidor): a resposta nova atualiza a tarefa existente
+   * em vez de criar outra. "Agendar reunião" e "Falar com" têm vida própria e não são fundidas.
+   */
+  upsertReplyTask(input: Omit<Task, 'id' | 'status' | 'createdAt'>) {
+    const special = /^(Agendar reunião|Falar com)/i;
+    const weight = (t: string) => (/^(Enviar orçamento|Atendimento automático)/i.test(t) ? 2 : /^(Responder|Enviar informações|Tratar objeção)/i.test(t) ? 1 : 0);
+    const open = this.db.tasks.filter((t) => t.leadId === input.leadId && t.status === 'aberta' && t.source === 'resposta');
+    if (special.test(input.title)) {
+      if (open.some((t) => t.title === input.title)) return;
+      return this.createTask(input);
+    }
+    const current = open.filter((t) => !special.test(t.title)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (!current) return this.createTask(input);
+    const title = weight(input.title) >= weight(current.title) ? input.title : current.title;
+    this.repo.update('tasks', current.id, { title, description: input.description, dueAt: input.dueAt });
+  }
 
   createTask(input: Omit<Task, 'id' | 'status' | 'createdAt'>): Task {
     const t = this.repo.insert('tasks', { ...input, id: uid('task'), status: 'aberta', createdAt: this.nowIso() });
