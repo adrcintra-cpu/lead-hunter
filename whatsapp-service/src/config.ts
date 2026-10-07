@@ -35,6 +35,8 @@ export const config = {
   /** Intervalo sorteado entre mensagens de campanha pelo WhatsApp conectado. */
   campaignGapMinSeconds: Number(process.env.CAMPAIGN_GAP_MIN_SECONDS ?? 45),
   campaignGapMaxSeconds: Number(process.env.CAMPAIGN_GAP_MAX_SECONDS ?? 120),
+  /** Espera base para retomar a sessão depois de um deploy sobreposto (segundos). */
+  takeoverWaitSeconds: Number(process.env.TAKEOVER_WAIT_SECONDS ?? 60),
   autoMinDelaySeconds: Number(process.env.AUTO_REPLY_MIN_DELAY_SECONDS ?? 5),
 };
 

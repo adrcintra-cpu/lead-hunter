@@ -33,6 +33,11 @@ interface Session {
   retries: number;
   /** Desconexão pedida pelo usuário: não reconectar. */
   closing: boolean;
+  /** Saiu de cena porque outra instância abriu a sessão (deploy sobreposto): pode retomar depois. */
+  yielded: boolean;
+  /** Retomadas seguidas após "sessão assumida" (evita duas instâncias brigando sem fim). */
+  takeovers: number;
+  openedAt: number;
   flush: (() => Promise<void>) | null;
   /** Controle de ritmo do envio individual. */
   lastSendAt: number;
@@ -63,6 +68,8 @@ function remember(s: Session, id: string | null | undefined, message: proto.IMes
 }
 
 const MAX_RETRIES = 6;
+/** Espera antes de retomar uma sessão assumida por outra instância (padrão: 1 min, 2 min, 5 min). */
+const TAKEOVER_WAITS = [1, 2, 5].map((x) => x * config.takeoverWaitSeconds * 1000);
 
 /**
  * Uma sessão de WhatsApp por usuário, isolada. Toda a lógica da biblioteca fica aqui:
@@ -70,6 +77,8 @@ const MAX_RETRIES = 6;
  */
 export class SessionManager {
   private sessions = new Map<string, Session>();
+  /** O processo está sendo desligado (SIGTERM do deploy): não retoma sessões. */
+  private stopping = false;
 
   private inbound: InboundRelay;
 
@@ -96,6 +105,9 @@ export class SessionManager {
         error: null,
         retries: 0,
         closing: false,
+        yielded: false,
+        takeovers: 0,
+        openedAt: 0,
         flush: null,
         lastSendAt: 0,
         sentDay: '',
@@ -154,6 +166,7 @@ export class SessionManager {
     const s = this.get(userId);
     if (s.sock && (s.status === 'conectado' || s.status === 'aguardando_qr' || s.status === 'conectando')) return this.view(userId);
     s.closing = false;
+    s.yielded = false;
     this.set(s, { status: opts.restoring ? 'reconectando' : 'conectando', error: null, qr: null });
 
     try {
@@ -246,6 +259,7 @@ export class SessionManager {
         if (u.connection === 'open') {
           const now = new Date().toISOString();
           const phone = formatPhone(sock.user?.id);
+          s.openedAt = Date.now();
           this.set(s, { status: 'conectado', qr: null, phone, connectedAt: s.connectedAt && opts.restoring ? s.connectedAt : now, lastSeenAt: now, error: null, retries: 0 });
           log.info({ user: maskUser(userId), phone: maskPhone(phone?.replace(/\D/g, '')), restoring: !!opts.restoring }, opts.restoring ? 'sessão restaurada' : 'sessão conectada');
         }
@@ -266,7 +280,24 @@ export class SessionManager {
             // criptografia e o celular do contato passa a mostrar "Aguardando mensagem".
             log.warn({ user: maskUser(userId) }, 'sessão assumida por outra instância do serviço: esta para');
             s.closing = true;
+            s.yielded = true;
             await s.flush?.().catch(() => undefined);
+            // Num deploy, a instância antiga é desligada logo depois. Se a que saiu de cena foi a nova,
+            // ninguém ficaria com a sessão: espera a antiga sair e retoma (no máximo 3 vezes seguidas).
+            if (this.stopping) return;
+            if (Date.now() - s.openedAt > 10 * 60_000) s.takeovers = 0;
+            s.takeovers += 1;
+            if (s.takeovers > TAKEOVER_WAITS.length) {
+              log.error({ user: maskUser(userId) }, 'sessão disputada por outra instância: confira se há dois serviços de WhatsApp rodando com o mesmo banco');
+              return;
+            }
+            const wait = TAKEOVER_WAITS[s.takeovers - 1];
+            log.warn({ user: maskUser(userId), inSec: wait / 1000, attempt: s.takeovers }, 'vai retomar a sessão se a outra instância sair');
+            setTimeout(() => {
+              if (this.stopping || !s.yielded || s.sock) return;
+              log.info({ user: maskUser(userId) }, 'retomando a sessão');
+              void this.connect(userId, { restoring: true });
+            }, wait);
             return;
           }
           if (code === DisconnectReason.restartRequired) {
@@ -325,6 +356,7 @@ export class SessionManager {
   async disconnect(userId: string) {
     const s = this.get(userId);
     s.closing = true;
+    s.yielded = false;
     try {
       await s.sock?.logout();
     } catch {
@@ -434,6 +466,7 @@ export class SessionManager {
 
   /** Desligamento limpo: grava o que estiver pendente. Não faz logout (a sessão continua válida). */
   async shutdown() {
+    this.stopping = true;
     for (const s of this.sessions.values()) {
       s.closing = true;
       await s.flush?.().catch(() => undefined);
