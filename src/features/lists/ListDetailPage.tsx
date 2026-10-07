@@ -5,6 +5,7 @@ import { useDb } from '@/store/AppStore';
 import { useLeadRows } from '@/store/selectors';
 import { EmptyState, PageHeader } from '@/components/ui';
 import { LeadsTable } from '@/features/leads/LeadsPage';
+import { ProspectButton } from '@/features/campaigns/ProspectButton';
 
 export function ListDetailPage() {
   const { listId } = useParams();
@@ -23,7 +24,11 @@ export function ListDetailPage() {
       <Link to="/listas" className="btn-ghost -ml-3 w-fit">
         <ArrowLeft className="h-4 w-4" /> Listas
       </Link>
-      <PageHeader title={list.name} subtitle={list.description} />
+      <PageHeader
+        title={list.name}
+        subtitle={list.description}
+        actions={members.length ? <ProspectButton leadIds={members.map((r) => r.lead.id)} label={`Prospectar lista (${members.length})`} /> : undefined}
+      />
       <LeadsTable rows={members} emptyText="Adicione leads pela tabela de Leads ou pelo perfil de cada lead." />
     </div>
   );

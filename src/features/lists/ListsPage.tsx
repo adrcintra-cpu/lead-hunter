@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { List, Pencil, Plus, Trash2 } from 'lucide-react';
+import { FileSpreadsheet, List, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ImportListModal } from './ImportListModal';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import type { LeadList } from '@/core/types';
 import { relativeTime } from '@/core/utils';
@@ -48,6 +49,7 @@ export function ListsPage() {
   const { toast } = useApp();
   const [editing, setEditing] = useState<LeadList | 'new' | null>(null);
   const [deleting, setDeleting] = useState<LeadList | null>(null);
+  const [importing, setImporting] = useState(false);
   const count = (id: string) => db.listMembers.filter((m) => m.listId === id).length;
 
   return (
@@ -56,9 +58,14 @@ export function ListsPage() {
         title="Listas"
         subtitle="Agrupe leads como quiser. Um lead pode estar em várias listas."
         actions={
-          <button type="button" className="btn-dark" onClick={() => setEditing('new')}>
-            <Plus className="h-4 w-4" /> Nova lista
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-primary" onClick={() => setImporting(true)}>
+              <FileSpreadsheet className="h-4 w-4" /> Importar planilha
+            </button>
+            <button type="button" className="btn-dark" onClick={() => setEditing('new')}>
+              <Plus className="h-4 w-4" /> Nova lista
+            </button>
+          </div>
         }
       />
       {db.lists.length === 0 ? (
@@ -109,6 +116,7 @@ export function ListsPage() {
           A lista “{deleting.name}” será excluída. Os leads continuam no sistema.
         </ConfirmDialog>
       )}
+      {importing && <ImportListModal onClose={() => setImporting(false)} />}
       {editing && <ListFormModal initial={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
     </div>
   );

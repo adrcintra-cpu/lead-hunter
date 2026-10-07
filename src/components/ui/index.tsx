@@ -179,11 +179,11 @@ export function ConfirmDialog({
   );
 }
 
-export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function Modal({ title, onClose, children, footer, wide = false }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" aria-label="Fechar" onClick={onClose} className="absolute inset-0 bg-black/40" />
-      <div role="dialog" aria-modal="true" aria-label={title} className="card relative z-10 w-full max-w-md p-5 shadow-pop">
+      <div role="dialog" aria-modal="true" aria-label={title} className={`card relative z-10 max-h-[90vh] w-full overflow-y-auto p-5 shadow-pop ${wide ? 'max-w-3xl' : 'max-w-md'}`}>
         <h2 className="text-lg font-extrabold">{title}</h2>
         <div className="mt-4">{children}</div>
         {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}

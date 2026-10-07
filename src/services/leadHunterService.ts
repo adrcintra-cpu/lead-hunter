@@ -2,7 +2,9 @@ import { AIService } from '@/core/ai/aiService';
 import type { ProviderSet } from '@/core/providers/types';
 import { unsupportedCriteria } from '@/core/providers/types';
 import { MOCK_SUPPRESSED_PHONE } from '@/core/providers/mock/mockCompanies';
-import { applyCompanyData, mergeInto, ruleScore, toCompany } from '@/core/scoring';
+import { applyCompanyData, mergeInto, ruleScore, tierOf, toCompany } from '@/core/scoring';
+import { ufFromPhone, isMobile } from '@/core/importer/ddd';
+import type { ImportRow } from '@/core/importer/spreadsheet';
 import { IdentityIndex, sameCompany } from '@/core/identity';
 import { formatCnpj, isValidCnpj } from '@/core/cnpj';
 import type { Engagement, ScoreExtras } from '@/core/scoring';
@@ -812,6 +814,149 @@ export class LeadHunterService {
       .map((n) => n.body);
     const brief = lead ? beelieBrief(lead.beelie, lead) : undefined;
     return { history, daysSinceLastContact, notes, brief };
+  }
+
+  // ---------- Importar planilha ----------
+
+  /**
+   * Importa contatos de uma planilha para uma lista (criada com o nome dado ou reaproveitada).
+   * Remove duplicados da própria planilha e quem já é lead (mesma regra da busca: CNPJ, site,
+   * telefone/WhatsApp, nome + cidade); quem já existe só entra na lista. Quem pediu opt-out fica de fora.
+   * Score só pelas regras (sem custo de IA). Sem empresa ou sem contato (telefone, WhatsApp ou e-mail): linha inválida.
+   */
+  async importContacts(input: { listName: string; origin?: string; rows: ImportRow[] }, onProgress: (done: number, total: number) => void = () => {}) {
+    const listName = input.listName.trim();
+    if (!listName) throw new Error('Dê um nome para a lista.');
+    if (input.rows.length > 2000) throw new Error('Até 2.000 linhas por importação. Divida a planilha.');
+    const origin = input.origin?.trim();
+    const at = nowIso();
+
+    type Item = { raw: RawCompany; email?: string; contactName?: string; contactRole?: string };
+    const valid: Item[] = [];
+    let invalid = 0;
+    for (const r of input.rows) {
+      const name = (r.tradeName || r.company || '').trim();
+      const email = r.email?.trim().toLowerCase();
+      const phone = r.phone?.trim();
+      const wa = r.whatsapp?.trim() || (phone && isMobile(phone) ? phone : undefined);
+      const okEmail = !!email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+      if (!name || (!wa && !phone && !okEmail)) {
+        invalid++;
+        continue;
+      }
+      const state = (r.state?.trim().toUpperCase().slice(0, 2) || ufFromPhone(wa || phone) || '').trim();
+      const raw: RawCompany = {
+        provider: 'planilha',
+        externalId: uid('imp'),
+        legalName: (r.company || name).trim(),
+        legalNameIsTradeName: !r.company,
+        tradeName: r.tradeName?.trim() || (r.company ? undefined : name),
+        cnpj: r.cnpj && isValidCnpj(r.cnpj) ? formatCnpj(r.cnpj) : undefined,
+        segment: r.segment?.trim() || 'A identificar',
+        city: r.city?.trim() || 'A identificar',
+        state: state || 'SP',
+        phone: phone || wa,
+        whatsapp: wa,
+        // Informado na planilha: provável (o envio confere se o número tem WhatsApp).
+        whatsappStatus: wa ? 'provavel' : undefined,
+        website: r.website?.trim() || undefined,
+        instagram: r.instagram?.trim() || undefined,
+      };
+      valid.push({ raw, email: okEmail ? email : undefined, contactName: r.contactName?.trim() || undefined, contactRole: r.contactRole?.trim() || undefined });
+    }
+
+    // 1) Duplicados dentro da planilha: fica o primeiro, completado com os dados dos outros.
+    const groups: Item[][] = [];
+    for (const it of valid) {
+      const g = groups.find((grp) => grp.some((x) => sameCompany(x.raw, it.raw)));
+      if (g) g.push(it);
+      else groups.push([it]);
+    }
+    const duplicates = valid.length - groups.length;
+    const merged = groups.map((g) => g.reduce((a, b) => ({
+      raw: { ...b.raw, ...Object.fromEntries(Object.entries(a.raw).filter(([, v]) => v !== undefined && v !== '' && v !== 'A identificar')) } as RawCompany,
+      email: a.email ?? b.email,
+      contactName: a.contactName ?? b.contactName,
+      contactRole: a.contactRole ?? b.contactRole,
+    })));
+
+    // 2) Lista de destino (reaproveita a de mesmo nome).
+    const list =
+      this.db.lists.find((l) => normalize(l.name) === normalize(listName)) ??
+      this.createList(listName, `Importada de planilha${origin ? ` · origem: ${origin}` : ''}`);
+
+    // 3) Já é lead → só entra na lista. Opt-out → fica de fora. Novo → empresa + lead.
+    const index = new IdentityIndex<Company>(this.db.companies);
+    const supp = this.db.suppression;
+    const same = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 10 && (a.endsWith(b) || b.endsWith(a)));
+    const suppressed = (it: Item) => {
+      const nums = [it.raw.phone, it.raw.whatsapp].filter(Boolean).map((v) => digits(v!));
+      if (it.raw.cnpj) nums.push(digits(it.raw.cnpj));
+      return supp.some((s) => (s.kind === 'email' ? !!it.email && s.value === it.email : nums.some((v) => same(v, digits(s.value)))));
+    };
+    let existed = 0;
+    let optOut = 0;
+    const created: string[] = [];
+    const leadIds: string[] = [];
+    let done = 0;
+    this.repo.batch(() => {
+      for (const it of merged) {
+        onProgress(++done, merged.length);
+        const found = index.find(it.raw);
+        const foundLead = found && this.db.leads.find((l) => l.companyId === found.id);
+        if (foundLead) {
+          existed++;
+          leadIds.push(foundLead.id);
+          this.addToList(foundLead.id, list.id);
+          continue;
+        }
+        if (suppressed(it)) {
+          optOut++;
+          continue;
+        }
+        const company = toCompany(it.raw);
+        const leadId = uid('lead');
+        const base = ruleScore(company, this.profile);
+        const tier = tierOf(base.total);
+        this.repo.insert('companies', company);
+        this.repo.insert('leads', {
+          id: leadId,
+          companyId: company.id,
+          stage: 'novo',
+          currentScore: base.total,
+          scoreTier: tier,
+          origin: `Planilha: ${list.name}${origin ? ` (${origin})` : ''}`.slice(0, 120),
+          contactName: it.contactName,
+          contactRole: it.contactRole,
+          email: it.email,
+          discoveredAt: at,
+          lastActivityAt: at,
+          createdAt: at,
+          updatedAt: at,
+        });
+        this.repo.insert('leadScores', {
+          id: uid('sc'),
+          leadId,
+          score: base.total,
+          tier,
+          ruleScore: base.total,
+          aiAdjustment: 0,
+          breakdown: base.rules,
+          justification: `Base de regras ${base.total} (importado de planilha; sem ajuste da IA).`,
+          model: 'regras',
+          promptVersion: '-',
+          createdAt: at,
+        });
+        this.log(leadId, 'discovered', `Importado da planilha para a lista “${list.name}”${origin ? ` · origem: ${origin}` : ''}`, { listId: list.id, origin });
+        index.add(company);
+        this.addToList(leadId, list.id);
+        created.push(leadId);
+        leadIds.push(leadId);
+      }
+    });
+    // Modo Supabase: espera as gravações terminarem antes de mostrar o resultado.
+    await (this.repo as { flush?: () => Promise<void> }).flush?.();
+    return { list, total: input.rows.length, created: created.length, existed, duplicates, invalid, optOut, leadIds };
   }
 
   // ---------- Listas ----------
