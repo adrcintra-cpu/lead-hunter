@@ -125,6 +125,9 @@ interface AutoReply {
   delaySec: number;
 }
 
+/** Linhas por página nas consultas ao banco (limite padrão do Supabase). */
+const PAGE = 1000;
+
 export class InboundRelay {
   private indexes = new Map<string, Index>();
   private loading = new Map<string, Promise<Index>>();
@@ -201,21 +204,28 @@ export class InboundRelay {
   /** Telefones (WhatsApp e fixo) das empresas que são leads do usuário. */
   private async load(userId: string): Promise<Index> {
     const map = new Map<string, string>();
-    const { data: leads, error } = await this.db.from('leads').select('id, company_id').eq('owner_id', userId);
-    if (error) throw new Error(error.message);
+    // Em páginas de 1000 e sem listas de ids na URL: com milhares de leads, ".in(ids)" estoura o
+    // tamanho da URL e a consulta falha ("fetch failed"), e nenhuma resposta chegava aos leads.
+    const all = async (table: string, cols: string): Promise<Record<string, unknown>[]> => {
+      const rows: Record<string, unknown>[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await this.db.from(table).select(cols).eq('owner_id', userId).order('id').range(from, from + PAGE - 1);
+        if (error) throw new Error(`${table}: ${error.message}`);
+        rows.push(...((data ?? []) as Record<string, unknown>[]));
+        if (!data || data.length < PAGE) break;
+      }
+      return rows;
+    };
+    const leads = await all('leads', 'id, company_id');
     const byCompany = new Map<string, string>();
-    for (const l of leads ?? []) byCompany.set(l.company_id as string, l.id as string);
-    const ids = [...byCompany.keys()];
-    for (let i = 0; i < ids.length; i += 500) {
-      const { data: comps, error: e2 } = await this.db.from('companies').select('id, whatsapp, phone').eq('owner_id', userId).in('id', ids.slice(i, i + 500));
-      if (e2) throw new Error(e2.message);
-      for (const c of comps ?? []) {
-        const leadId = byCompany.get(c.id as string);
-        if (!leadId) continue;
-        for (const raw of [c.whatsapp, c.phone] as (string | null)[]) {
-          const d = toDigits(raw);
-          if (d && !map.has(phoneKey(d))) map.set(phoneKey(d), leadId);
-        }
+    for (const l of leads) byCompany.set(l.company_id as string, l.id as string);
+    const comps = await all('companies', 'id, whatsapp, phone');
+    for (const c of comps) {
+      const leadId = byCompany.get(c.id as string);
+      if (!leadId) continue;
+      for (const raw of [c.whatsapp, c.phone] as (string | null)[]) {
+        const d = toDigits(raw);
+        if (d && !map.has(phoneKey(d))) map.set(phoneKey(d), leadId);
       }
     }
     return { map, at: Date.now() };
