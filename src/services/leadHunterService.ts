@@ -3,7 +3,7 @@ import type { ProviderSet } from '@/core/providers/types';
 import { unsupportedCriteria } from '@/core/providers/types';
 import { MOCK_SUPPRESSED_PHONE } from '@/core/providers/mock/mockCompanies';
 import { applyCompanyData, mergeInto, ruleScore, tierOf, toCompany } from '@/core/scoring';
-import { ufFromPhone, isMobile } from '@/core/importer/ddd';
+import { ufFromPhone, isMobile, withDdd } from '@/core/importer/ddd';
 import type { ImportRow } from '@/core/importer/spreadsheet';
 import { IdentityIndex, sameCompany } from '@/core/identity';
 import { formatCnpj, isValidCnpj } from '@/core/cnpj';
@@ -837,8 +837,9 @@ export class LeadHunterService {
     for (const r of input.rows) {
       const name = (r.tradeName || r.company || '').trim();
       const email = r.email?.trim().toLowerCase();
-      const phone = r.phone?.trim();
-      const wa = r.whatsapp?.trim() || (phone && isMobile(phone) ? phone : undefined);
+      // DDD em coluna separada: junta ao número que veio sem DDD.
+      const phone = withDdd(r.phone, r.ddd);
+      const wa = withDdd(r.whatsapp, r.ddd) || (phone && isMobile(phone) ? phone : undefined);
       const okEmail = !!email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
       if (!name || (!wa && !phone && !okEmail)) {
         invalid++;

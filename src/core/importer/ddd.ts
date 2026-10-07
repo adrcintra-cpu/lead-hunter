@@ -43,3 +43,16 @@ export function isMobile(raw?: string): boolean {
   if ((d.length === 12 || d.length === 13) && d.startsWith('55')) d = d.slice(2);
   return d.length === 11 && d[2] === '9';
 }
+
+/**
+ * Junta o DDD de uma coluna separada ao número quando ele veio sem DDD (8 ou 9 dígitos).
+ * Número que já tem DDD (ou 55) fica como está.
+ */
+export function withDdd(num?: string, ddd?: string): string | undefined {
+  const n = (num ?? '').trim();
+  if (!n) return undefined;
+  const d = (ddd ?? '').replace(/\D/g, '').replace(/^0+/, '').slice(-2);
+  const digits = n.replace(/\D/g, '');
+  if (d.length === 2 && (digits.length === 8 || digits.length === 9)) return `(${d}) ${digits.length === 9 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : `${digits.slice(0, 4)}-${digits.slice(4)}`}`;
+  return n;
+}

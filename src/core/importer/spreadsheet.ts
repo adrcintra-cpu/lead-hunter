@@ -17,6 +17,7 @@ export type ImportField =
   | 'state'
   | 'segment'
   | 'website'
+  | 'ddd'
   | 'cnpj'
   | 'instagram';
 
@@ -25,6 +26,7 @@ export const IMPORT_FIELDS: { id: ImportField; label: string }[] = [
   { id: 'tradeName', label: 'Nome fantasia' },
   { id: 'contactName', label: 'Contato (pessoa)' },
   { id: 'contactRole', label: 'Cargo' },
+  { id: 'ddd', label: 'DDD' },
   { id: 'whatsapp', label: 'WhatsApp' },
   { id: 'phone', label: 'Telefone' },
   { id: 'email', label: 'E-mail' },
@@ -51,6 +53,7 @@ const ALIASES: [ImportField, string[]][] = [
   ['state', ['uf', 'estado', 'state']],
   ['segment', ['segmento', 'ramo', 'setor', 'atividade', 'categoria', 'nicho', 'area de atuacao']],
   ['website', ['site', 'website', 'url', 'pagina', 'homepage']],
+  ['ddd', ['ddd', 'cod area', 'codigo de area', 'cod de area', 'prefixo', 'area code']],
   ['cnpj', ['cnpj']],
   ['instagram', ['instagram', 'insta']],
 ];
@@ -61,7 +64,7 @@ const norm = (s: string) => normalize(s).replace(/[^a-z0-9]+/g, ' ').trim();
 export function guessMapping(headers: string[]): (ImportField | null)[] {
   const used = new Set<ImportField>();
   // Nos nomes parciais ("E-mail do contato", "Telefone do responsável"), dado de contato vem antes de pessoa.
-  const PARTIAL: ImportField[] = ['whatsapp', 'email', 'phone', 'cnpj', 'website', 'instagram', 'city', 'state', 'segment', 'tradeName', 'company', 'contactRole', 'contactName'];
+  const PARTIAL: ImportField[] = ['ddd', 'whatsapp', 'email', 'phone', 'cnpj', 'website', 'instagram', 'city', 'state', 'segment', 'tradeName', 'company', 'contactRole', 'contactName'];
   const partialOrder = [...ALIASES].sort((a, b) => PARTIAL.indexOf(a[0]) - PARTIAL.indexOf(b[0]));
   const pick = (h: string, exact: boolean): ImportField | null => {
     const n = norm(h);
@@ -248,6 +251,42 @@ export async function readXlsx(buf: ArrayBuffer): Promise<string[][]> {
 }
 
 /** Lê o arquivo escolhido (xlsx ou csv) e devolve cabeçalho + linhas. */
+/**
+ * Sem linha de cabeçalho: adivinha o campo pelo conteúdo das primeiras linhas
+ * (e-mail, site, DDD de 2 dígitos, telefone/celular, UF, CNPJ; o 1º texto vira empresa).
+ */
+export function guessByContent(rows: string[][]): (ImportField | null)[] {
+  const width = Math.max(0, ...rows.map((r) => r.length));
+  const sample = rows.slice(0, 30);
+  const out: (ImportField | null)[] = [];
+  const used = new Set<ImportField>();
+  const share = (i: number, re: RegExp) => {
+    const vals = sample.map((r) => (r[i] ?? '').trim()).filter(Boolean);
+    return vals.length ? vals.filter((v) => re.test(v)).length / vals.length : 0;
+  };
+  const take = (f: ImportField) => (used.has(f) ? null : (used.add(f), f));
+  for (let i = 0; i < width; i++) {
+    let f: ImportField | null = null;
+    if (share(i, /^[^@\s]+@[^@\s]+\.[^@\s]+$/) > 0.6) f = take('email');
+    else if (share(i, /^\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}$/) > 0.6) f = take('cnpj');
+    else if (share(i, /^\(?0?\d{2}\)?$/) > 0.6) f = take('ddd');
+    else if (share(i, /^[+\d\s().-]{8,20}$/) > 0.6) {
+      const mobile = share(i, /(^|\D)9\d{4}-?\d{4}$/) > 0.5;
+      f = take(mobile ? 'whatsapp' : 'phone') ?? take(mobile ? 'phone' : 'whatsapp');
+    } else if (share(i, /^(www\.|https?:\/\/)|\.(com|br|net)(\/|$)/i) > 0.6) f = take('website');
+    else if (share(i, /^[A-Za-z]{2}$/) > 0.8) f = take('state');
+    else if (share(i, /[A-Za-zÀ-ú]/) > 0.6) f = take('company') ?? take('contactName') ?? take('city');
+    out.push(f);
+  }
+  return out;
+}
+
+/** O cabeçalho parece ser uma linha de dados (números, e-mails, nenhum nome de coluna conhecido)? */
+export function looksLikeData(headers: string[]): boolean {
+  if (guessMapping(headers).some(Boolean)) return false;
+  return headers.some((h) => /\d{4,}|@|^\d{2}$/.test(h.trim()));
+}
+
 export async function readSpreadsheet(file: { name: string; arrayBuffer: () => Promise<ArrayBuffer> }): Promise<{ headers: string[]; rows: string[][] }> {
   const buf = await file.arrayBuffer();
   const isXlsx = /\.xlsx$/i.test(file.name) || new Uint8Array(buf.slice(0, 2))[0] === 0x50;

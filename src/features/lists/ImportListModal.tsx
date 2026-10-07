@@ -3,10 +3,18 @@ import { Link } from 'react-router-dom';
 import { Download, FileSpreadsheet } from 'lucide-react';
 import { useApp, useService } from '@/store/AppStore';
 import { ErrorBox, Modal, Spinner } from '@/components/ui';
-import { IMPORT_FIELDS, guessMapping, readSpreadsheet, templateCsv, toImportRows, type ImportField } from '@/core/importer/spreadsheet';
+import { IMPORT_FIELDS, guessByContent, guessMapping, looksLikeData, readSpreadsheet, templateCsv, toImportRows, type ImportField } from '@/core/importer/spreadsheet';
 import { ProspectButton } from '../campaigns/ProspectButton';
 
-type Parsed = { fileName: string; headers: string[]; rows: string[][]; mapping: (ImportField | null)[] };
+type Parsed = { fileName: string; first: string[]; body: string[][]; hasHeader: boolean; headers: string[]; rows: string[][]; mapping: (ImportField | null)[] };
+
+/** Monta cabeçalho/linhas conforme a 1ª linha seja ou não cabeçalho. */
+function layout(fileName: string, first: string[], body: string[][], hasHeader: boolean): Parsed {
+  if (hasHeader) return { fileName, first, body, hasHeader, headers: first, rows: body, mapping: guessMapping(first) };
+  const rows = [first, ...body];
+  const width = Math.max(...rows.map((r) => r.length));
+  return { fileName, first, body, hasHeader, headers: Array.from({ length: width }, (_, i) => `Coluna ${i + 1}`), rows, mapping: guessByContent(rows) };
+}
 type Result = Awaited<ReturnType<ReturnType<typeof useService>['importContacts']>>;
 
 function downloadTemplate() {
@@ -37,8 +45,9 @@ export function ImportListModal({ onClose }: { onClose: () => void }) {
     setBusy('Lendo a planilha…');
     try {
       const { headers, rows } = await readSpreadsheet(file);
-      if (!rows.length) throw new Error('A planilha só tem o cabeçalho.');
-      setParsed({ fileName: file.name, headers, rows, mapping: guessMapping(headers) });
+      const hasHeader = !looksLikeData(headers);
+      if (hasHeader && !rows.length) throw new Error('A planilha só tem o cabeçalho.');
+      setParsed(layout(file.name, headers, rows, hasHeader));
       if (!listName) setListName(file.name.replace(/\.(xlsx|csv)$/i, '').replace(/[_-]+/g, ' ').trim());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível ler o arquivo.');
@@ -129,6 +138,10 @@ export function ImportListModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={parsed.hasHeader} onChange={(e) => setParsed(layout(parsed.fileName, parsed.first, parsed.body, e.target.checked))} />
+              A primeira linha é o cabeçalho (nomes das colunas)
+            </label>
             <div>
               <div className="label">Colunas reconhecidas (ajuste se precisar)</div>
               <div className="overflow-x-auto rounded-lg border border-line">
