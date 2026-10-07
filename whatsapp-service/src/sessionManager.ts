@@ -398,7 +398,8 @@ export class SessionManager {
     const phone = normalizePhone(rawPhone);
     if (!phone) return { ok: false, error: 'Telefone inválido.' };
 
-    const today = new Date().toISOString().slice(0, 10);
+    // Dia de Brasília (o limite diário vira à meia-noite daqui, não às 21h).
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     if (s.sentDay !== today) {
       s.sentDay = today;
       s.sentToday = 0;
