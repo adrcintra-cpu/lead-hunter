@@ -1,5 +1,5 @@
 import { nextDayWindow, nextWindowStart, plan, startOfDayBRT, type Effect, type PlanContext } from '../../../supabase/functions/_shared/automation/planner.ts';
-import { ADVANCED_STAGES, messageStage, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from '../../../supabase/functions/_shared/automation/replies.ts';
+import { ADVANCED_STAGES, instagramFromKnowledge, messageStage, parseSubject, renderTemplate, replyDecision, siteFromKnowledge, withOptOutFooter, withSiteInvite, type TemplateData } from '../../../supabase/functions/_shared/automation/replies.ts';
 import {
   CLOSED_STAGES,
   DEFAULT_SEND_WINDOW,
@@ -705,7 +705,11 @@ export class AutomationService {
       company: c,
       conversation: conv.map((m) => ({ from: m.from, date: `${when(m.at)}, ${m.channel === 'email' ? 'e-mail' : 'WhatsApp'}`, text: m.text })),
     });
-    const body = s.message?.trim();
+    const raw = s.message?.trim();
+    // Despedida com o site e o Instagram da empresa (uma vez por conversa), como na resposta automática.
+    const body = raw
+      ? withSiteInvite(raw, s.intent, siteFromKnowledge(assistant.knowledge), conv.filter((m) => m.from === 'vendedor').map((m) => m.text), instagramFromKnowledge(assistant.knowledge))
+      : raw;
     if (!body) return null;
     const at = this.nowIso();
     const msg: Message = {
