@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Send } from 'lucide-react';
-import { useApp, useService } from '@/store/AppStore';
+import { useApp, useDb, useService } from '@/store/AppStore';
 import { Spinner, cx } from '@/components/ui';
 import { AddToCampaign } from './AddToCampaign';
 
@@ -22,14 +22,25 @@ const when = (iso: string | null) => {
  */
 export function ProspectButton({ leadIds, onDone, label }: { leadIds: string[]; onDone?: () => void; label?: string }) {
   const service = useService();
+  const db = useDb();
   const { toast } = useApp();
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState(false);
+  // Quem já está numa campanha (na fila, em andamento ou pausado) não precisa de novo clique.
+  const inFlight = new Set(db.enrollments.filter((e) => e.status === 'ativa' || e.status === 'pausada' || e.status === 'pendente').map((e) => e.leadId));
+  const todo = leadIds.filter((id) => !inFlight.has(id));
+  if (leadIds.length && !todo.length) {
+    return (
+      <span className="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-good/40 px-3 text-[13px] font-bold text-good">
+        ✓ {leadIds.length === 1 ? 'Já está em prospecção' : 'Já estão em prospecção'}: o BEELIE envia no horário de envio
+      </span>
+    );
+  }
 
   async function go() {
     setBusy(true);
     try {
-      const r = await service.automation.prospect(leadIds);
+      const r = await service.automation.prospect(todo);
       const out = r.skipped.length ? ` ${r.skipped.length} ${r.skipped.length === 1 ? 'ficou' : 'ficaram'} de fora (${[...new Set(r.skipped.map((x) => x.reason))].join(', ')}).` : '';
       if (!r.added) toast(`Nenhum lead novo para prospectar.${out}`, 'info');
       else {
@@ -52,11 +63,11 @@ export function ProspectButton({ leadIds, onDone, label }: { leadIds: string[]; 
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" className="btn-primary min-h-[38px]" disabled={busy || !leadIds.length} onClick={() => void go()}>
-        {busy ? <Spinner /> : <Send className="h-4 w-4" />} {label ?? `Prospectar (${leadIds.length})`}
+      <button type="button" className="btn-primary min-h-[38px]" disabled={busy || !todo.length} onClick={() => void go()}>
+        {busy ? <Spinner /> : <Send className="h-4 w-4" />} {todo.length < leadIds.length ? `Prospectar ${todo.length === 1 ? 'a que falta' : `as ${todo.length} que faltam`}` : (label ?? `Prospectar (${leadIds.length})`)}
       </button>
       {pick ? (
-        <AddToCampaign leadIds={leadIds} onDone={onDone} />
+        <AddToCampaign leadIds={todo} onDone={onDone} />
       ) : (
         <button type="button" className={cx('btn-ghost min-h-[38px] text-[13px]')} onClick={() => setPick(true)}>
           ou escolher campanha

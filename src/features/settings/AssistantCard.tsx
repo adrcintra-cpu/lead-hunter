@@ -168,25 +168,7 @@ export function AssistantCard() {
             </label>
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <div>
-                <span className="label">Formato das respostas</span>
-                <div role="radiogroup" aria-label="Formato" className="flex rounded-lg border border-line p-0.5">
-                  {(['texto', 'audio'] as const).map((f) => (
-                    <button
-                      key={f}
-                      type="button"
-                      role="radio"
-                      aria-checked={prefs.replyFormat === f}
-                      disabled={!prefsAvailable}
-                      onClick={() => void updatePrefs({ ...prefs, replyFormat: f })}
-                      className={cx('min-h-[32px] rounded-md px-3 text-xs font-bold', prefs.replyFormat === f ? 'bg-inverse text-inverse-ink' : 'text-ink-soft hover:bg-muted')}
-                    >
-                      {f === 'texto' ? 'Texto' : 'Áudio (voz da IA)'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label htmlFor="as-voice" className="label">Voz</label>
+                <label htmlFor="as-voice" className="label">Voz (quando o lead pede áudio)</label>
                 <div className="flex items-center gap-2">
                   <select
                     id="as-voice"
@@ -215,9 +197,9 @@ export function AssistantCard() {
                 </div>
               </div>
             </div>
-            <p className="mt-2 text-xs text-ink-faint">Recomendado: Texto. O {s.name || 'assistente'} digita e só usa a voz na resposta a uma mensagem em que o lead pede (“manda um áudio”, “fala por áudio”); depois volta a digitar. Em Áudio, responde sempre com voz. Áudio recebido do lead é entendido e respondido por escrito. Se a voz falhar, a resposta sai em texto.</p>
-            {prefs.replyFormat === 'audio' && whatsappQrAvailable && conn && conn.audio === false && (
-              <p className="mt-2 text-xs text-warn">A voz da IA ainda não está configurada no servidor: adicione OPENAI_API_KEY nas variáveis do Railway. Até lá, as respostas automáticas em áudio falham e ficam prontas para você enviar.</p>
+            <p className="mt-2 text-xs text-ink-faint">O {s.name || 'assistente'} sempre digita. Só responde com voz quando o lead pede (“manda um áudio”, “fala por áudio”), e na mensagem seguinte volta a digitar. Áudio recebido do lead é entendido e respondido por escrito. Se a voz falhar, a resposta sai em texto.</p>
+            {whatsappQrAvailable && conn && conn.audio === false && (
+              <p className="mt-2 text-xs text-warn">A voz da IA ainda não está configurada no servidor: adicione OPENAI_API_KEY nas variáveis do Railway. Até lá, quando o lead pedir áudio, a resposta sai em texto.</p>
             )}
             <label className="mt-4 flex items-start gap-3 border-t border-line pt-4">
               <input

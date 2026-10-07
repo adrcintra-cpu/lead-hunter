@@ -96,7 +96,7 @@ export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs
   const { data: u } = await supabase.auth.getUser();
   if (!u.user) throw new Error('Faça login de novo.');
   const row: Record<string, unknown> = { owner_id: u.user.id, ...clean, updated_at: new Date().toISOString() };
-  if (prefs) Object.assign(row, { auto_reply: prefs.autoReply, reply_format: prefs.replyFormat, voice: prefs.voice });
+  if (prefs) Object.assign(row, { auto_reply: prefs.autoReply, reply_format: 'texto', voice: prefs.voice }); // sempre digita; voz só a pedido do lead
   if (prefs?.answerUnknown !== undefined) row.answer_unknown = prefs.answerUnknown;
   const { error } = await supabase.from('assistant_settings').upsert(row);
   if (error) throw new Error(missingTable(error.message) ? 'Falta aplicar a migration do assistente (npx supabase db push).' : error.message);

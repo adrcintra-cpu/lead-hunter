@@ -241,7 +241,8 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     if (!noted) await log(db, ownerId, leadId, 'lead_updated', 'Do outro lado é um atendimento automático (robô): o BEELIE parou de responder sozinho. Fale com a empresa por outro caminho ou responda o menu você mesmo.', { kind: 'auto_reply_skipped', reason: 'robo' });
     return 'robo';
   }
-  const format = bot === 'text' ? 'texto' : chooseFormat(bodies, cfg?.reply_format === 'audio' ? 'audio' : 'texto');
+  // O BEELIE digita; voz só quando o lead pede (a opção antiga "Áudio" das configurações não força mais voz).
+  const format = bot === 'text' ? 'texto' : chooseFormat(bodies, 'texto');
   return {
     messageId: s.id,
     body: s.body,
