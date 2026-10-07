@@ -61,8 +61,27 @@ export function textOf(message: any): string | null {
   if (m.videoMessage) return '[Vídeo recebido — veja no WhatsApp]';
   if (m.documentMessage) return '[Documento recebido — veja no WhatsApp]';
   if (m.stickerMessage) return null;
-  if (m.contactMessage || m.locationMessage) return '[Contato ou localização recebidos — veja no WhatsApp]';
+  // Cartão de contato (ex.: o lead indica quem decide): nome e telefone viram texto.
+  const cards = m.contactMessage ? [m.contactMessage] : (m.contactsArrayMessage?.contacts ?? []);
+  if (cards.length) {
+    const lines = cards.slice(0, 5).map(contactCard).filter(Boolean);
+    if (lines.length) return lines.map((l: string) => `[Contato compartilhado] ${l}`).join('\n').slice(0, 4000);
+  }
+  if (m.contactMessage || m.contactsArrayMessage || m.locationMessage) return '[Contato ou localização recebidos — veja no WhatsApp]';
   return null;
+}
+
+/** "Nome — telefone(s) — e-mail" a partir de um cartão de contato (vCard) do WhatsApp. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function contactCard(c: any): string {
+  const vcard = String(c?.vcard ?? '');
+  const fn = /^FN[^:]*:(.+)$/im.exec(vcard)?.[1]?.trim();
+  const name = String(c?.displayName ?? fn ?? '').trim().slice(0, 80);
+  const phones = [...vcard.matchAll(/^TEL[^:\n]*?(?:waid=(\d+))?[^:\n]*:(.+)$/gim)].map((x) => (x[2] ?? '').trim() || (x[1] ? `+${x[1]}` : '')).filter(Boolean);
+  const emails = [...vcard.matchAll(/^EMAIL[^:\n]*:(.+)$/gim)].map((x) => x[1].trim()).filter(Boolean);
+  const parts = [name, ...new Set(phones)].filter(Boolean);
+  if (emails.length) parts.push(emails[0]);
+  return parts.join(' — ');
 }
 
 /**
@@ -302,19 +321,29 @@ export class InboundRelay {
     log.info({ user: maskUser(userId), to: maskPhone(phone), inSec: Math.round(delay / 1000) }, 'resposta automática agendada');
   }
 
-  /** Áudio de lead: tenta transcrever. Devolve null quando não é áudio ou não deu para transcrever. */
+  /**
+   * Áudio ou imagem de lead: transcreve o áudio / lê a imagem (print de contato, cartão de visita).
+   * Devolve null quando não é mídia ou não deu para ler (fica o aviso de sempre).
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async audioText(userId: string, raw: any): Promise<string | null> {
     const msg = raw?.message;
-    const audio = (msg?.ephemeralMessage?.message ?? msg?.viewOnceMessage?.message ?? msg)?.audioMessage;
-    if (!audio || !this.transcriber) return null;
+    const m = msg?.ephemeralMessage?.message ?? msg?.viewOnceMessage?.message ?? msg;
+    const audio = m?.audioMessage;
+    const image = m?.imageMessage;
+    if ((!audio && !image) || !this.transcriber) return null;
     try {
       const text = await this.transcriber(userId, raw);
       if (!text) return null;
-      log.info({ user: maskUser(userId), seconds: Number(audio.seconds) || undefined }, 'áudio de lead transcrito');
-      return `[Áudio transcrito] ${text}`.slice(0, 4000);
+      if (audio) {
+        log.info({ user: maskUser(userId), seconds: Number(audio.seconds) || undefined }, 'áudio de lead transcrito');
+        return `[Áudio transcrito] ${text}`.slice(0, 4000);
+      }
+      log.info({ user: maskUser(userId) }, 'imagem de lead lida');
+      const caption = typeof image.caption === 'string' && image.caption.trim() ? `\nLegenda: ${image.caption.trim()}` : '';
+      return `[Imagem] ${text}${caption}`.slice(0, 4000);
     } catch (err) {
-      log.warn({ user: maskUser(userId), err: err instanceof Error ? err.message : String(err) }, 'áudio de lead não transcrito');
+      log.warn({ user: maskUser(userId), err: err instanceof Error ? err.message : String(err) }, audio ? 'áudio de lead não transcrito' : 'imagem de lead não lida');
       return null;
     }
   }

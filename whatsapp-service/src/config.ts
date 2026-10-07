@@ -29,6 +29,8 @@ export const config = {
   ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
   /** Modelo que transcreve os áudios recebidos dos leads. */
   sttModel: (process.env.OPENAI_STT_MODEL ?? 'gpt-4o-mini-transcribe').trim(),
+  /** Leitura de imagens enviadas por leads (print de contato, cartão de visita). */
+  visionModel: (process.env.OPENAI_VISION_MODEL ?? 'gpt-4o-mini').trim(),
   /** Espera mínima antes da resposta automática (segundos). */
   /** Intervalo sorteado entre mensagens de campanha pelo WhatsApp conectado. */
   campaignGapMinSeconds: Number(process.env.CAMPAIGN_GAP_MIN_SECONDS ?? 45),

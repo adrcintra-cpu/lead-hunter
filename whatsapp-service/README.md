@@ -67,7 +67,7 @@ Site (Vercel) ──HTTPS + token de login──▶ este serviço ──▶ Sess
    | `SEND_MIN_INTERVAL_SECONDS` | `8` (opcional) |
    | `SEND_DAILY_LIMIT` | `60` (opcional) |
    | `WHATSAPP_INBOUND_SECRET` | o mesmo valor salvo nas Secrets das Edge Functions do Supabase |
-   | `OPENAI_API_KEY` | chave da OpenAI: responder em áudio e transcrever os áudios dos leads (opcional) |
+   | `OPENAI_API_KEY` | chave da OpenAI: responder em áudio, transcrever os áudios e ler as imagens (prints, cartões de contato) dos leads (opcional; modelo de imagem: `OPENAI_VISION_MODEL`, padrão gpt-4o-mini) |
    | `CAMPAIGN_GAP_MIN_SECONDS` / `CAMPAIGN_GAP_MAX_SECONDS` | intervalo sorteado entre mensagens de campanha (padrão 45 e 120) |
    | `RAILWAY_DEPLOYMENT_OVERLAP_SECONDS` | `0`: o servidor antigo desliga antes do novo conectar. Duas instâncias com a mesma sessão corrompem a criptografia ("Aguardando mensagem" no celular do contato). |
 
