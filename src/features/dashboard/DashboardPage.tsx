@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bot, Database, Megaphone, Plus, Sparkles } from 'lucide-react';
+import { Bot, ChevronRight, Database, Megaphone, Plus, Sparkles } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRows } from '@/store/selectors';
 import { CLOSED_STAGES, stageLabel } from '@/core/types';
@@ -11,13 +11,23 @@ import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { TaskItem } from '@/features/tasks/TasksPage';
 import { StatusChip } from '@/features/campaigns/CampaignsPage';
 
-function Kpi({ label, value, note, accent }: { label: string; value: string | number; note?: string; accent?: boolean }) {
-  return (
-    <div className="card px-4 py-4">
-      <div className="text-[12.5px] font-semibold text-ink-faint">{label}</div>
+/** Cartão de número; com `to`, abre a lista correspondente. */
+function Kpi({ label, value, note, accent, to }: { label: string; value: string | number; note?: string; accent?: boolean; to?: string }) {
+  const body = (
+    <>
+      <div className="flex items-center justify-between text-[12.5px] font-semibold text-ink-faint">
+        {label}
+        {to && <ChevronRight className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />}
+      </div>
       <div className={cx('mt-1.5 font-mono text-3xl font-semibold tabular-nums', accent && 'text-accent')}>{value}</div>
       {note && <div className="mt-0.5 text-xs text-ink-faint">{note}</div>}
-    </div>
+    </>
+  );
+  if (!to) return <div className="card px-4 py-4">{body}</div>;
+  return (
+    <Link to={to} className="card group block px-4 py-4 transition-colors hover:border-accent/50 hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+      {body}
+    </Link>
   );
 }
 
@@ -150,13 +160,13 @@ export function DashboardPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Leads" value={db.leads.length} note={`${db.leads.filter((l) => l.stage === 'cliente').length} viraram clientes`} />
-            <Kpi label="Em cadência" value={db.enrollments.filter((e) => e.status === 'ativa').length} note={`${liveCampaigns.length} campanhas em andamento`} />
-            <Kpi label="Mensagens enviadas" value={m.sent} note={`${m.delivered} entregues · ${m.failed} falhas`} />
-            <Kpi label="Respostas" value={m.replies} note={`taxa de ${m.replyRate}%`} accent />
-            <Kpi label="Interessados" value={m.interested} note={`${m.meetings} pediram reunião`} accent />
-            <Kpi label="Tarefas abertas" value={openTasks.length} note="atendimento humano" />
-            <Kpi label="Opt-out" value={m.optOuts} note="pediram para não receber" />
+            <Kpi to="/leads" label="Leads" value={db.leads.length} note={`${db.leads.filter((l) => l.stage === 'cliente').length} viraram clientes`} />
+            <Kpi to="/leads?ver=cadencia" label="Em cadência" value={db.enrollments.filter((e) => e.status === 'ativa').length} note={`${liveCampaigns.length} campanhas em andamento`} />
+            <Kpi to="/campanhas" label="Mensagens enviadas" value={m.sent} note={`${m.delivered} entregues · ${m.failed} falhas`} />
+            <Kpi to="/leads?ver=respostas" label="Respostas" value={m.replies} note={`taxa de ${m.replyRate}%`} accent />
+            <Kpi to="/leads?ver=interessados" label="Interessados" value={m.interested} note={`${m.meetings} pediram reunião`} accent />
+            <Kpi to="/tarefas" label="Tarefas abertas" value={openTasks.length} note="atendimento humano" />
+            <Kpi to="/leads?ver=optout" label="Opt-out" value={m.optOuts} note="pediram para não receber" />
             <div className="card px-4 py-4">
               <div className="text-[12.5px] font-semibold text-ink-faint">Temperatura dos leads</div>
               <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-muted" aria-hidden>
@@ -165,9 +175,9 @@ export function DashboardPage() {
                 <div className="bg-ink-faint/50" style={{ width: `${(temp.cold / total) * 100}%` }} />
               </div>
               <div className="mt-2 flex justify-between text-xs">
-                <span className="font-semibold text-good">{temp.hot} quentes</span>
-                <span className="font-semibold text-warn">{temp.warm} mornos</span>
-                <span className="text-ink-faint">{temp.cold} frios</span>
+                <Link to="/leads?ver=quentes" className="font-semibold text-good hover:underline">{temp.hot} quentes</Link>
+                <Link to="/leads?ver=mornos" className="font-semibold text-warn hover:underline">{temp.warm} mornos</Link>
+                <Link to="/leads?ver=frios" className="text-ink-faint hover:underline">{temp.cold} frios</Link>
               </div>
             </div>
           </div>

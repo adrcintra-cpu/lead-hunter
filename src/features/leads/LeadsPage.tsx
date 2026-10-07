@@ -10,6 +10,20 @@ import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { AddLeadDialog } from './AddLeadDialog';
 import { ProspectButton } from '../campaigns/ProspectButton';
 
+/** Recortes abertos pelos cartões do Dashboard (/leads?ver=...). Mesmas contas dos cartões. */
+export const QUICK_VIEWS: Record<string, string> = {
+  clientes: 'Clientes',
+  cadencia: 'Em cadência',
+  enviadas: 'Receberam mensagem de campanha',
+  respostas: 'Responderam',
+  interessados: 'Interessados',
+  reuniao: 'Pediram reunião',
+  optout: 'Pediram para não receber',
+  quentes: 'Leads quentes',
+  mornos: 'Leads mornos',
+  frios: 'Leads frios',
+};
+
 type SortKey = 'empresa' | 'segmento' | 'cidade' | 'estado' | 'score' | 'status' | 'origem' | 'data';
 
 interface Filters {
@@ -310,12 +324,36 @@ export function LeadsPage() {
   const [params, setParams] = useSearchParams();
   const searchId = params.get('search');
   const search = searchId ? db.searches.find((s) => s.id === searchId) : null;
+  const view = params.get('ver') ?? '';
+  const viewLabel = QUICK_VIEWS[view];
   const [adding, setAdding] = useState(false);
   const scoped = useMemo(() => {
-    if (!searchId) return rows;
-    const ids = new Set(db.searchResults.filter((r) => r.searchId === searchId).map((r) => r.leadId));
-    return rows.filter((r) => ids.has(r.lead.id));
-  }, [rows, db.searchResults, searchId]);
+    let out = rows;
+    if (searchId) {
+      const ids = new Set(db.searchResults.filter((r) => r.searchId === searchId).map((r) => r.leadId));
+      out = out.filter((r) => ids.has(r.lead.id));
+    }
+    if (viewLabel) {
+      const ins = db.inbound.filter((r) => r.campaignId && r.classification !== 'ausente');
+      const leadsOf = (xs: { leadId: string }[]) => new Set(xs.map((x) => x.leadId));
+      const ids: Set<string> | null =
+        view === 'cadencia' ? leadsOf(db.enrollments.filter((e) => e.status === 'ativa'))
+        : view === 'enviadas' ? leadsOf(db.messages.filter((m) => m.campaignId && m.sentAt))
+        : view === 'respostas' ? leadsOf(ins)
+        : view === 'interessados' ? leadsOf(ins.filter((r) => r.classification === 'interessado' || r.classification === 'reuniao'))
+        : view === 'reuniao' ? leadsOf(ins.filter((r) => r.classification === 'reuniao'))
+        : view === 'optout' ? leadsOf(ins.filter((r) => r.classification === 'opt_out'))
+        : null;
+      const tier = view === 'quentes' ? 'alta' : view === 'mornos' ? 'media' : view === 'frios' ? 'baixa' : null;
+      out = out.filter((r) => (ids ? ids.has(r.lead.id) : tier ? r.lead.scoreTier === tier : view === 'clientes' ? r.lead.stage === 'cliente' : true));
+    }
+    return out;
+  }, [rows, db.searchResults, db.inbound, db.enrollments, db.messages, searchId, view, viewLabel]);
+  const clear = (key: string) => {
+    const n = new URLSearchParams(params);
+    n.delete(key);
+    setParams(n);
+  };
 
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-4">
@@ -334,6 +372,13 @@ export function LeadsPage() {
                   setParams(n);
                 }}
               >
+                ver todos
+              </button>
+            </span>
+          ) : viewLabel ? (
+            <span className="inline-flex flex-wrap items-center gap-2">
+              Mostrando: {viewLabel}
+              <button type="button" className="text-accent underline" onClick={() => clear('ver')}>
                 ver todos
               </button>
             </span>
