@@ -211,7 +211,7 @@ export class InboundRelay {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await this.db.from(table).select(cols).eq('owner_id', userId).order('id').range(from, from + PAGE - 1);
         if (error) throw new Error(`${table}: ${error.message}`);
-        rows.push(...((data ?? []) as Record<string, unknown>[]));
+        rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
         if (!data || data.length < PAGE) break;
       }
       return rows;
