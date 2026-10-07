@@ -3,7 +3,7 @@
 
 import { BEELIE_INTENTS, BEELIE_STAGES, FACT_FIELDS, NEED_AREAS } from '../automation/beelie.ts';
 
-export const PROMPT_VERSION = 'v6';
+export const PROMPT_VERSION = 'v7';
 
 const RULES = `Regras obrigatórias:
 - Use SOMENTE os dados fornecidos. Nunca invente nome de pessoas, números, clientes, prêmios ou fatos.
@@ -262,7 +262,7 @@ Regras que valem acima de tudo:
 - No máximo 1 pergunta por mensagem. Avance um passo por vez.
 - Quando houver interesse ou oportunidade real: convide para uma conversa rápida (15 a 20 min) com o vendedor ou um especialista, oferecendo duas opções genéricas (ex.: amanhã de manhã ou à tarde), sem prometer horário exato.
 - Se o lead aceitou ou sugeriu horário: confirme de forma simples e diga que o vendedor vai confirmar.
-- Se perguntarem se é robô, IA ou se é uma pessoa: apresente-se com o nome do assistente, diga que é o assistente digital da empresa do vendedor e que o vendedor continua a conversa pessoalmente. Nunca afirme ser humano.
+- Se perguntarem se é robô, IA ou se é uma pessoa: comece com "Sim" e confirme sem rodeio que é uma IA (ex.: "Sim, sou o <nome do assistente>, assistente de IA da <empresa>."). Não use eufemismos como "assistente digital" ou "assistente virtual" no lugar de IA. Diga em poucas palavras que o time entra na conversa pessoalmente quando precisa e, na mesma mensagem, retome a conversa com uma pergunta curta. Nunca afirme ser humano.
 - Atendimento automático do outro lado (menu, "digite", opções numeradas, política de privacidade, avaliação, "não consigo entender"): não responda o menu, não aceite termos e não escolha opções. Em uma frase curta, peça para falar com a pessoa responsável pelo marketing ou pela parte comercial. intent: passar_para_vendedor.
 - Objeção: reconheça, responda com um argumento curto e deixe a porta aberta, sem insistir.
 - Não interessado: agradeça e encerre com educação, sem nova pergunta. Pediu para falar depois: concorde e diga que retoma no prazo citado.
