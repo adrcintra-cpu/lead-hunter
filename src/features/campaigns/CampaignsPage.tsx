@@ -458,6 +458,11 @@ export function CampaignDetailPage() {
               <span className="block text-ink-faint">
                 Empresas novas encontradas pelas buscas (inclusive as agendadas) que se encaixam no público acima, com score mínimo {camp.audience.minScore || 0}, entram sozinhas nesta campanha enquanto ela estiver ativa. Se a empresa se encaixar em mais de uma campanha, entra na de público mais específico (mais filtros). A campanha não finaliza sozinha.
               </span>
+              <span className="mt-1 block text-ink-faint">
+                <b>Prospecção diária:</b> com o limite diário de WhatsApp preenchido, todo dia útil, no horário de envio, o servidor completa o dia com leads da sua base que se encaixam no público e ainda não foram abordados (melhor score primeiro), mesmo com o Lead Hunter fechado.
+                {camp.autoEnroll && !camp.dailyLimitWhatsapp && camp.channel !== 'email' ? <span className="text-warn"> Preencha o limite diário de WhatsApp para ligar.</span> : null}
+                {camp.autoEnroll && camp.dailyLimitWhatsapp ? <span className="text-good"> Ligada: até {camp.dailyLimitWhatsapp} por dia · {toPrepare.length} leads disponíveis no público.</span> : null}
+              </span>
             </span>
           </label>
         </div>

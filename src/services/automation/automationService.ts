@@ -289,7 +289,8 @@ export class AutomationService {
       ownerName: this.svc.profile.fullName ?? '',
     });
     const at = this.nowIso();
-    this.repo.update('campaigns', c.id, { status: 'ativa', startedAt: at });
+    // Prospecção diária ligada: o servidor completa o dia com leads da base (até 25 por dia útil).
+    this.repo.update('campaigns', c.id, { status: 'ativa', startedAt: at, autoEnroll: true, dailyLimitWhatsapp: 25 });
     return this.db.campaigns.find((x) => x.id === c.id)!;
   }
 

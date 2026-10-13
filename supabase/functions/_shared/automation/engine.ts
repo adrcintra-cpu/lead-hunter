@@ -12,6 +12,7 @@ import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } fro
 import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
+import { feedCampaigns } from './feeder.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -250,6 +251,8 @@ export interface RunSummary {
   sent: number;
   failed: number;
   finished: number;
+  /** Leads que entraram hoje pela prospecção diária. */
+  fed?: number;
   errors: string[];
 }
 
@@ -264,6 +267,14 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   for (const c of scheduled) {
     await db.from('campaigns').update({ status: 'ativa', started_at: now.toISOString() }).eq('id', c.id);
     sum.activated++;
+  }
+
+  // Prospecção diária: campanhas com entrada automática e limite diário completam o dia com leads da base.
+  try {
+    const fed = await feedCampaigns(db, now);
+    sum.fed = fed.enrolled;
+  } catch (err) {
+    sum.errors.push(`prospecção diária: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const due: Row[] = await must(
