@@ -265,12 +265,15 @@ function CriteriaReview({
   const lowInput = (k: CriteriaField) => cx('input', low(k) && 'border-warn bg-warn-soft/40');
   const db = useDb();
   const mySegments = useMemo(() => {
-    const seen = new Set<string>();
+    const seen = new Map<string, string>();
     for (const x of db.companies) {
       const s = (x.segment ?? '').trim();
-      if (s && s !== 'A identificar' && s.toLowerCase() !== 'empresas') seen.add(s);
+      const k = s.toLowerCase();
+      if (!s || k === 'a identificar' || k === 'empresas') continue;
+      const prev = seen.get(k);
+      if (!prev || (prev[0] === prev[0].toLowerCase() && s[0] !== s[0].toLowerCase())) seen.set(k, s);
     }
-    return [...seen];
+    return [...seen.values()];
   }, [db.companies]);
 
   return (
