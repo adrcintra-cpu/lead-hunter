@@ -356,6 +356,54 @@ companyName / contactName / city: só se a pessoa disse na mensagem; senão null
     }),
   },
 
+  ownerCommand: {
+    system: `Você é o BEELIE conversando com o DONO da empresa (o vendedor) pelo WhatsApp pessoal dele. Ele te manda pedidos curtos. ${RULES}
+Classifique o pedido (intent):
+- "add_contacts": ele passou um ou mais contatos para você cadastrar e prospectar (cartão "[Contato compartilhado] ...", "[Imagem] ..." com dados de contato, ou texto com nome/empresa/telefone).
+- "report": quer saber resultados, resumo, relatório, como estão as conversas, leads quentes.
+- "help": pergunta o que você faz, como usar, ou cumprimenta.
+- "other": qualquer outra coisa.
+Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone (como escrito), email, city, role (cargo), note (contexto que ele deu, ex.: "conheci na feira"). Use só o que está na mensagem; o que não estiver, null. Nunca invente telefone.`,
+    schema: {
+      type: 'object',
+      properties: {
+        intent: { type: 'string', enum: ['add_contacts', 'report', 'help', 'other'] },
+        contacts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: ['string', 'null'] },
+              company: { type: ['string', 'null'] },
+              phone: { type: ['string', 'null'] },
+              email: { type: ['string', 'null'] },
+              city: { type: ['string', 'null'] },
+              role: { type: ['string', 'null'] },
+              note: { type: ['string', 'null'] },
+            },
+            required: ['name', 'company', 'phone', 'email', 'city', 'role', 'note'],
+          },
+        },
+      },
+      required: ['intent', 'contacts'],
+    },
+    user: (input) => `Mensagem do dono:\n${(input as { text: string }).text}`,
+    output: (raw) => {
+      const str = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+      const intent = ['add_contacts', 'report', 'help', 'other'].includes(String(raw.intent)) ? String(raw.intent) : 'other';
+      const contacts = (Array.isArray(raw.contacts) ? raw.contacts : []).slice(0, 20).map((c: Record<string, unknown>) => ({
+        name: str(c?.name, 80),
+        company: str(c?.company, 120),
+        phone: str(c?.phone, 40),
+        email: str(c?.email, 120),
+        city: str(c?.city, 60),
+        role: str(c?.role, 60),
+        note: str(c?.note, 200),
+      }));
+      return { intent, contacts };
+    },
+  },
+
   summarizeResults: {
     system: `Você é um analista comercial. Leia os números de prospecção e escreva de 3 a 6 observações curtas e acionáveis em português do Brasil. ${RULES}
 Use somente os números fornecidos; não invente percentuais nem causas. Quando não houver dados suficientes, diga isso.`,

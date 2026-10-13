@@ -13,6 +13,7 @@ import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STA
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { feedCampaigns } from './feeder.ts';
+import { sendDailyReports } from './ownerChat.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -253,6 +254,8 @@ export interface RunSummary {
   finished: number;
   /** Leads que entraram hoje pela prospecção diária. */
   fed?: number;
+  /** Relatórios diários enviados ao dono. */
+  reports?: number;
   errors: string[];
 }
 
@@ -267,6 +270,13 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   for (const c of scheduled) {
     await db.from('campaigns').update({ status: 'ativa', started_at: now.toISOString() }).eq('id', c.id);
     sum.activated++;
+  }
+
+  // Resumo do dia no WhatsApp do dono, na hora escolhida.
+  try {
+    sum.reports = await sendDailyReports(db, now);
+  } catch (err) {
+    sum.errors.push(`relatório diário: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Prospecção diária: campanhas com entrada automática e limite diário completam o dia com leads da base.

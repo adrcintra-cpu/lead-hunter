@@ -15,6 +15,7 @@ import { inWindow } from '../_shared/automation/planner.ts';
 import { looksAutomated } from '../_shared/automation/replies.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from '../_shared/automation/types.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
+import { handleOwnerMessage, leadAlert, ownerSettings, samePhone } from '../_shared/automation/ownerChat.ts';
 import { handleUnknown } from '../_shared/automation/unknownInbound.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -81,6 +82,22 @@ Deno.serve(async (req) => {
   if (!UUID.test(ownerId)) return new Response('Dados inválidos', { status: 400 });
   const db = adminClient();
 
+  // Mensagem do dono (o seu WhatsApp pessoal) para o BEELIE: pedido, contato para prospectar ou relatório.
+  if (b.action === 'owner') {
+    const body = typeof b.body === 'string' ? b.body.slice(0, 4000) : '';
+    const from = String(b.from ?? '').replace(/\D/g, '').slice(0, 20);
+    const s = await ownerSettings(db, ownerId);
+    // Confere de novo aqui: só o número salvo em Configurações fala com o BEELIE como dono.
+    if (!s.phone || !samePhone(s.phone, from)) return new Response('Não autorizado', { status: 403 });
+    if (!body.trim()) return Response.json({ ok: true, reply: null });
+    try {
+      return Response.json({ ok: true, reply: await handleOwnerMessage(db, ownerId, body) });
+    } catch (err) {
+      console.error('owner', err instanceof Error ? err.message : String(err));
+      return Response.json({ ok: true, reply: 'Tive um problema para fazer isso agora. Tente de novo em alguns minutos.' });
+    }
+  }
+
   if (b.action === 'unknown') {
     const body = typeof b.body === 'string' ? b.body.slice(0, 4000) : '';
     const from = String(b.from ?? '').replace(/\D/g, '').slice(0, 20);
@@ -99,8 +116,10 @@ Deno.serve(async (req) => {
         receivedAt: typeof b.receivedAt === 'string' ? b.receivedAt : undefined,
         deferTask: true,
       });
+      const task = (result?.task as { title?: string } | null)?.title ?? null;
       const auto = await decideAndTask(db, ownerId, r.leadId, result);
-      return Response.json({ ok: true, leadId: r.leadId, created: r.created, auto });
+      const notify = await leadAlert(db, ownerId, r.leadId, { category: result?.category, summary: result?.summary, taskTitle: task }).catch(() => null);
+      return Response.json({ ok: true, leadId: r.leadId, created: r.created, auto, notify });
     } catch (err) {
       console.error('unknown', err instanceof Error ? err.message : String(err));
       return Response.json({ error: 'Falha ao registrar o contato.' }, { status: 500 });
@@ -145,8 +164,11 @@ Deno.serve(async (req) => {
       receivedAt: typeof b.receivedAt === 'string' ? b.receivedAt : undefined,
       deferTask: true,
     });
+    const task = (result?.task as { title?: string } | null)?.title ?? null;
     const auto = await decideAndTask(db, ownerId, leadId, result);
-    return Response.json({ ok: true, auto });
+    // Lead em potencial: aviso para o seu WhatsApp (o serviço envia).
+    const notify = await leadAlert(db, ownerId, leadId, { category: result?.category, summary: result?.summary, taskTitle: task }).catch(() => null);
+    return Response.json({ ok: true, auto, notify });
   } catch (err) {
     console.error('inbound', err instanceof Error ? err.message : String(err));
     return Response.json({ error: 'Falha ao registrar a resposta.' }, { status: 500 });

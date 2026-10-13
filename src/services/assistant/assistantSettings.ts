@@ -16,6 +16,15 @@ export interface AssistantPrefs {
    * undefined = coluna ainda não existe no banco (migration não aplicada): não é salvo.
    */
   answerUnknown?: boolean;
+  /**
+   * Seu WhatsApp pessoal para conversar com o BEELIE (avisos, relatório, passar contatos).
+   * undefined = coluna ainda não existe no banco (migration não aplicada).
+   */
+  ownerWhatsapp?: string;
+  /** Avisos de lead em potencial no seu WhatsApp. */
+  ownerAlerts?: boolean;
+  /** Hora do resumo diário (dias úteis); null = sem resumo. */
+  ownerReportHour?: number | null;
 }
 
 export const DEFAULT_PREFS: AssistantPrefs = { autoReply: true, replyFormat: 'texto', voice: 'cedar' };
@@ -66,6 +75,12 @@ export async function loadAssistant(): Promise<AssistantState> {
     : { ...DEFAULT_PREFS };
   const un = await supabase.from('assistant_settings').select('answer_unknown').maybeSingle();
   if (!un.error) prefs.answerUnknown = un.data?.answer_unknown === true;
+  const ow = await supabase.from('assistant_settings').select('owner_whatsapp, owner_alerts, owner_report_hour').maybeSingle();
+  if (!ow.error) {
+    prefs.ownerWhatsapp = ow.data?.owner_whatsapp ?? '';
+    prefs.ownerAlerts = ow.data ? ow.data.owner_alerts !== false : true;
+    prefs.ownerReportHour = ow.data ? (typeof ow.data.owner_report_hour === 'number' ? ow.data.owner_report_hour : null) : 18;
+  }
   return { settings: withDefaults(data), prefs, prefsAvailable: !pr.error, custom: !!data?.persona, available: true };
 }
 
@@ -87,7 +102,9 @@ export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs
   const clean = { name: s.name.trim(), persona: s.persona.trim(), knowledge: s.knowledge.trim(), playbooks: s.playbooks.trim() };
   if (dataMode !== 'supabase' || !supabase) {
     try {
-      localStorage.setItem(LOCAL_KEY, JSON.stringify({ ...clean, prefs }));
+      // Telefone pessoal não fica no navegador.
+      const { ownerWhatsapp: _phone, ...safePrefs } = prefs ?? ({} as AssistantPrefs);
+      localStorage.setItem(LOCAL_KEY, JSON.stringify({ ...clean, prefs: prefs ? safePrefs : undefined }));
     } catch {
       throw new Error('Não foi possível salvar neste navegador.');
     }
@@ -98,6 +115,11 @@ export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs
   const row: Record<string, unknown> = { owner_id: u.user.id, ...clean, updated_at: new Date().toISOString() };
   if (prefs) Object.assign(row, { auto_reply: prefs.autoReply, reply_format: 'texto', voice: prefs.voice }); // sempre digita; voz só a pedido do lead
   if (prefs?.answerUnknown !== undefined) row.answer_unknown = prefs.answerUnknown;
+  if (prefs?.ownerWhatsapp !== undefined) {
+    row.owner_whatsapp = prefs.ownerWhatsapp.trim() || null;
+    row.owner_alerts = prefs.ownerAlerts !== false;
+    row.owner_report_hour = prefs.ownerReportHour ?? null;
+  }
   const { error } = await supabase.from('assistant_settings').upsert(row);
   if (error) throw new Error(missingTable(error.message) ? 'Falta aplicar a migration do assistente (npx supabase db push).' : error.message);
 }

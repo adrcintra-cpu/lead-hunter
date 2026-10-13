@@ -458,6 +458,13 @@ export class SessionManager {
     return audio ? transcribe(buf, audio.mimetype ?? 'audio/ogg') : describeImage(buf, image.mimetype ?? 'image/jpeg', image.caption ?? undefined);
   }
 
+  /** Aviso ou relatório para o WhatsApp pessoal do dono (precisa da sessão conectada). */
+  notifyOwner(userId: string, text: string): Promise<boolean> {
+    const s = this.sessions.get(userId);
+    if (!s?.sock || s.status !== 'conectado') return Promise.resolve(false);
+    return this.inbound.notifyOwner(userId, text);
+  }
+
   /** Ao subir o serviço: reconecta quem estava conectado (sessão salva no banco). */
   async restoreAll() {
     const { data, error } = await this.db.from('whatsapp_connections').select('user_id').in('status', ['conectado', 'reconectando', 'conectando']);

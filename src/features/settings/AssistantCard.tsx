@@ -21,6 +21,7 @@ export function AssistantCard() {
   const [prefs, setPrefs] = useState<AssistantPrefs>(DEFAULT_PREFS);
   const [prefsAvailable, setPrefsAvailable] = useState(true);
   const conn = useWhatsAppConnection();
+  const [ownerDraft, setOwnerDraft] = useState<string | null>(null);
   const [custom, setCustom] = useState(false);
   const [available, setAvailable] = useState(true);
   const [tab, setTab] = useState<Tab>('persona');
@@ -219,6 +220,15 @@ export function AssistantCard() {
                 )}
               </span>
             </label>
+            <OwnerChannel
+              prefs={prefs}
+              draft={ownerDraft}
+              setDraft={setOwnerDraft}
+              botPhone={conn?.phone ?? null}
+              name={s.name || 'BEELIE'}
+              available={prefsAvailable}
+              onSave={(next) => void updatePrefs({ ...prefs, ...next })}
+            />
             {!prefsAvailable && <p className="mt-2 text-xs text-warn">Falta aplicar a migration da conversa automática (npx supabase db push). Até lá, vale o padrão: o {s.name || 'assistente'} responde sozinho, em texto.</p>}
           </div>
 
@@ -267,5 +277,102 @@ export function AssistantCard() {
         </ConfirmDialog>
       )}
     </section>
+  );
+}
+
+const onlyDigits = (v: string) => v.replace(/\D/g, '');
+/** DDD + últimos 8 dígitos (compara com ou sem 55 e o 9 extra). */
+const phoneKey = (v: string) => {
+  let d = onlyDigits(v);
+  if ((d.length === 12 || d.length === 13) && d.startsWith('55')) d = d.slice(2);
+  return d.length === 10 || d.length === 11 ? `${d.slice(0, 2)}${d.slice(-8)}` : null;
+};
+
+/** Seu WhatsApp pessoal conversando com o BEELIE: avisos, resumo diário e contatos para prospectar. */
+function OwnerChannel({
+  prefs,
+  draft,
+  setDraft,
+  botPhone,
+  name,
+  available,
+  onSave,
+}: {
+  prefs: AssistantPrefs;
+  draft: string | null;
+  setDraft: (v: string | null) => void;
+  botPhone: string | null;
+  name: string;
+  available: boolean;
+  onSave: (next: Partial<AssistantPrefs>) => void;
+}) {
+  const missing = prefs.ownerWhatsapp === undefined;
+  const value = draft ?? prefs.ownerWhatsapp ?? '';
+  const key = phoneKey(value);
+  const sameAsBot = !!key && !!botPhone && key === phoneKey(botPhone);
+  const invalid = value.trim() !== '' && !key;
+  const commit = () => {
+    if (draft === null) return;
+    if (invalid || sameAsBot) return;
+    // Primeira vez: já liga os avisos e o resumo às 18h (dá para mudar ao lado).
+    if (draft.trim() !== (prefs.ownerWhatsapp ?? '')) onSave({ ownerWhatsapp: draft.trim(), ...(!prefs.ownerWhatsapp ? { ownerAlerts: true, ownerReportHour: prefs.ownerReportHour ?? 18 } : {}) });
+    setDraft(null);
+  };
+  const on = !!prefs.ownerWhatsapp && !!phoneKey(prefs.ownerWhatsapp);
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <div className="text-sm font-bold">Falar com o {name} pelo seu WhatsApp</div>
+      <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
+        Do seu número pessoal você recebe avisos de lead em potencial e o resumo do dia, pede “relatório” quando quiser e passa contatos para ele cadastrar e prospectar
+        (cartão do contato, print de cartão de visita ou “nome, empresa, telefone”). Só este número é tratado como você.
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="sm:col-span-1">
+          <label htmlFor="owner-wa" className="label">Seu WhatsApp (com DDD)</label>
+          <input
+            id="owner-wa"
+            className="input"
+            inputMode="tel"
+            placeholder="Ex.: (19) 99999-0000"
+            value={value}
+            disabled={!available || missing}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit();
+            }}
+          />
+          {invalid && <p className="mt-1 text-xs text-warn">Número com DDD, ex.: (19) 99999-0000.</p>}
+          {sameAsBot && <p className="mt-1 text-xs text-warn">Este é o número do {name}. Use o seu número pessoal.</p>}
+        </div>
+        <div>
+          <label htmlFor="owner-report" className="label">Resumo do dia (dias úteis)</label>
+          <select
+            id="owner-report"
+            className="input"
+            disabled={!available || missing || !on}
+            value={prefs.ownerReportHour ?? ''}
+            onChange={(e) => onSave({ ownerReportHour: e.target.value === '' ? null : Number(e.target.value) })}
+          >
+            <option value="">Não enviar</option>
+            {Array.from({ length: 14 }, (_, i) => i + 7).map((h) => (
+              <option key={h} value={h}>às {String(h).padStart(2, '0')}h</option>
+            ))}
+          </select>
+        </div>
+        <label className="flex items-center gap-2 self-end pb-2 text-[13px]">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[rgb(var(--accent))]"
+            disabled={!available || missing || !on}
+            checked={prefs.ownerAlerts !== false}
+            onChange={(e) => onSave({ ownerAlerts: e.target.checked })}
+          />
+          Avisar lead em potencial
+        </label>
+      </div>
+      {missing && available && <p className="mt-2 text-xs text-warn">Falta aplicar a migration desta opção (npx supabase db push).</p>}
+      {on && <p className="mt-2 text-xs text-good">Ligado. Mande um “oi” do seu WhatsApp para o número do {name} para testar.</p>}
+    </div>
   );
 }

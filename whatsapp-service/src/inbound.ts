@@ -148,6 +148,62 @@ export class InboundRelay {
   ) {}
 
   private unknownCfg = new Map<string, { on: boolean; at: number }>();
+  private ownerCfg = new Map<string, { phone: string | null; at: number }>();
+
+  /** Seu WhatsApp pessoal (Configurações → Assistente). Cache de 1 min; sem a coluna, nenhum. */
+  private async ownerPhone(userId: string): Promise<string | null> {
+    const c = this.ownerCfg.get(userId);
+    if (c && Date.now() - c.at < 60_000) return c.phone;
+    const { data, error } = await this.db.from('assistant_settings').select('owner_whatsapp').eq('owner_id', userId).maybeSingle();
+    const raw = !error && typeof data?.owner_whatsapp === 'string' ? data.owner_whatsapp : '';
+    const phone = toDigits(raw) ? raw : null;
+    this.ownerCfg.set(userId, { phone, at: Date.now() });
+    return phone;
+  }
+
+  private async isOwner(userId: string, phone: string): Promise<boolean> {
+    const owner = await this.ownerPhone(userId);
+    const d = owner ? toDigits(owner) : null;
+    return !!d && phoneKey(d) === phoneKey(phone);
+  }
+
+  /** Envia (com nova tentativa se outra mensagem acabou de sair) e marca como do BEELIE. */
+  private async sendOwn(userId: string, phone: string, text: string): Promise<boolean> {
+    if (!this.send) return false;
+    let r = await this.send(userId, phone, text, {});
+    for (let i = 0; i < 3 && !r.ok && /^Aguarde (\d+) s/.test(r.error); i++) {
+      await new Promise((ok) => setTimeout(ok, (Number(/^Aguarde (\d+) s/.exec(r.ok ? '' : r.error)?.[1] ?? 10) + 1) * 1000));
+      r = await this.send(userId, phone, text, {});
+    }
+    if (!r.ok) {
+      log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'mensagem para o dono não enviada');
+      return false;
+    }
+    if (r.id) this.markOwn(r.id);
+    return true;
+  }
+
+  /** Aviso ou relatório para o seu WhatsApp pessoal. */
+  async notifyOwner(userId: string, text: string): Promise<boolean> {
+    const owner = await this.ownerPhone(userId);
+    const d = owner ? toDigits(owner) : null;
+    if (!d || !text.trim()) return false;
+    const ok = await this.sendOwn(userId, d, text.slice(0, 3500));
+    if (ok) log.info({ user: maskUser(userId) }, 'aviso enviado para o dono');
+    return ok;
+  }
+
+  /** Mensagem sua para o BEELIE: pedido, contato para prospectar (cartão, texto ou print) ou relatório. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async handleOwner(userId: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'error'> {
+    const body = (await this.audioText(userId, raw)) ?? m.text;
+    const res = await this.post({ action: 'owner', ownerId: userId, from: m.phone, body });
+    if (!res.ok) throw new Error(`função respondeu ${res.status}`);
+    const data = (await res.json().catch(() => ({}))) as { reply?: string | null };
+    log.info({ user: maskUser(userId) }, 'pedido do dono recebido');
+    if (data.reply) await this.sendOwn(userId, m.phone, data.reply);
+    return 'forwarded';
+  }
 
   /** Opção "Atender quem chama sem ser lead" (cache de 1 min; sem a coluna, desligada). */
   private async answersUnknown(userId: string): Promise<boolean> {
@@ -175,8 +231,9 @@ export class InboundRelay {
     const name = typeof raw?.pushName === 'string' ? raw.pushName.slice(0, 60) : undefined;
     const res = await this.post({ action: 'unknown', ownerId: userId, from: m.phone, body: m.text, name, externalId: m.id, receivedAt: m.at });
     if (!res.ok) throw new Error(`função respondeu ${res.status}`);
-    const data = (await res.json().catch(() => ({}))) as { leadId?: string | null; created?: boolean; auto?: AutoReply | null };
+    const data = (await res.json().catch(() => ({}))) as { leadId?: string | null; created?: boolean; auto?: AutoReply | null; notify?: string | null };
     if (!data.leadId) return skip('não é contato comercial');
+    if (data.notify) void this.notifyOwner(userId, data.notify);
     // Daqui em diante o número é lead: as próximas mensagens seguem o caminho normal.
     const idx = this.indexes.get(userId);
     if (idx) idx.map.set(phoneKey(m.phone), data.leadId);
@@ -377,6 +434,8 @@ export class InboundRelay {
       return 'ignored';
     }
     try {
+      // Você (o dono) escrevendo do seu WhatsApp pessoal: conversa com o BEELIE, não vira lead.
+      if (await this.isOwner(userId, m.phone)) return await this.handleOwner(userId, m, raw);
       const leadId = await this.findLead(userId, m.phone);
       log.info({ user: maskUser(userId), from: maskPhone(m.phone), lead: !!leadId }, 'mensagem de WhatsApp recebida');
       // Não é lead: conversa pessoal não sai daqui, a menos que a opção de atender desconhecidos esteja ligada.
@@ -385,7 +444,8 @@ export class InboundRelay {
       const res = await this.post({ ownerId: userId, leadId, from: m.phone, body, externalId: m.id, receivedAt: m.at });
       if (!res.ok) throw new Error(`função respondeu ${res.status}`);
       log.info({ user: maskUser(userId), from: maskPhone(m.phone) }, 'resposta de lead registrada');
-      const data = (await res.json().catch(() => ({}))) as { auto?: AutoReply | null };
+      const data = (await res.json().catch(() => ({}))) as { auto?: AutoReply | null; notify?: string | null };
+      if (data.notify) void this.notifyOwner(userId, data.notify);
       if (data.auto?.body && data.auto.messageId) this.schedule(userId, leadId, m.phone, data.auto);
       // Sem resposta automática para esta mensagem (robô do outro lado, limite, fora do horário):
       // a resposta que estava agendada para a mensagem anterior também não sai.
