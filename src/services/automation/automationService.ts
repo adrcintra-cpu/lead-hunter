@@ -226,6 +226,43 @@ export class AutomationService {
     return { added: ok.length, skipped, pendingReview: draftFirst };
   }
 
+  /** A cadência tem alguma etapa de WhatsApp? (a de só e-mail não sai sem e-mail configurado). */
+  static hasWhatsapp(cad?: Cadence): boolean {
+    return !!cad?.steps.some((s) => s.type === 'send' && s.channel === 'whatsapp');
+  }
+
+  /** Cadência padrão para prospectar: a primeira com WhatsApp; sem nenhuma, a primeira que houver. */
+  preferredCadence(): Cadence | undefined {
+    return this.db.cadences.find((c) => AutomationService.hasWhatsapp(c)) ?? this.db.cadences[0];
+  }
+
+  /** A campanha já enviou alguma mensagem? */
+  campaignHasSends(campaignId: string): boolean {
+    return this.db.messages.some((m) => m.campaignId === campaignId && (m.sentAt || m.status === 'opened_whatsapp'));
+  }
+
+  /**
+   * Troca a cadência de uma campanha que ainda não enviou nada (ex.: ficou com a cadência só de e-mail).
+   * As inscrições em andamento recomeçam do primeiro passo, no próximo horário de envio.
+   */
+  switchCadence(campaignId: string, cadenceId: string): { ok: boolean; reason?: string; reset: number } {
+    const camp = this.db.campaigns.find((c) => c.id === campaignId);
+    const cad = this.db.cadences.find((c) => c.id === cadenceId);
+    if (!camp || !cad) return { ok: false, reason: 'Campanha ou cadência não encontrada.', reset: 0 };
+    if (camp.cadenceId === cadenceId) return { ok: true, reset: 0 };
+    if (camp.status !== 'rascunho' && this.campaignHasSends(campaignId)) return { ok: false, reason: 'A campanha já enviou mensagens: crie outra campanha para usar outra cadência.', reset: 0 };
+    const at = this.nowIso();
+    const live = camp.status === 'ativa';
+    const ens = this.db.enrollments.filter((e) => e.campaignId === campaignId && (e.status === 'ativa' || e.status === 'pausada' || e.status === 'pendente'));
+    this.repo.batch(() => {
+      this.repo.update('campaigns', campaignId, { cadenceId });
+      for (const e of ens) {
+        this.repo.update('enrollments', e.id, { cadenceId, stepIndex: 0, ...(e.status !== 'pendente' ? { nextRunAt: live ? at : e.nextRunAt } : {}), draft: undefined, updatedAt: at });
+      }
+    });
+    return { ok: true, reset: ens.length };
+  }
+
   /** Nome da campanha padrão usada pelo botão "Prospectar". */
   static readonly DEFAULT_CAMPAIGN = 'Prospecção';
 
@@ -234,8 +271,14 @@ export class AutomationService {
     const name = AutomationService.DEFAULT_CAMPAIGN;
     const found = this.db.campaigns.find((c) => c.name === name && c.status !== 'finalizada');
     if (found && found.status === 'rascunho') this.repo.update('campaigns', found.id, { status: 'ativa', startedAt: this.nowIso() });
-    if (found) return this.db.campaigns.find((x) => x.id === found.id)!;
-    const cad = this.db.cadences[0];
+    if (found) {
+      // Criada antes com a cadência só de e-mail e sem nenhum envio: passa para a cadência com WhatsApp.
+      const cur = this.db.cadences.find((c) => c.id === found.cadenceId);
+      const best = this.preferredCadence();
+      if (best && !AutomationService.hasWhatsapp(cur) && AutomationService.hasWhatsapp(best)) this.switchCadence(found.id, best.id);
+      return this.db.campaigns.find((x) => x.id === found.id)!;
+    }
+    const cad = this.preferredCadence();
     if (!cad) throw new Error('Nenhuma cadência cadastrada. Crie uma em Cadências.');
     const c = this.createCampaign({
       name,

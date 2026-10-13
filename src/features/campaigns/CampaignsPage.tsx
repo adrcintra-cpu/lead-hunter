@@ -4,7 +4,7 @@ import { ArrowLeft, CalendarClock, Megaphone, Pause, Play, Plus, Sparkles, Squar
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { STAGES, stageLabel, type Campaign, type CampaignAudience, type CampaignChannel, type Enrollment } from '@/core/types';
 import { describeStep } from '../../../supabase/functions/_shared/automation/planner.ts';
-import { CAMPAIGN_STATUS_LABEL, ENROLLMENT_STATUS_LABEL } from '@/services/automation/automationService';
+import { AutomationService, CAMPAIGN_STATUS_LABEL, ENROLLMENT_STATUS_LABEL } from '@/services/automation/automationService';
 import { formatDateTime } from '@/core/utils';
 import { ConfirmDialog, EmptyState, PageHeader, Spinner, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
@@ -80,7 +80,7 @@ export function CampaignsPage() {
                 objective: '',
                 audience: { segments: [], cities: [], minScore: 0, stages: ['novo', 'qualificado'], tags: [] },
                 channel: 'multicanal',
-                cadenceId: db.cadences[0].id,
+                cadenceId: (auto.preferredCadence() ?? db.cadences[0]).id,
                 ownerName: db.profile?.fullName ?? '',
               });
               navigate(`/campanhas/${c.id}`);
@@ -197,6 +197,9 @@ export function CampaignDetailPage() {
   /** Campanha em andamento: dá para mudar o público e adicionar leads (canal e cadência continuam travados). */
   const live = camp.status === 'ativa' || camp.status === 'pausada' || camp.status === 'agendada';
   const audienceEditable = camp.status !== 'finalizada';
+  /** Ativa mas sem nenhum envio ainda: a cadência ainda pode ser trocada (os leads recomeçam do início). */
+  const cadenceSwitchable = live && !auto.campaignHasSends(camp.id);
+  const noWhatsapp = !AutomationService.hasWhatsapp(cad) && camp.channel !== 'email';
   const m = auto.campaignMetrics(camp.id);
   const pending = enrollments.filter((e) => e.status === 'pendente');
   // Leads do público que ainda não estão nesta campanha (os que "Preparar mensagens" vai incluir).
@@ -309,7 +312,11 @@ export function CampaignDetailPage() {
         <h2 className="text-[15px] font-extrabold">Configuração</h2>
         {!editable && (
           <p className="mt-1 text-xs text-ink-faint">
-            {live ? 'Canal e cadência ficam travados depois da ativação. O público pode mudar a qualquer momento: vale para os leads que você adicionar.' : 'Campanha finalizada: só nome, responsável e objetivo podem mudar.'}
+            {live
+              ? cadenceSwitchable
+                ? 'Canal travado depois da ativação. A cadência ainda pode ser trocada porque nada foi enviado: os leads recomeçam do primeiro passo. O público pode mudar a qualquer momento.'
+                : 'Canal e cadência ficam travados depois da ativação. O público pode mudar a qualquer momento: vale para os leads que você adicionar.'
+              : 'Campanha finalizada: só nome, responsável e objetivo podem mudar.'}
           </p>
         )}
         <div className="mt-4 grid gap-3.5 sm:grid-cols-2">
@@ -336,11 +343,27 @@ export function CampaignDetailPage() {
           <div>
             <label htmlFor="c-cad" className="label">Cadência</label>
             <div className="flex gap-2">
-              <select id="c-cad" className="input" disabled={!editable} value={camp.cadenceId} onChange={(e) => set({ cadenceId: e.target.value })}>
+              <select
+                id="c-cad"
+                className="input"
+                disabled={!editable && !cadenceSwitchable}
+                value={camp.cadenceId}
+                onChange={(e) => {
+                  if (editable) return set({ cadenceId: e.target.value });
+                  const r = auto.switchCadence(camp.id, e.target.value);
+                  toast(r.ok ? `Cadência trocada: ${r.reset} ${r.reset === 1 ? 'lead recomeça' : 'leads recomeçam'} do primeiro passo no próximo horário de envio.` : r.reason ?? 'Não foi possível trocar.', r.ok ? 'success' : 'error');
+                }}
+              >
                 {db.cadences.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               {cad && <Link to={`/cadencias/${cad.id}`} className="btn-outline shrink-0">Editar</Link>}
             </div>
+            {noWhatsapp && (
+              <p className="mt-1.5 text-xs text-warn">
+                Esta cadência só envia e-mail: leads sem e-mail (ou sem e-mail configurado no servidor) não recebem nada.
+                {cadenceSwitchable || editable ? ' Troque para uma cadência com WhatsApp.' : ''}
+              </p>
+            )}
           </div>
         </div>
 
