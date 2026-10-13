@@ -7,6 +7,7 @@ import type { CriteriaField, SearchCriteria } from '@/core/types';
 import { unsupportedCriteria } from '@/core/providers/types';
 import { UFS, withRegion } from './region';
 import { CityInput } from './CityInput';
+import { SegmentInput } from './SegmentInput';
 
 
 import type { ParseResult, SearchStep } from '@/services/leadHunterService';
@@ -262,6 +263,15 @@ function CriteriaReview({
   const set = <K extends keyof SearchCriteria>(k: K, v: SearchCriteria[K]) => onChange({ ...c, [k]: v });
   const low = (k: CriteriaField) => (confidence[k] ?? 1) < 0.5;
   const lowInput = (k: CriteriaField) => cx('input', low(k) && 'border-warn bg-warn-soft/40');
+  const db = useDb();
+  const mySegments = useMemo(() => {
+    const seen = new Set<string>();
+    for (const x of db.companies) {
+      const s = (x.segment ?? '').trim();
+      if (s && s !== 'A identificar' && s.toLowerCase() !== 'empresas') seen.add(s);
+    }
+    return [...seen];
+  }, [db.companies]);
 
   return (
     <section className="card px-5 py-5 md:px-6">
@@ -271,7 +281,7 @@ function CriteriaReview({
       </div>
       <div className="mt-4 grid gap-x-4 gap-y-3.5 sm:grid-cols-2">
         <Field label="Segmento" htmlFor="c-seg" low={low('segment')}>
-          <input id="c-seg" className={lowInput('segment')} value={c.segment} placeholder="Ex.: Máquinas agrícolas" onChange={(e) => set('segment', e.target.value)} />
+          <SegmentInput id="c-seg" className={lowInput('segment')} value={c.segment} extra={mySegments} onCommit={(v) => set('segment', v)} />
         </Field>
         <Field label="Localização" htmlFor="c-loc" low={low('regionLabel')}>
           <div className="flex gap-2">
