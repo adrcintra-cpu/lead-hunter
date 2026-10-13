@@ -360,6 +360,7 @@ companyName / contactName / city: só se a pessoa disse na mensagem; senão null
     system: `Você é o BEELIE conversando com o DONO da empresa (o vendedor) pelo WhatsApp pessoal dele. Ele te manda pedidos curtos. ${RULES}
 Classifique o pedido (intent):
 - "add_contacts": ele passou um ou mais contatos para você cadastrar e prospectar (cartão "[Contato compartilhado] ...", "[Imagem] ..." com dados de contato, ou texto com nome/empresa/telefone).
+- "add_context": ele está complementando o ÚLTIMO CONTATO que passou (informado abaixo, se houver): nome da empresa, relação com a empresa dele (ex.: "já é cliente", "fizemos a identidade visual"), cargo, como conheceu, o que oferecer, ou pede para usar o contato que acabou de passar. Sem telefone novo na mensagem. Preencha context.company (só se ele disse o nome da empresa do contato) e context.note (o fato, em uma frase objetiva, em 3ª pessoa).
 - "report": quer saber resultados, resumo, relatório, como estão as conversas, leads quentes.
 - "help": pergunta o que você faz, como usar, ou cumprimenta.
 - "other": qualquer outra coisa.
@@ -367,7 +368,12 @@ Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone
     schema: {
       type: 'object',
       properties: {
-        intent: { type: 'string', enum: ['add_contacts', 'report', 'help', 'other'] },
+        intent: { type: 'string', enum: ['add_contacts', 'add_context', 'report', 'help', 'other'] },
+        context: {
+          type: 'object',
+          properties: { company: { type: ['string', 'null'] }, note: { type: ['string', 'null'] } },
+          required: ['company', 'note'],
+        },
         contacts: {
           type: 'array',
           items: {
@@ -385,12 +391,16 @@ Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone
           },
         },
       },
-      required: ['intent', 'contacts'],
+      required: ['intent', 'contacts', 'context'],
     },
-    user: (input) => `Mensagem do dono:\n${(input as { text: string }).text}`,
+    user: (input) => {
+      const i = input as { text: string; last?: string };
+      return [i.last ? `Último contato que ele passou: ${i.last}` : 'Ele não passou nenhum contato recentemente.', `Mensagem do dono:\n${i.text}`].join('\n\n');
+    },
     output: (raw) => {
       const str = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
-      const intent = ['add_contacts', 'report', 'help', 'other'].includes(String(raw.intent)) ? String(raw.intent) : 'other';
+      const intent = ['add_contacts', 'add_context', 'report', 'help', 'other'].includes(String(raw.intent)) ? String(raw.intent) : 'other';
+      const ctx = (raw.context ?? {}) as Record<string, unknown>;
       const contacts = (Array.isArray(raw.contacts) ? raw.contacts : []).slice(0, 20).map((c: Record<string, unknown>) => ({
         name: str(c?.name, 80),
         company: str(c?.company, 120),
@@ -400,7 +410,7 @@ Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone
         role: str(c?.role, 60),
         note: str(c?.note, 200),
       }));
-      return { intent, contacts };
+      return { intent, contacts, context: { company: str(ctx.company, 120), note: str(ctx.note, 300) } };
     },
   },
 

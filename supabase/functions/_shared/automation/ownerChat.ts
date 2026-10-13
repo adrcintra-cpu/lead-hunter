@@ -70,8 +70,35 @@ export interface OwnerContact {
   note: string | null;
 }
 export interface OwnerIntent {
-  intent: 'add_contacts' | 'report' | 'help' | 'other';
+  intent: 'add_contacts' | 'add_context' | 'report' | 'help' | 'other';
   contacts: OwnerContact[];
+  /** Complemento sobre o último contato que você passou (empresa, relação, como conheceu). */
+  context?: { company: string | null; note: string | null };
+}
+
+/** Espera antes da primeira mensagem para um contato seu: dá tempo de você contar algo sobre ele. */
+export const OWNER_CONTACT_DELAY_MIN = 10;
+
+export interface LastOwnerContact {
+  leadId: string;
+  label: string;
+  at: string;
+}
+
+/** O último contato que você passou (nas últimas 3 h), para complementos como "ele já é cliente". */
+export async function lastOwnerContact(db: Db, ownerId: string, now = new Date()): Promise<LastOwnerContact | null> {
+  const since = new Date(now.getTime() - 3 * 3600_000).toISOString();
+  const { data } = await db
+    .from('lead_activities')
+    .select('lead_id, payload, created_at')
+    .eq('owner_id', ownerId)
+    .eq('payload->>kind', 'owner_contact')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const a = ((data ?? []) as Row[])[0];
+  if (!a) return null;
+  return { leadId: a.lead_id, label: String(a.payload?.label ?? 'o contato'), at: a.created_at };
 }
 
 const PHONE_RE = /(?:\+?55[\s.-]?)?\(?\d{2}\)?[\s.-]?9?\d{4}[\s.-]?\d{4}/g;
@@ -98,18 +125,28 @@ export function parseOwnerRules(text: string): OwnerIntent {
   return { intent: 'help', contacts: [] };
 }
 
-export async function understand(db: Db, ownerId: string, text: string): Promise<OwnerIntent> {
-  const rules = parseOwnerRules(text);
+export async function understand(db: Db, ownerId: string, text: string, last: LastOwnerContact | null = null): Promise<OwnerIntent> {
+  let rules = parseOwnerRules(text);
+  // Sem telefone, logo depois de passar um contato: é complemento sobre ele.
+  if (last && rules.intent === 'help' && text.trim().length > 15 && !/^(oi|ol[aá]|bom dia|boa tarde|boa noite|ajuda)\b/i.test(text.trim())) {
+    rules = { intent: 'add_context', contacts: [], context: { company: null, note: text.trim().slice(0, 300) } };
+  }
   if (!hasClaude()) return rules;
   const started = Date.now();
   try {
-    const run = await runTask<OwnerIntent>('ownerCommand', { text: text.slice(0, 3000) });
+    const run = await runTask<OwnerIntent>('ownerCommand', { text: text.slice(0, 3000), last: last ? `${last.label} (há ${Math.max(1, Math.round((Date.now() - Date.parse(last.at)) / 60000))} min)` : undefined });
     await logRun(db, ownerId, 'ownerCommand', started, 'ok', run.usage);
     const out = run.output;
     // A IA nunca inventa telefone: só vale o que aparece na mensagem.
     const digitsIn = text.replace(/\D/g, '');
     out.contacts = out.contacts.filter((c) => !c.phone || digitsIn.includes(c.phone.replace(/\D/g, '').slice(-8)));
     if (out.intent === 'add_contacts' && !out.contacts.length && rules.contacts.length) return rules;
+    // Contato sem telefone logo depois de outro: trata como complemento do último.
+    if (out.intent === 'add_contacts' && last && out.contacts.length && out.contacts.every((c) => !c.phone && !c.email)) {
+      const c = out.contacts[0];
+      return { intent: 'add_context', contacts: [], context: { company: c.company ?? c.name, note: c.note ?? text.trim().slice(0, 300) } };
+    }
+    if (out.intent === 'add_context' && !last) return { intent: 'help', contacts: [] };
     return out;
   } catch (err) {
     await logRun(db, ownerId, 'ownerCommand', started, 'error', {});
@@ -148,7 +185,8 @@ export interface AddResult {
 export async function addContacts(db: Db, ownerId: string, contacts: OwnerContact[], now = new Date()): Promise<{ results: AddResult[]; campaign: Row | null; when: Date }> {
   const { data: p } = await db.from('profiles').select('send_window').eq('id', ownerId).maybeSingle();
   const window: SendWindow = (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW;
-  const when = nextWindowStart(now, window);
+  const start = new Date(now.getTime() + OWNER_CONTACT_DELAY_MIN * 60_000);
+  const when = nextWindowStart(start, window);
   const campaign = await prospectingCampaign(db, ownerId);
   const { data: supp } = await db.from('suppression_list').select('kind, value').eq('owner_id', ownerId);
   const results: AddResult[] = [];
@@ -211,15 +249,17 @@ export async function addContacts(db: Db, ownerId: string, contacts: OwnerContac
       }
       leadId = lead.id as string;
       created = true;
-      await db.from('lead_activities').insert({
-        owner_id: ownerId,
-        lead_id: leadId,
-        type: 'discovered',
-        description: `Você passou este contato pelo WhatsApp${c.note ? `: ${c.note}` : ''}.`,
-        payload: { kind: 'owner_contact', note: c.note },
-        actor_id: null,
-      });
     }
+    await db.from('lead_activities').insert({
+      owner_id: ownerId,
+      lead_id: leadId,
+      type: created ? 'discovered' : 'lead_updated',
+      description: `Você passou este contato pelo WhatsApp${c.note ? `: ${c.note}` : ''}.`,
+      payload: { kind: 'owner_contact', note: c.note, label },
+      actor_id: null,
+    });
+    // O que você contou vira observação do lead: o BEELIE usa na abordagem.
+    if (c.note) await db.from('lead_notes').insert({ owner_id: ownerId, lead_id: leadId, body: `Informação do dono da empresa: ${c.note}`, created_by: null });
     // Já está em alguma campanha em andamento?
     const { data: busy } = await db.from('enrollments').select('id').eq('lead_id', leadId).in('status', ['ativa', 'pausada', 'pendente']).limit(1);
     if (busy?.length) {
@@ -229,7 +269,7 @@ export async function addContacts(db: Db, ownerId: string, contacts: OwnerContac
     if (campaign) {
       const { error } = await db
         .from('enrollments')
-        .upsert({ owner_id: ownerId, campaign_id: campaign.id, cadence_id: campaign.cadence_id, lead_id: leadId, step_index: 0, status: 'ativa', next_run_at: at, started_at: at }, { onConflict: 'campaign_id,lead_id', ignoreDuplicates: true });
+        .upsert({ owner_id: ownerId, campaign_id: campaign.id, cadence_id: campaign.cadence_id, lead_id: leadId, step_index: 0, status: 'ativa', next_run_at: when.toISOString(), started_at: at }, { onConflict: 'campaign_id,lead_id', ignoreDuplicates: true });
       if (!error) {
         await db.from('leads').update({ stage: 'em_cadencia' }).eq('id', leadId).in('stage', ['novo', 'qualificado']);
         await db.from('lead_activities').insert({ owner_id: ownerId, lead_id: leadId, type: 'campaign_enrolled', description: `Entrou na campanha “${campaign.name}” (você passou pelo WhatsApp)`, payload: { campaignId: campaign.id, auto: true, owner: true }, actor_id: null });
@@ -253,8 +293,11 @@ export function addReply(r: { results: AddResult[]; campaign: Row | null; when: 
   if (queued.length) {
     const names = queued.map((x) => x.label).join(', ');
     if (r.campaign) {
-      const quando = r.when.getTime() <= now.getTime() + 60_000 ? 'nos próximos minutos' : `${dayLabel(r.when, now)} às ${hhmm(r.when)}`;
-      lines.push(`Feito! ${queued.length === 1 ? 'Cadastrei' : `Cadastrei ${queued.length} contatos:`} ${names}. A primeira mensagem sai ${quando}, na campanha “${r.campaign.name}”.`);
+      const soon = r.when.getTime() <= now.getTime() + (OWNER_CONTACT_DELAY_MIN + 1) * 60_000;
+      const quando = soon ? `em uns ${OWNER_CONTACT_DELAY_MIN} minutos` : `${dayLabel(r.when, now)} às ${hhmm(r.when)}`;
+      lines.push(
+        `Feito! ${queued.length === 1 ? 'Cadastrei' : `Cadastrei ${queued.length} contatos:`} ${names}. A primeira mensagem sai ${quando}, na campanha “${r.campaign.name}”. Se quiser, me conte algo sobre ${queued.length === 1 ? 'ele' : 'eles'} antes (empresa, se já é cliente, como conheceu) que eu uso na abordagem.`,
+      );
     } else {
       lines.push(`Cadastrei ${names}, mas não há campanha ativa com WhatsApp para prospectar. Ative a campanha “Prospecção” no Lead Hunter que eu começo.`);
     }
@@ -318,9 +361,34 @@ export const HELP = [
   'Também te aviso aqui quando aparecer lead em potencial e mando o resumo do dia.',
 ].join('\n');
 
+const PLACEHOLDER_NAME = /^Contato \+?55/;
+
+/** Complemento sobre o último contato: vira observação (o BEELIE usa na abordagem) e, se veio, o nome da empresa. */
+export async function addContext(db: Db, ownerId: string, last: LastOwnerContact, ctx: { company: string | null; note: string | null }, text: string): Promise<string> {
+  const note = (ctx.note ?? text).trim().slice(0, 300);
+  await db.from('lead_notes').insert({ owner_id: ownerId, lead_id: last.leadId, body: `Informação do dono da empresa: ${note}`, created_by: null });
+  const { data: l } = await db.from('leads').select('id, contact_name, company_id').eq('id', last.leadId).maybeSingle();
+  let label = last.label;
+  if (ctx.company && l?.company_id) {
+    const { data: c } = await db.from('companies').select('legal_name, trade_name').eq('id', l.company_id).maybeSingle();
+    const legal = String(c?.legal_name ?? '');
+    // O nome da empresa só substitui o provisório (nome da pessoa ou "Contato +55...").
+    const provisional = PLACEHOLDER_NAME.test(legal) || (!!l.contact_name && legal.trim() === String(l.contact_name).trim()) || legal.trim() === last.label.trim();
+    await db.from('companies').update({ trade_name: ctx.company, ...(provisional ? { legal_name: ctx.company } : {}) }).eq('id', l.company_id);
+    label = `${l.contact_name ?? last.label} (${ctx.company})`;
+  }
+  await db.from('lead_activities').insert({ owner_id: ownerId, lead_id: last.leadId, type: 'lead_updated', description: `Você contou pelo WhatsApp: ${note}`, payload: { kind: 'owner_context' }, actor_id: null });
+  const { count: sent } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('lead_id', last.leadId).not('sent_at', 'is', null);
+  return sent
+    ? `Anotado sobre ${label}: ${note}. A primeira mensagem já tinha saído; uso isso daqui pra frente na conversa.`
+    : `Anotado sobre ${label}: ${note}. Vou usar isso na primeira mensagem.`;
+}
+
 /** Mensagem do dono: entende o pedido e devolve a resposta. */
 export async function handleOwnerMessage(db: Db, ownerId: string, text: string, now = new Date()): Promise<string> {
-  const it = await understand(db, ownerId, text);
+  const last = await lastOwnerContact(db, ownerId, now);
+  const it = await understand(db, ownerId, text, last);
+  if (it.intent === 'add_context' && last) return addContext(db, ownerId, last, it.context ?? { company: null, note: null }, text);
   if (it.intent === 'add_contacts') return addReply(await addContacts(db, ownerId, it.contacts, now), now);
   if (it.intent === 'report') return buildReport(db, ownerId, now);
   return HELP;
