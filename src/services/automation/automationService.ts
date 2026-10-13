@@ -1,5 +1,5 @@
 import { nextDayWindow, nextWindowStart, plan, startOfDayBRT, type Effect, type PlanContext } from '../../../supabase/functions/_shared/automation/planner.ts';
-import { ADVANCED_STAGES, instagramFromKnowledge, messageStage, parseSubject, renderTemplate, replyDecision, siteFromKnowledge, withOptOutFooter, withSiteInvite, type TemplateData } from '../../../supabase/functions/_shared/automation/replies.ts';
+import { ADVANCED_STAGES, checkInterest, instagramFromKnowledge, type InterestSignals, messageStage, parseSubject, renderTemplate, replyDecision, siteFromKnowledge, withOptOutFooter, withSiteInvite, type TemplateData } from '../../../supabase/functions/_shared/automation/replies.ts';
 import {
   CLOSED_STAGES,
   DEFAULT_SEND_WINDOW,
@@ -671,13 +671,15 @@ export class AutomationService {
     const text = body.trim();
     if (!text) throw new Error('A resposta está vazia.');
     const history = this.conversation(leadId).slice(-10);
-    const cls = await this.svc.ai.classifyReply(text, `Empresa ${c.tradeName ?? c.legalName}, etapa atual: ${lead.stage}`, {
+    const raw = await this.svc.ai.classifyReply(text, `Empresa ${c.tradeName ?? c.legalName}, etapa atual: ${lead.stage}`, {
       conversation: history.map((m) => ({ from: m.from === 'lead' ? 'lead' : 'beelie', text: m.text })),
       brief: beelieBrief(lead.beelie, lead),
     });
     const name = c.tradeName ?? c.legalName;
     const lastOutbound = [...history].reverse().find((m) => m.from === 'vendedor')?.text;
-    const signals = combineSignals(cls.signals, analyzeSignalsRules(text, lastOutbound, { companyName: name, category: cls.category }));
+    const signals = combineSignals(raw.signals, analyzeSignalsRules(text, lastOutbound, { companyName: name, category: raw.category }));
+    // Interesse só com sinal real na conversa (não basta responder).
+    const cls = checkInterest(raw, signals);
     const active = this.db.enrollments.filter((e) => e.leadId === leadId && (e.status === 'ativa' || e.status === 'pausada'));
     const enr = active[0];
     const at = this.nowIso();
@@ -712,7 +714,7 @@ export class AutomationService {
         summary: cls.summary,
         suggestedAction: cls.suggestedAction,
       });
-      this.actOnReply(cls, lead, c, name, active, camp?.ownerName, camp?.id, channel);
+      this.actOnReply(cls, lead, c, name, active, camp?.ownerName, camp?.id, channel, signals);
       this.applyBeelie(leadId, signals, at, name, camp?.ownerName, camp?.id, cls.category === 'reuniao');
     });
     await this.svc.rescore(leadId);
@@ -892,8 +894,8 @@ export class AutomationService {
       .forEach((e) => this.setEnrollment(e, 'interrompida', reason));
   }
 
-  private actOnReply(cls: ReplyAnalysis, lead: Lead, c: Company, name: string, active: Enrollment[], owner?: string, campaignId?: string, channel?: SendChannel) {
-    const d = replyDecision(cls.category, name);
+  private actOnReply(cls: ReplyAnalysis, lead: Lead, c: Company, name: string, active: Enrollment[], owner?: string, campaignId?: string, channel?: SendChannel, signals?: InterestSignals) {
+    const d = replyDecision(cls.category, name, signals);
     const today = this.svc.now();
     if (d.suppress) {
       const values: [('phone' | 'email'), string][] = [];

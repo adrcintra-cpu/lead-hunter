@@ -3,7 +3,7 @@
 
 import { BEELIE_INTENTS, BEELIE_STAGES, FACT_FIELDS, NEED_AREAS } from '../automation/beelie.ts';
 
-export const PROMPT_VERSION = 'v9';
+export const PROMPT_VERSION = 'v10';
 
 const RULES = `Regras obrigatórias:
 - Use SOMENTE os dados fornecidos. Nunca invente nome de pessoas, números, clientes, prêmios ou fatos.
@@ -170,8 +170,8 @@ FORMATO:
   classifyReply: {
     system: `Você classifica respostas de leads a mensagens comerciais B2B. Textos que começam com "[Áudio transcrito]" são áudios do lead transcritos: classifique pelo conteúdo. "[Contato compartilhado] Nome — telefone" é um cartão de contato enviado pelo lead: em geral é a pessoa indicada como responsável (referred_name e referred_contact, certainty confirmado), a menos que a conversa mostre outra coisa. "[Imagem] ..." é a leitura automática de uma imagem enviada pelo lead (ex.: print de um contato): use os dados dela da mesma forma. ${RULES}
 Categorias:
-- interessado: demonstrou interesse sem pedir algo específico
-- informacoes: pediu mais informações, material ou explicação
+- interessado: sinal CLARO de interesse na oferta ("faz sentido", "quero saber mais", "temos esse problema", "pode mandar", "me interessa"). Responder, cumprimentar ("oi, tudo bem?"), agradecer, "ok", "quem fala?", "de onde é?", "do que se trata?" ou só responder à pergunta de identificação NÃO é interesse: use nao_identificado.
+- informacoes: pediu detalhes sobre a OFERTA (como funciona, material, apresentação, exemplos). Perguntar quem é você ou de que empresa fala é só curiosidade: nao_identificado.
 - orcamento: pediu preço, valores, cotação ou proposta
 - reuniao: pediu reunião, ligação ou horário
 - objecao: levantou uma objeção (preço, já tem fornecedor, sem verba) sem recusar de vez
@@ -179,13 +179,13 @@ Categorias:
 - nao_interessado: recusou
 - sem_contato: pediu para não receber mais mensagens
 - ausente: resposta automática de férias/ausência
-- nao_identificado: não dá para saber
+- nao_identificado: respondeu sem mostrar interesse nem recusa, ou não dá para saber
 Na dúvida entre nao_interessado e sem_contato, prefira sem_contato se houver pedido para parar de receber.
 suggestedAction: uma frase curta e prática do que o vendedor deve fazer agora.
 followUpDays: só para "posteriormente", em quantos dias retomar (use o prazo citado; sem prazo, 30).
 
 Análise de SDR (use a CONVERSA para entender a que pergunta a pessoa respondeu):
-intent: positivo, neutro, interessado, pediu_explicacao, respondeu_pergunta, contato_errado, indicou_outro_contato, objecao, sem_interesse, nao_contatar, preco, reuniao (aceitou ou pediu conversar), resposta_automatica, fora_do_escritorio.
+intent: positivo, neutro, interessado (só com sinal claro de interesse), pediu_explicacao (perguntou como a oferta funciona; "quem é?"/"do que se trata?" é neutro), respondeu_pergunta, contato_errado, indicou_outro_contato, objecao, sem_interesse, nao_contatar, preco, reuniao (aceitou ou pediu conversar), resposta_automatica, fora_do_escritorio.
 extracted: SÓ o que a pessoa disse nesta resposta, sem inferir.
 - contact_name / contact_role / email / phone: dados de QUEM ESTÁ RESPONDENDO. Ex.: "Meu nome é Ricardo" → contact_name Ricardo (confirmado). Resposta curta "Mariana" logo após "como posso te chamar?" → contact_name Mariana (confirmado).
 - referred_name / referred_role / referred_contact: OUTRA pessoa indicada ("quem cuida é a Fernanda"). Nunca coloque o indicado em contact_name.
@@ -194,7 +194,7 @@ extracted: SÓ o que a pessoa disse nesta resposta, sem inferir.
 - certainty: "confirmado" quando a pessoa afirmou; "provavel" quando é só indício (ex.: nome deduzido de um e-mail joao.silva@ → provavel).
 - Valores curtos: nome só o nome ("Ricardo", não a frase).
 needArea: área da necessidade, se houver (${Object.keys(NEED_AREAS).join(', ')}), senão null.
-temperature: frio (só educação, pouco interesse), morno (explica a situação, responde, tem curiosidade), quente (pergunta como funciona, preço ou prazo, mostra problema real ou aceita conversar).
+temperature: frio (só educação, pouco interesse), morno (explica a situação, responde, tem curiosidade), quente (pergunta como a oferta funciona, preço ou prazo, mostra problema real ou aceita conversar). Responder à identificação ou perguntar quem é você nunca é quente.
 stage: estágio sugerido (${BEELIE_STAGES.map((x) => x.id).join(', ')}). Só "reuniao" se a pessoa aceitou ou pediu conversar.`,
     schema: {
       type: 'object',

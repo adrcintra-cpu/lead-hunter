@@ -9,11 +9,11 @@ import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
-import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
+import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { feedCampaigns } from './feeder.ts';
-import { sendDailyReports } from './ownerChat.ts';
+import { addContacts, samePhone, sendDailyReports } from './ownerChat.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -738,6 +738,10 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
     }
   }
 
+  // Interesse só com sinal real na conversa (não basta responder).
+  const signals = combineSignals(aiSignals, analyzeSignalsRules(text, lastOutbound, { companyName: name, category: cls.category }));
+  cls = checkInterest(cls, signals);
+
   const active: Row[] = await must(db.from('enrollments').select('id, status, campaign_id').eq('lead_id', lead.id).in('status', ['ativa', 'pausada']));
   const enr = active[0];
   const camp: Row | null = enr ? await must(db.from('campaigns').select('id, owner_name').eq('id', enr.campaign_id).maybeSingle()) : null;
@@ -790,9 +794,9 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
   });
 
   // Beelie: memória da conversa e enriquecimento do cadastro (só dado confirmado e não corrigido por pessoa).
-  const intelResult = await applyBeelie(db, i.ownerId, lead, company, combineSignals(aiSignals, analyzeSignalsRules(text, lastOutbound, { companyName: name, category: cls.category })), at, camp, cls.category === 'reuniao');
+  const intelResult = await applyBeelie(db, i.ownerId, lead, company, signals, at, camp, cls.category === 'reuniao');
 
-  const d = replyDecision(cls.category, name);
+  const d = replyDecision(cls.category, name, signals);
   if (d.suppress) {
     const reason = `Pediu para não receber mensagens (${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })})`;
     const rows: Row[] = [];
@@ -818,7 +822,7 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
     task = { title: d.task.title, description: `${d.task.description ?? ''}${extra}`.trim(), campaignId: camp?.id ?? null, ownerName: camp?.owner_name ?? lead.owner_name ?? null, dueAt: at };
     if (!i.deferTask) await upsertReplyTask(db, i.ownerId, lead.id, task);
   }
-  return { ...(inbound as Row), suggestion, category: cls.category, beelie: intelResult?.intel ?? null, task: i.deferTask ? task : null };
+  return { ...(inbound as Row), suggestion, category: cls.category, interest: hasRealInterest(signals), beelie: intelResult?.intel ?? null, task: i.deferTask ? task : null };
 }
 
 /** Aplica a análise ao lead: memória (leads.beelie), cadastro, outro responsável e reunião. */
@@ -850,7 +854,28 @@ async function applyBeelie(db: Db, ownerId: string, lead: Row, company: Row, sig
       phone: c && !c.includes('@') ? c.replace(/\D/g, '') : null,
       source: 'conversa',
     }).then(() => undefined, () => undefined);
-    await upsertReplyTask(db, ownerId, lead.id, {
+    // Indicado com telefone: o BEELIE já começa a prospectar a pessoa, citando quem indicou.
+    const phone = c && !c.includes('@') ? c.replace(/\D/g, '') : '';
+    const own = samePhone(phone, company.whatsapp) || samePhone(phone, company.phone);
+    let prospecting = false;
+    if (phone.length >= 10 && !own) {
+      const referrer = lead.contact_name ? String(lead.contact_name).split(' ')[0] : null;
+      const by = referrer ? `por ${referrer}, da ${nameOf(company)},` : `pela equipe da ${nameOf(company)},`;
+      const note = `${r.referred.name} foi indicad${/a$/i.test(r.referred.name.split(' ')[0]) ? 'a' : 'o'} ${by} como responsável${r.referred.role ? ` (${r.referred.role})` : ''}. Na primeira mensagem, diga que ${referrer ?? 'a equipe'} passou o contato.`;
+      const added = await addContacts(
+        db,
+        ownerId,
+        [{ name: r.referred.name, company: nameOf(company), phone, email: null, city: company.city ?? null, role: r.referred.role ?? null, note }],
+        new Date(at),
+        { origin: `Indicação de ${nameOf(company)}`, via: `Indicad${/a$/i.test(r.referred.name.split(' ')[0]) ? 'a' : 'o'} na conversa com ${nameOf(company)}`, kind: 'referral', notePrefix: 'Indicação', campaignVia: `indicação de ${referrer ? `${referrer}, da ` : ''}${nameOf(company)}` },
+      ).catch(() => null);
+      const res = added?.results[0];
+      if (res && added?.campaign && ['novo', 'existente', 'em_prospeccao'].includes(res.status)) {
+        await log(db, ownerId, lead.id, 'lead_updated', res.status === 'em_prospeccao' ? `${r.referred.name} (indicado) já está em prospecção.` : `BEELIE vai falar com ${r.referred.name} (indicado na conversa), na campanha “${added.campaign.name}”.`, { kind: 'referral_prospect', referredLeadId: res.leadId });
+        prospecting = true;
+      }
+    }
+    if (!prospecting) await upsertReplyTask(db, ownerId, lead.id, {
       campaignId: camp?.id,
       title: `Falar com ${r.referred.name} (${nameOf(company)})`,
       description: `Indicada na conversa como responsável${r.referred.role ? ` (${r.referred.role})` : ''}.${c ? ` Contato: ${c}.` : ' Contato ainda não informado.'}`,

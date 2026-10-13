@@ -182,7 +182,25 @@ export interface AddResult {
   leadId?: string;
 }
 
-export async function addContacts(db: Db, ownerId: string, contacts: OwnerContact[], now = new Date()): Promise<{ results: AddResult[]; campaign: Row | null; when: Date }> {
+/** Quem passou o contato: você (padrão) ou um lead que indicou outra pessoa na conversa. */
+export interface AddSource {
+  origin: string;
+  /** Texto da atividade, ex.: "Você passou este contato pelo WhatsApp". */
+  via: string;
+  /** Tipo gravado na atividade ("owner_contact" é o que permite complementar pelo seu WhatsApp). */
+  kind: string;
+  notePrefix: string;
+  campaignVia: string;
+}
+const FROM_OWNER: AddSource = {
+  origin: OWNER_ORIGIN,
+  via: 'Você passou este contato pelo WhatsApp',
+  kind: 'owner_contact',
+  notePrefix: 'Informação do dono da empresa',
+  campaignVia: 'você passou pelo WhatsApp',
+};
+
+export async function addContacts(db: Db, ownerId: string, contacts: OwnerContact[], now = new Date(), from: AddSource = FROM_OWNER): Promise<{ results: AddResult[]; campaign: Row | null; when: Date }> {
   const { data: p } = await db.from('profiles').select('send_window').eq('id', ownerId).maybeSingle();
   const window: SendWindow = (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW;
   const start = new Date(now.getTime() + OWNER_CONTACT_DELAY_MIN * 60_000);
@@ -240,7 +258,7 @@ export async function addContacts(db: Db, ownerId: string, contacts: OwnerContac
       }
       const { data: lead, error } = await db
         .from('leads')
-        .insert({ owner_id: ownerId, company_id: companyId, origin: OWNER_ORIGIN, stage: 'novo', created_by: null, ...(c.name ? { contact_name: c.name } : {}), ...(c.role ? { contact_role: c.role } : {}), ...(c.email ? { email: c.email } : {}) })
+        .insert({ owner_id: ownerId, company_id: companyId, origin: from.origin, stage: 'novo', created_by: null, ...(c.name ? { contact_name: c.name } : {}), ...(c.role ? { contact_role: c.role } : {}), ...(c.email ? { email: c.email } : {}) })
         .select('id')
         .single();
       if (error || !lead) {
@@ -254,12 +272,12 @@ export async function addContacts(db: Db, ownerId: string, contacts: OwnerContac
       owner_id: ownerId,
       lead_id: leadId,
       type: created ? 'discovered' : 'lead_updated',
-      description: `Você passou este contato pelo WhatsApp${c.note ? `: ${c.note}` : ''}.`,
-      payload: { kind: 'owner_contact', note: c.note, label },
+      description: `${from.via}${c.note ? `: ${c.note}` : ''}.`,
+      payload: { kind: from.kind, note: c.note, label },
       actor_id: null,
     });
     // O que você contou vira observação do lead: o BEELIE usa na abordagem.
-    if (c.note) await db.from('lead_notes').insert({ owner_id: ownerId, lead_id: leadId, body: `Informação do dono da empresa: ${c.note}`, created_by: null });
+    if (c.note) await db.from('lead_notes').insert({ owner_id: ownerId, lead_id: leadId, body: `${from.notePrefix}: ${c.note}`, created_by: null });
     // Já está em alguma campanha em andamento?
     const { data: busy } = await db.from('enrollments').select('id').eq('lead_id', leadId).in('status', ['ativa', 'pausada', 'pendente']).limit(1);
     if (busy?.length) {
@@ -272,7 +290,7 @@ export async function addContacts(db: Db, ownerId: string, contacts: OwnerContac
         .upsert({ owner_id: ownerId, campaign_id: campaign.id, cadence_id: campaign.cadence_id, lead_id: leadId, step_index: 0, status: 'ativa', next_run_at: when.toISOString(), started_at: at }, { onConflict: 'campaign_id,lead_id', ignoreDuplicates: true });
       if (!error) {
         await db.from('leads').update({ stage: 'em_cadencia' }).eq('id', leadId).in('stage', ['novo', 'qualificado']);
-        await db.from('lead_activities').insert({ owner_id: ownerId, lead_id: leadId, type: 'campaign_enrolled', description: `Entrou na campanha “${campaign.name}” (você passou pelo WhatsApp)`, payload: { campaignId: campaign.id, auto: true, owner: true }, actor_id: null });
+        await db.from('lead_activities').insert({ owner_id: ownerId, lead_id: leadId, type: 'campaign_enrolled', description: `Entrou na campanha “${campaign.name}” (${from.campaignVia})`, payload: { campaignId: campaign.id, auto: true, owner: from.kind === 'owner_contact', referral: from.kind === 'referral' }, actor_id: null });
       }
     }
     results.push({ label, status: created ? 'novo' : 'existente', leadId });

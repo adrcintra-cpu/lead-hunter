@@ -51,8 +51,9 @@ export function followUpDaysFrom(text: string): number | undefined {
 export function analyzeReplyRules(text: string): ReplyAnalysis {
   const t = norm(text);
   const hit = RULES.find((r) => r.re.test(t));
-  const category: ReplyCategory = hit ? hit.cat : t.includes('?') ? 'informacoes' : 'nao_identificado';
-  const confidence = hit ? hit.confidence : t.includes('?') ? 0.55 : 0.4;
+  // Pergunta solta ("quem fala?", "do que se trata?") não é pedido de informação sobre a oferta.
+  const category: ReplyCategory = hit ? hit.cat : 'nao_identificado';
+  const confidence = hit ? hit.confidence : 0.4;
   return {
     category,
     classification: CATEGORY_TO_CLASS[category],
@@ -163,6 +164,25 @@ export function messageStage(steps: { type: string }[], stepIndex: number): 'pri
   return 'acompanhamento';
 }
 
+/** Sinais da conversa que mostram interesse de verdade (responder, cumprimentar ou perguntar quem é não basta). */
+export const HOT_INTENTS = ['interessado', 'pediu_explicacao', 'preco', 'reuniao'];
+export interface InterestSignals {
+  intent?: string | null;
+  temperature?: string | null;
+}
+/** Sem sinais (versão antiga), mantém o comportamento anterior. */
+export function hasRealInterest(s?: InterestSignals | null): boolean {
+  return !s || HOT_INTENTS.includes(s.intent ?? '') || s.temperature === 'quente';
+}
+/**
+ * "Interessado" só com sinal real: quem apenas respondeu ("oi", "quem fala?", "ok") fica como
+ * resposta sem interesse claro, e o lead não sobe para Interessado.
+ */
+export function checkInterest<T extends { category: ReplyCategory; classification: ReplyClass; suggestedAction: string }>(cls: T, s?: InterestSignals | null): T {
+  if (cls.category !== 'interessado' || hasRealInterest(s)) return cls;
+  return { ...cls, category: 'nao_identificado', classification: CATEGORY_TO_CLASS.nao_identificado, suggestedAction: 'Acompanhar a conversa: ainda não há sinal claro de interesse.' };
+}
+
 export interface ReplyDecision {
   /** O que fazer com as cadências ativas do lead. */
   enrollments: 'none' | 'stop' | 'pause';
@@ -181,7 +201,7 @@ export const ADVANCED_STAGES = ['cliente', 'proposta', 'reuniao'];
  * O que fazer quando o lead responde, por categoria. Aceita também a classificação antiga
  * (respostas registradas antes desta versão).
  */
-export function replyDecision(cat: ReplyCategory | ReplyClass, companyName: string): ReplyDecision {
+export function replyDecision(cat: ReplyCategory | ReplyClass, companyName: string, signals?: InterestSignals | null): ReplyDecision {
   const c: ReplyCategory = cat === 'duvida' ? 'informacoes' : cat === 'opt_out' ? 'sem_contato' : cat === 'outro' ? 'nao_identificado' : (cat as ReplyCategory);
   const pause = (reason: string, to: 'interessado' | 'respondeu', title?: string, description?: string): ReplyDecision => ({
     enrollments: 'pause',
@@ -200,7 +220,8 @@ export function replyDecision(cat: ReplyCategory | ReplyClass, companyName: stri
     case 'interessado':
       return pause('lead respondeu com interesse', 'interessado', `Responder ${companyName} — interessado`, 'A IA classificou a resposta como interesse. Responda pessoalmente.');
     case 'informacoes':
-      return pause('lead pediu informações', 'interessado', `Enviar informações para ${companyName}`, 'O lead pediu mais informações.');
+      // Pedir detalhes só conta como interesse quando a conversa mostra isso (não "quem é você?").
+      return pause('lead pediu informações', hasRealInterest(signals) ? 'interessado' : 'respondeu', `Enviar informações para ${companyName}`, 'O lead pediu mais informações.');
     case 'orcamento':
       return pause('lead pediu orçamento', 'interessado', `Enviar orçamento para ${companyName}`, 'O lead pediu valores ou orçamento.');
     case 'reuniao':
@@ -211,7 +232,7 @@ export function replyDecision(cat: ReplyCategory | ReplyClass, companyName: stri
       // Sem tarefa: o próximo contato fica agendado na data combinada.
       return pause('lead pediu para falar depois', 'respondeu');
     default:
-      return pause('lead respondeu', 'respondeu', `Ler resposta de ${companyName}`, 'A IA não conseguiu classificar com segurança.');
+      return pause('lead respondeu', 'respondeu', `Ler resposta de ${companyName}`, 'Respondeu, mas ainda sem sinal claro de interesse.');
   }
 }
 
