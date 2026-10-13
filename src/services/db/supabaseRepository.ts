@@ -129,6 +129,38 @@ export class SupabaseRepository implements Repository {
   private signatureCols = false;
   /** A coluna leads.beelie (memória do Beelie) existe (migration 1000 aplicada). */
   private beelieCol = false;
+  /**
+   * Gravações locais ainda não confirmadas pelo banco. Um recarregamento que começa antes de uma
+   * gravação chegar ao servidor traria a versão antiga: essas linhas mantêm a versão local.
+   */
+  private seq = 0;
+  private savedSeq = 0;
+  private touched: { table: TableName; key: string; seq: number }[] = [];
+
+  private rowKey(r: Record<string, unknown>): string {
+    return r.id != null ? String(r.id) : `${r.listId}:${r.leadId}`;
+  }
+
+  /** Marca a linha como alterada localmente; a marca sai quando a fila de gravação passa por ela. */
+  private touch(table: TableName, key: string) {
+    const seq = ++this.seq;
+    this.touched.push({ table, key, seq });
+    this.queue = this.queue.then(() => {
+      this.savedSeq = Math.max(this.savedSeq, seq);
+    });
+  }
+
+  /** Mantém no estado recarregado a versão local das linhas gravadas depois do início da leitura. */
+  private keepLocal(next: DbState, savedAtStart: number) {
+    const pending = this.touched.filter((t) => t.seq > savedAtStart);
+    for (const t of pending) {
+      const k = (r: unknown) => this.rowKey(r as Record<string, unknown>);
+      const local = (this.state[t.table] as unknown[]).find((r) => k(r) === t.key);
+      const rows = (next[t.table] as unknown[]).filter((r) => k(r) !== t.key);
+      (next as unknown as Record<string, unknown[]>)[t.table] = local ? [local, ...rows] : rows;
+    }
+    this.touched = this.touched.filter((t) => t.seq > this.savedSeq);
+  }
 
   constructor(
     private client: SupabaseClient,
@@ -137,6 +169,7 @@ export class SupabaseRepository implements Repository {
   ) {}
 
   async load(): Promise<void> {
+    const savedAtStart = this.savedSeq;
     const next = emptyDb();
     const tables = Object.keys(DEFS) as TableName[];
     await Promise.all(
@@ -195,6 +228,7 @@ export class SupabaseRepository implements Repository {
         updatedAt: p.updated_at,
       };
     }
+    this.keepLocal(next, savedAtStart);
     this.state = next;
     this.emit();
   }
@@ -247,6 +281,7 @@ export class SupabaseRepository implements Repository {
     if (!serverOwned(table, obj)) {
       const def = DEFS[table];
       this.enqueue(`Salvar em ${def.sql}`, () => this.client.from(def.sql).insert(toRow(table, obj)));
+      this.touch(table, this.rowKey(obj));
     }
     this.emit();
     return row;
@@ -268,6 +303,7 @@ export class SupabaseRepository implements Repository {
       const beelie = (patch as Record<string, unknown>).beelie ?? null;
       this.enqueue('Atualizar memória do Beelie', () => this.client.from('leads').update({ beelie }).eq('id', id));
     }
+    this.touch(table, id);
     this.emit();
     return updated;
   }
@@ -283,6 +319,7 @@ export class SupabaseRepository implements Repository {
     } else {
       this.enqueue(`Excluir de ${def.sql}`, () => this.client.from(def.sql).delete().eq('id', id));
     }
+    this.touch(table, id);
     this.emit();
   }
 

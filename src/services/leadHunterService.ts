@@ -376,7 +376,7 @@ export class LeadHunterService {
       // Empresas novas entram sozinhas nas campanhas ativas com "entrada automática".
       this.lastAutoEnroll = this.automation.autoEnrollNewLeads(limited.filter((r) => r.isNew).map((r) => r.lead.id));
       onStep('done');
-      return this.db.searches.find((s) => s.id === search.id)!;
+      return this.db.searches.find((s) => s.id === search.id) ?? { ...search, status: 'done', resultCount: limited.length, newCount: limited.filter((r) => r.isNew).length, duplicatesRemoved: duplicates };
     } catch (err) {
       this.repo.update('searches', search.id, { status: 'error', error: err instanceof Error ? err.message : String(err) });
       throw err;
