@@ -5,8 +5,8 @@ import { useApp, useDb, useService } from '@/store/AppStore';
 import { buildLeadRows } from '@/store/selectors';
 import type { CriteriaField, SearchCriteria } from '@/core/types';
 import { unsupportedCriteria } from '@/core/providers/types';
-import { MOCK_CITIES } from '@/core/providers/mock/mockCompanies';
 import { UFS, withRegion } from './region';
+import { CityInput } from './CityInput';
 
 
 import type { ParseResult, SearchStep } from '@/services/leadHunterService';
@@ -261,7 +261,6 @@ function CriteriaReview({
 }) {
   const set = <K extends keyof SearchCriteria>(k: K, v: SearchCriteria[K]) => onChange({ ...c, [k]: v });
   const low = (k: CriteriaField) => (confidence[k] ?? 1) < 0.5;
-  const [cityDraft, setCityDraft] = useState<string | null>(null);
   const lowInput = (k: CriteriaField) => cx('input', low(k) && 'border-warn bg-warn-soft/40');
 
   return (
@@ -276,32 +275,19 @@ function CriteriaReview({
         </Field>
         <Field label="Localização" htmlFor="c-loc" low={low('regionLabel')}>
           <div className="flex gap-2">
-            <input
+            <CityInput
               id="c-loc"
-              list="c-loc-list"
-              className={cx(lowInput('regionLabel'), 'min-w-0 flex-1')}
-              value={cityDraft ?? c.city ?? ''}
-              placeholder={c.state ? `Cidade (vazio = todo o estado)` : 'Qualquer cidade do Brasil'}
-              onChange={(e) => setCityDraft(e.target.value)}
-              onBlur={() => {
-                if (cityDraft === null) return;
-                onChange(withRegion(c, cityDraft, c.state));
-                setCityDraft(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              }}
+              className={lowInput('regionLabel')}
+              value={c.city ?? ''}
+              uf={c.state}
+              placeholder={c.state ? 'Cidade (vazio = todo o estado)' : 'Digite a cidade'}
+              onCommit={(city, uf) => onChange(withRegion(c, city, uf === undefined ? c.state : uf))}
             />
-            <datalist id="c-loc-list">
-              {MOCK_CITIES.map((city) => (
-                <option key={city} value={`${city}/SP`} />
-              ))}
-            </datalist>
             <select
               aria-label="Estado"
               className="input w-[92px] shrink-0"
               value={c.state ?? ''}
-              onChange={(e) => onChange(withRegion(c, cityDraft ?? c.city ?? '', e.target.value || null))}
+              onChange={(e) => onChange(withRegion(c, c.city ?? '', e.target.value || null))}
             >
               <option value="">Brasil</option>
               {UFS.map((uf) => (
