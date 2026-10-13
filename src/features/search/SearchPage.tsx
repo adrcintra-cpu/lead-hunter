@@ -6,6 +6,9 @@ import { buildLeadRows } from '@/store/selectors';
 import type { CriteriaField, SearchCriteria } from '@/core/types';
 import { unsupportedCriteria } from '@/core/providers/types';
 import { MOCK_CITIES } from '@/core/providers/mock/mockCompanies';
+import { UFS, withRegion } from './region';
+
+
 import type { ParseResult, SearchStep } from '@/services/leadHunterService';
 import { cx, EmptyState, ErrorBox, Modal, ScoreBadge, Spinner, WhatsappBadge } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
@@ -258,7 +261,7 @@ function CriteriaReview({
 }) {
   const set = <K extends keyof SearchCriteria>(k: K, v: SearchCriteria[K]) => onChange({ ...c, [k]: v });
   const low = (k: CriteriaField) => (confidence[k] ?? 1) < 0.5;
-  const regionValue = c.city ?? (c.state ? 'SP' : '');
+  const [cityDraft, setCityDraft] = useState<string | null>(null);
   const lowInput = (k: CriteriaField) => cx('input', low(k) && 'border-warn bg-warn-soft/40');
 
   return (
@@ -272,23 +275,40 @@ function CriteriaReview({
           <input id="c-seg" className={lowInput('segment')} value={c.segment} placeholder="Ex.: Máquinas agrícolas" onChange={(e) => set('segment', e.target.value)} />
         </Field>
         <Field label="Localização" htmlFor="c-loc" low={low('regionLabel')}>
-          <select
-            id="c-loc"
-            className={lowInput('regionLabel')}
-            value={regionValue}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (!v) onChange({ ...c, city: null, state: null, regionLabel: 'Qualquer região', radiusKm: null });
-              else if (v === 'SP') onChange({ ...c, city: null, state: 'SP', regionLabel: 'Estado de São Paulo', radiusKm: null });
-              else onChange({ ...c, city: v, state: 'SP', regionLabel: `${v}/SP`, radiusKm: c.radiusKm ?? 50 });
-            }}
-          >
-            <option value="">Qualquer região</option>
-            <option value="SP">Estado de São Paulo (todo)</option>
-            {MOCK_CITIES.map((city) => (
-              <option key={city} value={city}>{city}/SP</option>
-            ))}
-          </select>
+          <div className="flex gap-2">
+            <input
+              id="c-loc"
+              list="c-loc-list"
+              className={cx(lowInput('regionLabel'), 'min-w-0 flex-1')}
+              value={cityDraft ?? c.city ?? ''}
+              placeholder={c.state ? `Cidade (vazio = todo o estado)` : 'Qualquer cidade do Brasil'}
+              onChange={(e) => setCityDraft(e.target.value)}
+              onBlur={() => {
+                if (cityDraft === null) return;
+                onChange(withRegion(c, cityDraft, c.state));
+                setCityDraft(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+            />
+            <datalist id="c-loc-list">
+              {MOCK_CITIES.map((city) => (
+                <option key={city} value={`${city}/SP`} />
+              ))}
+            </datalist>
+            <select
+              aria-label="Estado"
+              className="input w-[92px] shrink-0"
+              value={c.state ?? ''}
+              onChange={(e) => onChange(withRegion(c, cityDraft ?? c.city ?? '', e.target.value || null))}
+            >
+              <option value="">Brasil</option>
+              {UFS.map((uf) => (
+                <option key={uf} value={uf}>{uf}</option>
+              ))}
+            </select>
+          </div>
         </Field>
         <Field label="Raio" htmlFor="c-radius">
           <div className="flex items-center gap-2">
