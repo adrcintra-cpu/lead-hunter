@@ -465,6 +465,63 @@ export class SessionManager {
     return this.inbound.notifyOwner(userId, text);
   }
 
+  /** Resultado da consulta por número (DDD + 8 últimos dígitos), por 30 dias: não consulta de novo. */
+  private waCache = new Map<string, { exists: boolean; at: number }>();
+  /** Consultas por usuário na última hora (limite para não chamar atenção do WhatsApp). */
+  private waChecks = new Map<string, number[]>();
+
+  /**
+   * Quais telefones têm WhatsApp (inclusive fixo com WhatsApp Business). Só consulta, não manda mensagem.
+   * Em lotes de 20, com pausa entre eles; no máximo 300 números novos por hora por usuário.
+   */
+  async checkWhatsapp(userId: string, phones: string[]): Promise<{ ok: true; found: string[]; unchecked: string[] } | { ok: false; error: string }> {
+    const s = this.sessions.get(userId);
+    if (!s?.sock || s.status !== 'conectado') return { ok: false, error: 'WhatsApp desconectado' };
+    const norm = (raw: string) => {
+      let d = raw.replace(/\D/g, '');
+      if ((d.length === 12 || d.length === 13) && d.startsWith('55')) d = d.slice(2);
+      if (d.startsWith('0')) d = d.slice(1);
+      return d.length === 10 || d.length === 11 ? d : null;
+    };
+    const kOf = (d: string) => `${d.slice(0, 2)}${d.slice(-8)}`;
+    const found: string[] = [];
+    const unchecked: string[] = [];
+    const todo: { raw: string; d: string }[] = [];
+    const now = Date.now();
+    for (const raw of phones) {
+      const d = norm(raw);
+      if (!d) continue;
+      const c = this.waCache.get(kOf(d));
+      if (c && now - c.at < 30 * 864e5) {
+        if (c.exists) found.push(raw);
+      } else todo.push({ raw, d });
+    }
+    const recent = (this.waChecks.get(userId) ?? []).filter((t) => now - t < 3600_000);
+    const room = Math.max(0, 300 - recent.length);
+    const batch = todo.slice(0, room);
+    unchecked.push(...todo.slice(room).map((x) => x.raw));
+    for (let i = 0; i < batch.length; i += 20) {
+      const part = batch.slice(i, i + 20);
+      try {
+        const res = (await s.sock.onWhatsApp(...part.map((x) => `55${x.d}`))) ?? [];
+        const ok = new Set(res.filter((r) => r.exists).map((r) => kOf(String(r.jid).split('@')[0].replace(/^55/, ''))));
+        for (const x of part) {
+          const exists = ok.has(kOf(x.d));
+          this.waCache.set(kOf(x.d), { exists, at: Date.now() });
+          if (exists) found.push(x.raw);
+          recent.push(Date.now());
+        }
+      } catch (err) {
+        log.warn({ user: maskUser(userId), err: err instanceof Error ? err.message : String(err) }, 'consulta de WhatsApp falhou');
+        unchecked.push(...part.map((x) => x.raw));
+      }
+      if (i + 20 < batch.length) await new Promise((r) => setTimeout(r, 1500));
+    }
+    this.waChecks.set(userId, recent);
+    if (this.waCache.size > 50_000) this.waCache.clear();
+    return { ok: true, found, unchecked };
+  }
+
   /** Ao subir o serviço: reconecta quem estava conectado (sessão salva no banco). */
   async restoreAll() {
     const { data, error } = await this.db.from('whatsapp_connections').select('user_id').in('status', ['conectado', 'reconectando', 'conectando']);

@@ -5,6 +5,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { searchPlaces } from '../_shared/providers/googlePlaces.ts';
+import { enrichWhatsapp, newBudget } from '../_shared/providers/waVerify.ts';
 import { lookupCnpj } from '../_shared/providers/brasilApi.ts';
 import type { SearchCriteria } from '../_shared/providers/types.ts';
 
@@ -39,7 +40,10 @@ Deno.serve(async (req) => {
       if (!key) return json({ error: 'GOOGLE_PLACES_API_KEY não configurada no servidor.' }, 500);
       const c = body.criteria;
       if (!c?.segment?.trim()) return json({ error: 'Informe um segmento.' }, 400);
-      return json(await searchPlaces(key, c));
+      // WhatsApp de cada empresa: confere no WhatsApp conectado (inclusive fixo) e no site.
+      const userId = auth.user.id;
+      const budget = newBudget();
+      return json(await searchPlaces(key, c, fetch, { enrich: (list) => enrichWhatsapp(list, userId, fetch, budget) }));
     }
     if (body.action === 'cnpj') {
       if (!body.cnpj) return json({ error: 'Informe o CNPJ.' }, 400);

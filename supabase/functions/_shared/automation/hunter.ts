@@ -6,6 +6,7 @@
 // nome são descartadas.
 
 import { searchPlaces } from '../providers/googlePlaces.ts';
+import { enrichWhatsapp, newBudget } from '../providers/waVerify.ts';
 import type { RawCompany, SearchCriteria } from '../providers/types.ts';
 import { SEGMENTS } from './segments.ts';
 
@@ -281,8 +282,9 @@ export async function runOne(db: Db, st: HunterState, target: { segment: string;
   const searchId: string | null = search?.id ?? null;
 
   let found: RawCompany[];
+  const budget = newBudget(12, 40_000);
   try {
-    found = (await searchPlaces(apiKey, criteria, fetchImpl)).companies;
+    found = (await searchPlaces(apiKey, criteria, fetchImpl, { enrich: (list) => enrichWhatsapp(list, st.ownerId, fetchImpl, budget) })).companies;
   } catch (err) {
     if (searchId) await db.from('searches').update({ status: 'error', error: err instanceof Error ? err.message.slice(0, 300) : String(err) }).eq('id', searchId);
     throw err;

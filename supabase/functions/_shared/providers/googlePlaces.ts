@@ -146,29 +146,102 @@ export async function cityCenter(apiKey: string, city: string, state: string | n
   return loc ? { lat: loc.latitude, lng: loc.longitude } : null;
 }
 
-export async function searchPlaces(apiKey: string, criteria: SearchCriteria, fetchImpl: Fetch = fetch) {
+/** Outros nomes do mesmo segmento no Google (para completar a quantidade pedida). */
+const SYNONYMS: Record<string, string[]> = {
+  'clinica odontologica': ['dentista', 'consultório odontológico'],
+  'clinica medica': ['consultório médico', 'centro médico'],
+  'clinica de estetica': ['estética', 'harmonização facial'],
+  'clinica veterinaria': ['veterinário', 'hospital veterinário'],
+  contabilidade: ['escritório de contabilidade', 'contador'],
+  advocacia: ['escritório de advocacia', 'advogado'],
+  industria: ['fábrica', 'indústria'],
+  metalurgica: ['caldeiraria', 'estamparia'],
+  transportadora: ['transportes de cargas', 'logística e transporte'],
+  imobiliaria: ['corretor de imóveis', 'imóveis'],
+  academia: ['crossfit', 'studio de pilates'],
+  'escola particular': ['colégio particular', 'escola'],
+  educacional: ['escola particular', 'colégio'],
+  'escola de idiomas': ['curso de inglês', 'escola de inglês'],
+  'salao de beleza': ['cabeleireiro', 'studio de beleza'],
+  construtora: ['construção civil', 'empreiteira'],
+  'oficina mecanica': ['mecânica automotiva', 'auto mecânica'],
+  tecnologia: ['empresa de software', 'empresa de TI'],
+  comercio: ['loja', 'comércio varejista'],
+  'pet shop': ['banho e tosa', 'petshop'],
+  restaurante: ['restaurante self-service', 'restaurante a la carte'],
+  'energia solar': ['energia fotovoltaica', 'placas solares'],
+  'ar-condicionado e climatizacao': ['ar condicionado', 'climatização'],
+  'loja de materiais de construcao': ['material de construção', 'depósito de materiais de construção'],
+  distribuidora: ['distribuidor', 'atacado'],
+  fisioterapia: ['clínica de fisioterapia', 'fisioterapeuta'],
+  'agencia de viagens': ['turismo', 'agência de turismo'],
+};
+const normKey = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+/** Consultas extras quando a principal traz menos que o pedido: só o segmento perto da cidade e sinônimos. */
+export function queryVariants(c: SearchCriteria): string[] {
+  const where = c.city ? ` em ${c.city}${c.state ? ` ${c.state}` : ''}` : '';
+  const out: string[] = [];
+  if (c.city) out.push(c.segment); // mesmo segmento, ordenado pela proximidade (pega cidades vizinhas no raio)
+  for (const syn of SYNONYMS[normKey(c.segment)] ?? []) out.push(`${syn}${where}`);
+  return out.slice(0, 2);
+}
+
+export interface SearchOptions {
+  /** Completa dados (ex.: WhatsApp) de cada página antes dos filtros. */
+  enrich?: (list: RawCompany[]) => Promise<unknown>;
+  /** Faz consultas extras quando a principal traz menos que o pedido (padrão: sim). */
+  variants?: boolean;
+}
+
+export async function searchPlaces(apiKey: string, criteria: SearchCriteria, fetchImpl: Fetch = fetch, opts: SearchOptions = {}) {
   const center = criteria.city ? await cityCenter(apiKey, criteria.city, criteria.state, fetchImpl) : null;
   const want = Math.max(1, Math.min(criteria.quantity, MAX_PAGES * 20));
-  const body: Record<string, unknown> = { textQuery: buildTextQuery(criteria), languageCode: 'pt-BR', regionCode: 'BR', pageSize: 20 };
+  const base: Record<string, unknown> = { languageCode: 'pt-BR', regionCode: 'BR', pageSize: 20 };
   if (center) {
     const radius = Math.min(MAX_BIAS_RADIUS_M, Math.max(1000, (criteria.radiusKm ?? 50) * 1000));
-    body.locationBias = { circle: { center: { latitude: center.lat, longitude: center.lng }, radius } };
+    base.locationBias = { circle: { center: { latitude: center.lat, longitude: center.lng }, radius } };
   }
   const found: RawCompany[] = [];
-  let pageToken: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const data = await call(apiKey, pageToken ? { ...body, pageToken } : body, FIELD_MASK, fetchImpl);
-    for (const p of data.places ?? []) {
-      try {
-        const c = mapPlace(p, criteria);
-        if (c) found.push(c);
-      } catch (err) {
-        // Um estabelecimento com dados incompletos não derruba a busca inteira.
-        console.warn('place ignorado', p?.id, err instanceof Error ? err.message : String(err));
+  const seen = new Set<string>();
+  const enough = () => applyCriteria(found, criteria, center).length >= want;
+
+  const run = async (textQuery: string, pages: number) => {
+    let pageToken: string | undefined;
+    for (let page = 0; page < pages; page++) {
+      const body = { ...base, textQuery };
+      const data = await call(apiKey, pageToken ? { ...body, pageToken } : body, FIELD_MASK, fetchImpl);
+      const fresh: RawCompany[] = [];
+      for (const p of data.places ?? []) {
+        if (!p?.id || seen.has(p.id)) continue;
+        seen.add(p.id);
+        try {
+          const c = mapPlace(p, criteria);
+          if (c) fresh.push(c);
+        } catch (err) {
+          // Um estabelecimento com dados incompletos não derruba a busca inteira.
+          console.warn('place ignorado', p?.id, err instanceof Error ? err.message : String(err));
+        }
       }
+      if (opts.enrich && fresh.length) {
+        try {
+          await opts.enrich(fresh);
+        } catch (err) {
+          console.warn('enriquecimento falhou', err instanceof Error ? err.message : String(err));
+        }
+      }
+      found.push(...fresh);
+      pageToken = data.nextPageToken;
+      if (!pageToken || enough()) break;
     }
-    pageToken = data.nextPageToken;
-    if (!pageToken || applyCriteria(found, criteria, center).length >= want) break;
+  };
+
+  await run(buildTextQuery(criteria), MAX_PAGES);
+  if (opts.variants !== false) {
+    for (const q of queryVariants(criteria)) {
+      if (enough()) break;
+      await run(q, 2);
+    }
   }
   return { companies: applyCriteria(found, criteria, center), center };
 }

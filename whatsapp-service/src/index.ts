@@ -61,6 +61,18 @@ async function ownerNotify(req: IncomingMessage, res: ServerResponse) {
   send(res, ok ? 200 : 409, { sent: ok });
 }
 
+/** Quais destes telefones têm WhatsApp (consulta pelo WhatsApp conectado do usuário, sem mandar mensagem). */
+async function waCheck(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'POST') throw new HttpError(405, 'Método não permitido.');
+  if (!secretOk(req)) throw new HttpError(401, 'Não autorizado.');
+  const b = await readJson(req);
+  const ownerId = String(b.ownerId ?? '');
+  const phones = Array.isArray(b.phones) ? b.phones.filter((x): x is string => typeof x === 'string').slice(0, 60) : [];
+  if (!UUID.test(ownerId)) throw new HttpError(400, 'Dados inválidos.');
+  const r = await manager.checkWhatsapp(ownerId, phones);
+  send(res, r.ok ? 200 : 409, r);
+}
+
 // ---------- utilidades HTTP ----------
 
 class HttpError extends Error {
@@ -194,6 +206,7 @@ const server = createServer(async (req, res) => {
     if (path === '/health') return send(res, 200, { ok: true });
     if (path === '/internal/campaign-send') return await campaignSend(req, res);
     if (path === '/internal/notify') return await ownerNotify(req, res);
+    if (path === '/internal/wa-check') return await waCheck(req, res);
     if (path === '/whatsapp/voice-preview') {
       // Amostra da voz da IA (MP3), para ouvir antes de escolher. Exige login, como as outras rotas.
       if (req.method !== 'POST') throw new HttpError(405, 'Método não permitido.');
