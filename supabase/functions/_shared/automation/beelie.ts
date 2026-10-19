@@ -194,7 +194,7 @@ const norm = (s: string) =>
 
 /** Palavras que nunca são nome de pessoa (respostas curtas, cumprimentos, cargos). */
 const NOT_NAME = new Set(
-  'sim nao ok certo isso eu ele ela voce oi ola bom boa dia tarde noite tudo bem obrigado obrigada valeu aqui la empresa equipe pessoal time setor marketing comercial vendas financeiro rh diretor diretora gerente coordenador coordenadora analista dono dona socio socia proprietario proprietaria ceo cmo responsavel assistente atendimento contato quem que pois porque mas entao ali hoje agora ainda pode claro perfeito exato beleza blz show top legal combinado sou mesmo mesma a o de da do das dos e'.split(' '),
+  'sim nao ok certo isso eu ele ela voce oi ola bom boa dia tarde noite tudo bem obrigado obrigada valeu aqui la empresa equipe pessoal time setor marketing comercial vendas financeiro rh diretor diretora gerente coordenador coordenadora analista dono dona socio socia proprietario proprietaria ceo cmo responsavel assistente atendimento contato quem que pois porque mas entao ali hoje agora ainda pode claro perfeito exato beleza blz show top legal combinado sou mesmo mesma canal suporte central sac recepcao recepcionista secretaria balcao loja escritorio whatsapp numero telefone bot robo virtual automatico geral administrativo atendente a o de da do das dos e'.split(' '),
 );
 const ROLE_WORDS =
   /\b(diretor|diretora|gerente|coordenador|coordenadora|supervisor|supervisora|analista|assistente|socio|socia|dono|dona|proprietario|proprietaria|fundador|fundadora|ceo|cmo|cto|cfo|coo|head|lider|responsavel|executivo|executiva|consultor|consultora|especialista|presidente|vice|administrador|administradora|comprador|compradora|vendedor|vendedora|marketing|comercial)\b/;
