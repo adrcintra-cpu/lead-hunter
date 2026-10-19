@@ -3,7 +3,7 @@
 
 import { BEELIE_INTENTS, BEELIE_STAGES, FACT_FIELDS, NEED_AREAS } from '../automation/beelie.ts';
 
-export const PROMPT_VERSION = 'v10';
+export const PROMPT_VERSION = 'v11';
 
 const RULES = `Regras obrigatórias:
 - Use SOMENTE os dados fornecidos. Nunca invente nome de pessoas, números, clientes, prêmios ou fatos.
@@ -361,14 +361,16 @@ companyName / contactName / city: só se a pessoa disse na mensagem; senão null
 Classifique o pedido (intent):
 - "add_contacts": ele passou um ou mais contatos para você cadastrar e prospectar (cartão "[Contato compartilhado] ...", "[Imagem] ..." com dados de contato, ou texto com nome/empresa/telefone).
 - "add_context": ele está complementando o ÚLTIMO CONTATO que passou (informado abaixo, se houver): nome da empresa, relação com a empresa dele (ex.: "já é cliente", "fizemos a identidade visual"), cargo, como conheceu, o que oferecer, ou pede para usar o contato que acabou de passar. Sem telefone novo na mensagem. Preencha context.company (só se ele disse o nome da empresa do contato) e context.note (o fato, em uma frase objetiva, em 3ª pessoa).
-- "report": quer saber resultados, resumo, relatório, como estão as conversas, leads quentes.
-- "help": pergunta o que você faz, como usar, ou cumprimenta.
-- "other": qualquer outra coisa.
+- "report": pede o resumo/relatório do dia, sem pergunta específica ("relatório", "como estamos?").
+- "question": qualquer pergunta ou pedido que precise de resposta: sobre um lead ou empresa ("e a Clínica Sorriso?", "o que o João respondeu?"), números de outros períodos, campanhas, tarefas, a busca automática, pedido de opinião ou sugestão, ou como fazer algo no Lead Hunter. Preencha lookup com o nome da empresa ou pessoa citada (só o nome), senão null.
+- "help": só cumprimento ("oi", "bom dia") ou pergunta sobre o que você faz.
+- "other": não dá para entender.
 Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone (como escrito), email, city, role (cargo), note (contexto que ele deu, ex.: "conheci na feira"). Use só o que está na mensagem; o que não estiver, null. Nunca invente telefone.`,
     schema: {
       type: 'object',
       properties: {
-        intent: { type: 'string', enum: ['add_contacts', 'add_context', 'report', 'help', 'other'] },
+        intent: { type: 'string', enum: ['add_contacts', 'add_context', 'report', 'question', 'help', 'other'] },
+        lookup: { type: ['string', 'null'], description: 'Empresa ou pessoa citada na pergunta.' },
         context: {
           type: 'object',
           properties: { company: { type: ['string', 'null'] }, note: { type: ['string', 'null'] } },
@@ -391,15 +393,21 @@ Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone
           },
         },
       },
-      required: ['intent', 'contacts', 'context'],
+      required: ['intent', 'contacts', 'context', 'lookup'],
     },
     user: (input) => {
-      const i = input as { text: string; last?: string };
-      return [i.last ? `Último contato que ele passou: ${i.last}` : 'Ele não passou nenhum contato recentemente.', `Mensagem do dono:\n${i.text}`].join('\n\n');
+      const i = input as { text: string; last?: string; history?: string };
+      return [
+        i.last ? `Último contato que ele passou: ${i.last}` : 'Ele não passou nenhum contato recentemente.',
+        i.history ? `Conversa recente com ele (mais antiga primeiro):\n${i.history}` : '',
+        `Mensagem do dono:\n${i.text}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
     },
     output: (raw) => {
       const str = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
-      const intent = ['add_contacts', 'add_context', 'report', 'help', 'other'].includes(String(raw.intent)) ? String(raw.intent) : 'other';
+      const intent = ['add_contacts', 'add_context', 'report', 'question', 'help', 'other'].includes(String(raw.intent)) ? String(raw.intent) : 'other';
       const ctx = (raw.context ?? {}) as Record<string, unknown>;
       const contacts = (Array.isArray(raw.contacts) ? raw.contacts : []).slice(0, 20).map((c: Record<string, unknown>) => ({
         name: str(c?.name, 80),
@@ -410,9 +418,25 @@ Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone
         role: str(c?.role, 60),
         note: str(c?.note, 200),
       }));
-      return { intent, contacts, context: { company: str(ctx.company, 120), note: str(ctx.note, 300) } };
+      return { intent, contacts, context: { company: str(ctx.company, 120), note: str(ctx.note, 300) }, lookup: str(raw.lookup, 80) };
     },
   },
+  ownerAsk: {
+    system: `Você é o BEELIE, o SDR de IA da empresa, conversando com o DONO pelo WhatsApp pessoal dele. Responda a pergunta dele como um assistente comercial competente e direto.
+- Use SOMENTE os dados do painel abaixo (números, leads, conversas, tarefas, campanhas, busca automática). Nunca invente números, nomes, respostas de leads ou fatos.
+- Se o dado não estiver no painel, diga que não tem essa informação aqui e onde ver no Lead Hunter (Dashboard, Leads, Pipeline, Campanhas, Tarefas, Buscas, Configurações).
+- Pedido de opinião ou sugestão: dê a sua, curta e prática, baseada nos dados.
+- Você pode, por aqui: cadastrar e prospectar contatos que ele mandar (cartão, print ou nome+empresa+telefone), anotar informações sobre o último contato, mandar o resumo do dia e responder perguntas. Outras ações (pausar campanha, mudar limite, editar lead, mandar mensagem para um lead) são feitas no Lead Hunter: explique onde, em uma frase.
+- Estilo WhatsApp: português do Brasil, frases curtas, no máximo 8 linhas, listas com "•" quando ajudar, sem markdown (sem ** ou #). Trate-o por "você".
+- "[Áudio transcrito] ..." é um áudio dele já transcrito: responda ao conteúdo.`,
+    schema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
+    user: (input) => {
+      const i = input as { text: string; panel: string; history?: string };
+      return [`Painel (dados reais, agora):\n${i.panel}`, i.history ? `Conversa recente com ele (mais antiga primeiro):\n${i.history}` : '', `Pergunta do dono:\n${i.text}`].filter(Boolean).join('\n\n');
+    },
+    output: (raw) => raw.message,
+  },
+
 
   summarizeResults: {
     system: `Você é um analista comercial. Leia os números de prospecção e escreva de 3 a 6 observações curtas e acionáveis em português do Brasil. ${RULES}

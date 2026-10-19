@@ -440,7 +440,7 @@ export class SessionManager {
     }
   }
 
-  /** Baixa o áudio recebido pela sessão do usuário e transcreve. Só é chamado para mensagens de leads. */
+  /** Baixa o áudio recebido pela sessão do usuário e transcreve. Só é chamado para mensagens de leads e as suas (dono). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async transcribeIncoming(userId: string, raw: any): Promise<string | null> {
     const s = this.sessions.get(userId);

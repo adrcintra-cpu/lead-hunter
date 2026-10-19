@@ -71,8 +71,10 @@ export interface OwnerContact {
   note: string | null;
 }
 export interface OwnerIntent {
-  intent: 'add_contacts' | 'add_context' | 'report' | 'help' | 'other';
+  intent: 'add_contacts' | 'add_context' | 'report' | 'question' | 'help' | 'other';
   contacts: OwnerContact[];
+  /** Empresa ou pessoa citada numa pergunta. */
+  lookup?: string | null;
   /** Complemento sobre o último contato que você passou (empresa, relação, como conheceu). */
   context?: { company: string | null; note: string | null };
 }
@@ -122,11 +124,14 @@ export function parseOwnerRules(text: string): OwnerIntent {
     contacts.push({ name: rest || null, company: null, phone: phones[0] ?? null, email: line.match(EMAIL_RE)?.[0] ?? null, city: null, role: null, note: null });
   }
   if (contacts.length) return { intent: 'add_contacts', contacts };
+  if (/^(relat[oó]rio|resumo)\??$/i.test(t) || /^como (estamos|est[aã]o as coisas|vai a prospec[cç][aã]o|foi o dia)( hoje)?\??$/i.test(t) || /^(manda|me (manda|passa)|quero) (o )?(relat|resumo)/i.test(t)) return { intent: 'report', contacts: [] };
+  if (/^(oi|ol[aá]|e a[ií]|bom dia|boa tarde|boa noite|ajuda|menu)\b[\s!.,?]*$/i.test(t)) return { intent: 'help', contacts: [] };
+  if (/\?|^(quant|qual|quais|quem|como|quando|onde|por ?que|o que|me (diz|fala|conta)|tem |teve |algu[eé]m)/i.test(t)) return { intent: 'question', contacts: [] };
   if (/relat|resum|como (estamos|est[aá]|vai|foi|anda)|status|quente|resultado|n[uú]mero/i.test(t)) return { intent: 'report', contacts: [] };
   return { intent: 'help', contacts: [] };
 }
 
-export async function understand(db: Db, ownerId: string, text: string, last: LastOwnerContact | null = null): Promise<OwnerIntent> {
+export async function understand(db: Db, ownerId: string, text: string, last: LastOwnerContact | null = null, history?: string): Promise<OwnerIntent> {
   let rules = parseOwnerRules(text);
   // Sem telefone, logo depois de passar um contato: é complemento sobre ele.
   if (last && rules.intent === 'help' && text.trim().length > 15 && !/^(oi|ol[aá]|bom dia|boa tarde|boa noite|ajuda)\b/i.test(text.trim())) {
@@ -135,7 +140,7 @@ export async function understand(db: Db, ownerId: string, text: string, last: La
   if (!hasClaude()) return rules;
   const started = Date.now();
   try {
-    const run = await runTask<OwnerIntent>('ownerCommand', { text: text.slice(0, 3000), last: last ? `${last.label} (há ${Math.max(1, Math.round((Date.now() - Date.parse(last.at)) / 60000))} min)` : undefined });
+    const run = await runTask<OwnerIntent>('ownerCommand', { text: text.slice(0, 3000), history, last: last ? `${last.label} (há ${Math.max(1, Math.round((Date.now() - Date.parse(last.at)) / 60000))} min)` : undefined });
     await logRun(db, ownerId, 'ownerCommand', started, 'ok', run.usage);
     const out = run.output;
     // A IA nunca inventa telefone: só vale o que aparece na mensagem.
@@ -147,7 +152,7 @@ export async function understand(db: Db, ownerId: string, text: string, last: La
       const c = out.contacts[0];
       return { intent: 'add_context', contacts: [], context: { company: c.company ?? c.name, note: c.note ?? text.trim().slice(0, 300) } };
     }
-    if (out.intent === 'add_context' && !last) return { intent: 'help', contacts: [] };
+    if (out.intent === 'add_context' && !last) return { intent: 'question', contacts: [], lookup: null };
     return out;
   } catch (err) {
     await logRun(db, ownerId, 'ownerCommand', started, 'error', {});
@@ -379,6 +384,7 @@ export const HELP = [
   'Oi! Sou o BEELIE. Por aqui você pode:',
   '• Me passar contatos para prospectar: mande o cartão do contato, um print do cartão de visita ou escreva nome, empresa e telefone (ex.: "João, Metalúrgica Silva, 19 99999-0000, conheci na feira").',
   '• Pedir um resumo: "relatório" ou "como estamos?".',
+  '• Perguntar o que quiser, por texto ou áudio: "quem respondeu hoje?", "e a Clínica Sorriso?", "quais tarefas tenho?", "o que você sugere?".',
   'Também te aviso aqui quando aparecer lead em potencial e mando o resumo do dia.',
 ].join('\n');
 
@@ -405,14 +411,137 @@ export async function addContext(db: Db, ownerId: string, last: LastOwnerContact
     : `Anotado sobre ${label}: ${note}. Vou usar isso na primeira mensagem.`;
 }
 
-/** Mensagem do dono: entende o pedido e devolve a resposta. */
-export async function handleOwnerMessage(db: Db, ownerId: string, text: string, now = new Date()): Promise<string> {
+/** Áudio seu que não deu para transcrever (o serviço manda só este aviso). */
+export const AUDIO_FAILED = 'Não consegui ouvir esse áudio agora. Pode mandar de novo ou escrever?';
+
+/** Mensagem do dono: entende o pedido e devolve a resposta. `history` = conversa recente com ele. */
+export async function handleOwnerMessage(db: Db, ownerId: string, text: string, now = new Date(), history?: string): Promise<string> {
+  if (/^\[Áudio recebido/i.test(text.trim())) return AUDIO_FAILED;
   const last = await lastOwnerContact(db, ownerId, now);
-  const it = await understand(db, ownerId, text, last);
+  const it = await understand(db, ownerId, text, last, history);
   if (it.intent === 'add_context' && last) return addContext(db, ownerId, last, it.context ?? { company: null, note: null }, text);
   if (it.intent === 'add_contacts') return addReply(await addContacts(db, ownerId, it.contacts, now), now);
   if (it.intent === 'report') return buildReport(db, ownerId, now);
+  if (it.intent === 'question' || (it.intent === 'other' && text.trim().length > 3)) {
+    const answer = await answerOwner(db, ownerId, text, it.lookup ?? null, now, history);
+    if (answer) return answer;
+  }
   return HELP;
+}
+
+// ---------- responder perguntas ----------
+
+const brDate = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const CLASS_LABEL: Record<string, string> = { interessado: 'interessado', reuniao: 'quer conversar', duvida: 'dúvida/informações', nao_interessado: 'não interessado', opt_out: 'pediu para parar', ausente: 'resposta automática', outro: 'respondeu' };
+
+/** Resumo dos dados reais para a IA responder sem inventar. */
+export async function ownerPanel(db: Db, ownerId: string, lookup: string | null, now = new Date()): Promise<string> {
+  const head = { count: 'exact', head: true };
+  const week = new Date(now.getTime() - 7 * 864e5).toISOString();
+  const parts: string[] = [];
+  parts.push(`Hoje (${now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit' })}):\n${await buildReport(db, ownerId, now)}`);
+
+  const [sent7, replies7, leadsTotal, fresh] = await Promise.all([
+    count(db.from('messages').select('id', head).eq('owner_id', ownerId).not('sent_at', 'is', null).gte('sent_at', week)),
+    count(db.from('inbound_messages').select('id', head).eq('owner_id', ownerId).gte('received_at', week)),
+    count(db.from('leads').select('id', head).eq('owner_id', ownerId)),
+    count(db.from('leads').select('id', head).eq('owner_id', ownerId).in('stage', ['novo', 'qualificado'])),
+  ]);
+  parts.push(`Últimos 7 dias: ${sent7} mensagens enviadas, ${replies7} respostas. Base: ${leadsTotal} leads, ${fresh} ainda não abordados.`);
+
+  const { data: recent } = await db
+    .from('inbound_messages')
+    .select('classification, summary, received_at, leads(contact_name, stage, companies(legal_name, trade_name, city))')
+    .eq('owner_id', ownerId)
+    .gte('received_at', week)
+    .order('received_at', { ascending: false })
+    .limit(15);
+  const lines = ((recent ?? []) as Row[]).map((r) => {
+    const c = r.leads?.companies;
+    const who = `${c?.trade_name || c?.legal_name || 'Lead'}${r.leads?.contact_name ? ` (${r.leads.contact_name})` : ''}${c?.city ? `, ${c.city}` : ''}`;
+    return `• ${brDate(r.received_at)} ${who}: ${CLASS_LABEL[r.classification] ?? r.classification}${r.summary ? ` — ${String(r.summary).slice(0, 100)}` : ''}`;
+  });
+  if (lines.length) parts.push(`Respostas recentes (mais nova primeiro):\n${lines.join('\n')}`);
+
+  const { data: tasks } = await db.from('tasks').select('title, due_at').eq('owner_id', ownerId).eq('status', 'aberta').order('due_at', { ascending: true }).limit(10);
+  if ((tasks ?? []).length) parts.push(`Tarefas abertas:\n${((tasks ?? []) as Row[]).map((t) => `• ${t.title}`).join('\n')}`);
+
+  const { data: camps } = await db.from('campaigns').select('name, status, daily_limit_whatsapp, auto_enroll').eq('owner_id', ownerId).order('created_at', { ascending: true });
+  if ((camps ?? []).length)
+    parts.push(`Campanhas:\n${((camps ?? []) as Row[]).map((c) => `• ${c.name}: ${c.status}${c.daily_limit_whatsapp ? `, até ${c.daily_limit_whatsapp} por dia` : ''}${c.auto_enroll ? ', entrada automática' : ''}`).join('\n')}`);
+
+  const { data: hs } = await db
+    .from('assistant_settings')
+    .select('hunter_enabled, hunter_today, hunter_day')
+    .eq('owner_id', ownerId)
+    .maybeSingle()
+    .then(
+      (r: { data: Row | null }) => r,
+      () => ({ data: null }),
+    );
+  if (hs) {
+    const { data: srch } = await db.from('searches').select('raw_query, new_count, created_at').eq('owner_id', ownerId).like('raw_query', 'BEELIE:%').order('created_at', { ascending: false }).limit(3);
+    const recentS = ((srch ?? []) as Row[]).map((x) => `${String(x.raw_query).replace(/^BEELIE:\s*/, '')} (${x.new_count} novas, ${brDate(x.created_at)})`).join('; ');
+    parts.push(`Busca automática: ${hs.hunter_enabled ? 'ligada' : 'desligada'}${recentS ? `. Últimas: ${recentS}` : '. Nenhuma busca ainda'}.`);
+  }
+
+  if (lookup && lookup.trim().length >= 3) parts.push(await leadDetails(db, ownerId, lookup.trim()));
+  return parts.join('\n\n').slice(0, 9000);
+}
+
+/** Detalhes de um lead citado na pergunta (até 2 empresas com o nome). */
+async function leadDetails(db: Db, ownerId: string, q: string): Promise<string> {
+  const like = `%${q.replace(/[%_,()"\\]/g, ' ').trim()}%`;
+  const { data: byCo } = await db.from('companies').select('id, legal_name, trade_name, city, state, segment, whatsapp').eq('owner_id', ownerId).or(`legal_name.ilike."${like}",trade_name.ilike."${like}"`).limit(2);
+  let companies = (byCo ?? []) as Row[];
+  if (!companies.length) {
+    const { data: byPerson } = await db.from('leads').select('company_id').eq('owner_id', ownerId).ilike('contact_name', like).limit(2);
+    const ids = ((byPerson ?? []) as Row[]).map((x) => x.company_id);
+    if (ids.length) companies = (((await db.from('companies').select('id, legal_name, trade_name, city, state, segment, whatsapp').in('id', ids)).data ?? []) as Row[]);
+  }
+  if (!companies.length) return `Busca por "${q}": nenhum lead com esse nome na base.`;
+  const out: string[] = [];
+  for (const c of companies) {
+    const { data: lead } = await db.from('leads').select('id, stage, current_score, contact_name, contact_role, next_action, last_contact_at').eq('owner_id', ownerId).eq('company_id', c.id).maybeSingle();
+    const head = `Lead "${c.trade_name || c.legal_name}" (${c.segment}, ${c.city}/${c.state})`;
+    if (!lead) {
+      out.push(`${head}: empresa sem lead.`);
+      continue;
+    }
+    const [{ data: msgs }, { data: ins }] = await Promise.all([
+      db.from('messages').select('final_content, generated_content, sent_at').eq('lead_id', lead.id).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(4),
+      db.from('inbound_messages').select('body, received_at').eq('lead_id', lead.id).order('received_at', { ascending: false }).limit(4),
+    ]);
+    const convo = [
+      ...((msgs ?? []) as Row[]).map((m) => ({ at: m.sent_at, t: `BEELIE: ${String(m.final_content || m.generated_content || '').slice(0, 220)}` })),
+      ...((ins ?? []) as Row[]).map((m) => ({ at: m.received_at, t: `Lead: ${String(m.body ?? '').slice(0, 220)}` })),
+    ]
+      .sort((a, b) => String(a.at).localeCompare(String(b.at)))
+      .map((x) => `  ${brDate(x.at)} ${x.t}`);
+    out.push(
+      [
+        `${head}: etapa ${lead.stage}, score ${lead.current_score}${lead.contact_name ? `, contato ${lead.contact_name}${lead.contact_role ? ` (${lead.contact_role})` : ''}` : ''}${lead.next_action ? `, próxima ação: ${lead.next_action}` : ''}.`,
+        convo.length ? `Conversa (mais antiga primeiro):\n${convo.join('\n')}` : 'Ainda sem conversa.',
+      ].join('\n'),
+    );
+  }
+  return out.join('\n\n');
+}
+
+/** Responde uma pergunta sua com os dados reais. Sem IA, devolve null (vale a ajuda). */
+export async function answerOwner(db: Db, ownerId: string, text: string, lookup: string | null, now = new Date(), history?: string): Promise<string | null> {
+  if (!hasClaude()) return null;
+  const started = Date.now();
+  try {
+    const panel = await ownerPanel(db, ownerId, lookup, now);
+    const run = await runTask<string>('ownerAsk', { text: text.slice(0, 2000), panel, history });
+    await logRun(db, ownerId, 'ownerAsk', started, 'ok', run.usage);
+    return String(run.output ?? '').trim().slice(0, 3000) || null;
+  } catch (err) {
+    await logRun(db, ownerId, 'ownerAsk', started, 'error', {});
+    console.error('ownerAsk', err instanceof Error ? err.message : String(err));
+    return null;
+  }
 }
 
 // ---------- avisos e relatório diário ----------

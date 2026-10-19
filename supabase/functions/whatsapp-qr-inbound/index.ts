@@ -91,7 +91,8 @@ Deno.serve(async (req) => {
     if (!s.phone || !samePhone(s.phone, from)) return new Response('Não autorizado', { status: 403 });
     if (!body.trim()) return Response.json({ ok: true, reply: null });
     try {
-      return Response.json({ ok: true, reply: await handleOwnerMessage(db, ownerId, body) });
+      const history = typeof b.history === 'string' ? b.history.slice(0, 3000) : undefined;
+      return Response.json({ ok: true, reply: await handleOwnerMessage(db, ownerId, body, new Date(), history) });
     } catch (err) {
       console.error('owner', err instanceof Error ? err.message : String(err));
       return Response.json({ ok: true, reply: 'Tive um problema para fazer isso agora. Tente de novo em alguns minutos.' });

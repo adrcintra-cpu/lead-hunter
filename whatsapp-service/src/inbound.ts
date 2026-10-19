@@ -197,12 +197,30 @@ export class InboundRelay {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleOwner(userId: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'error'> {
     const body = (await this.audioText(userId, raw)) ?? m.text;
-    const res = await this.post({ action: 'owner', ownerId: userId, from: m.phone, body });
+    const history = this.ownerHistory(userId);
+    const res = await this.post({ action: 'owner', ownerId: userId, from: m.phone, body, history: history || undefined });
     if (!res.ok) throw new Error(`função respondeu ${res.status}`);
     const data = (await res.json().catch(() => ({}))) as { reply?: string | null };
     log.info({ user: maskUser(userId) }, 'pedido do dono recebido');
-    if (data.reply) await this.sendOwn(userId, m.phone, data.reply);
+    this.rememberOwner(userId, `Você: ${body}`);
+    if (data.reply) {
+      await this.sendOwn(userId, m.phone, data.reply);
+      this.rememberOwner(userId, `BEELIE: ${data.reply}`);
+    }
     return 'forwarded';
+  }
+
+  /** Últimas trocas com o dono (só em memória, 30 min), para perguntas de continuação ("e ela?"). */
+  private ownerChat = new Map<string, { lines: string[]; at: number }>();
+  private rememberOwner(userId: string, line: string) {
+    const cur = this.ownerChat.get(userId);
+    const lines = cur && Date.now() - cur.at < 30 * 60_000 ? cur.lines : [];
+    lines.push(line.replace(/\s+/g, ' ').slice(0, 500));
+    this.ownerChat.set(userId, { lines: lines.slice(-8), at: Date.now() });
+  }
+  private ownerHistory(userId: string): string {
+    const cur = this.ownerChat.get(userId);
+    return cur && Date.now() - cur.at < 30 * 60_000 ? cur.lines.join('\n') : '';
   }
 
   /** Opção "Atender quem chama sem ser lead" (cache de 1 min; sem a coluna, desligada). */
