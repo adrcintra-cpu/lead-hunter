@@ -422,9 +422,12 @@ export async function handleOwnerMessage(db: Db, ownerId: string, text: string, 
   if (it.intent === 'add_context' && last) return addContext(db, ownerId, last, it.context ?? { company: null, note: null }, text);
   if (it.intent === 'add_contacts') return addReply(await addContacts(db, ownerId, it.contacts, now), now);
   if (it.intent === 'report') return buildReport(db, ownerId, now);
-  if (it.intent === 'question' || (it.intent === 'other' && text.trim().length > 3)) {
-    const answer = await answerOwner(db, ownerId, text, it.lookup ?? null, now, history);
-    if (answer) return answer;
+  // Pergunta nunca recebe o menu de ajuda: mesmo se a IA classificar como "ajuda".
+  const asked = it.intent === 'question' || (it.intent === 'other' && text.trim().length > 3) || (it.intent === 'help' && parseOwnerRules(text).intent === 'question');
+  if (asked) {
+    const r = await answerOwner(db, ownerId, text, it.lookup ?? null, now, history);
+    if (r.answer) return r.answer;
+    return `Não consegui montar a resposta agora${r.error ? ` (${r.error})` : ''}. Enquanto isso, o resumo de hoje:\n\n${await buildReport(db, ownerId, now)}`;
   }
   return HELP;
 }
@@ -528,19 +531,24 @@ async function leadDetails(db: Db, ownerId: string, q: string): Promise<string> 
   return out.join('\n\n');
 }
 
-/** Responde uma pergunta sua com os dados reais. Sem IA, devolve null (vale a ajuda). */
-export async function answerOwner(db: Db, ownerId: string, text: string, lookup: string | null, now = new Date(), history?: string): Promise<string | null> {
-  if (!hasClaude()) return null;
+/** Responde uma pergunta sua com os dados reais. Sem IA ou com falha, devolve o motivo (curto). */
+export async function answerOwner(db: Db, ownerId: string, text: string, lookup: string | null, now = new Date(), history?: string): Promise<{ answer: string | null; error?: string }> {
+  if (!hasClaude()) return { answer: null, error: 'IA não configurada no servidor' };
   const started = Date.now();
+  let step = 'dados';
   try {
     const panel = await ownerPanel(db, ownerId, lookup, now);
+    step = 'IA';
     const run = await runTask<string>('ownerAsk', { text: text.slice(0, 2000), panel, history });
     await logRun(db, ownerId, 'ownerAsk', started, 'ok', run.usage);
-    return String(run.output ?? '').trim().slice(0, 3000) || null;
+    const answer = String(run.output ?? '').trim().slice(0, 3000);
+    return answer ? { answer } : { answer: null, error: 'IA respondeu vazio' };
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     await logRun(db, ownerId, 'ownerAsk', started, 'error', {});
-    console.error('ownerAsk', err instanceof Error ? err.message : String(err));
-    return null;
+    console.error('ownerAsk', step, msg);
+    // Motivo curto, sem detalhes técnicos longos.
+    return { answer: null, error: `falha ao ${step === 'IA' ? 'consultar a IA' : 'ler os dados'}: ${msg.replace(/\s+/g, ' ').slice(0, 140)}` };
   }
 }
 
