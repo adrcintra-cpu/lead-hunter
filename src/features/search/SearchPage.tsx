@@ -419,13 +419,42 @@ function SearchResults({ searchId, onNew }: { searchId: string; onNew: () => voi
       {rows.length > 0 && (() => {
         const fresh = rows.filter((x) => !x.res.wasDuplicate);
         const ids = (fresh.length ? fresh : rows).map((x) => x.res.leadId);
+        // O que já aconteceu com esses leads: em qual campanha entraram e quantos ainda esperam.
+        const byCamp = new Map<string, number>();
+        const waiting: string[] = [];
+        for (const id of ids) {
+          const e = db.enrollments.find((x) => x.leadId === id && x.status !== 'interrompida');
+          const camp = e && db.campaigns.find((c) => c.id === e.campaignId);
+          if (camp) byCamp.set(camp.name, (byCamp.get(camp.name) ?? 0) + 1);
+          else waiting.push(id);
+        }
+        const auto = db.campaigns.filter((c) => c.status === 'ativa' && c.autoEnroll);
+        const perDay = auto.reduce((n, c) => n + (c.dailyLimitWhatsapp ?? 0), 0);
         return (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3">
             <div className="min-w-0 flex-1 text-[13px]">
-              <div className="font-bold text-ink">Próximo passo: prospectar</div>
-              <div className="text-ink-soft">O BEELIE escreve e envia a primeira mensagem de cada empresa sozinho, no horário de envio, e conversa com quem responder.</div>
+              {byCamp.size > 0 ? (
+                <>
+                  <div className="font-bold text-ink">
+                    ✓ {[...byCamp].map(([n, k]) => `${k} na campanha “${n}”`).join(' · ')}
+                  </div>
+                  <div className="text-ink-soft">
+                    O BEELIE escreve e envia a primeira mensagem sozinho, no horário de envio{perDay ? `, até ${perDay} por dia` : ''}, e conversa com quem responder. Você acompanha em Campanhas e recebe as tarefas só quando precisar entrar.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="font-bold text-ink">Próximo passo: prospectar</div>
+                  <div className="text-ink-soft">
+                    {auto.length
+                      ? `Estes leads entram sozinhos na prospecção diária (${perDay} por dia, os de maior score primeiro). Para começar agora, use o botão.`
+                      : 'Nenhuma campanha com “Entrada automática” ligada: os leads ficam em Leads até você prospectar. Use o botão ou ligue a entrada automática na campanha Prospecção.'}
+                  </div>
+                </>
+              )}
+              {byCamp.size > 0 && waiting.length > 0 && <div className="mt-1 text-ink-soft">{waiting.length} {waiting.length === 1 ? 'ainda espera' : 'ainda esperam'} a vez na prospecção diária.</div>}
             </div>
-            <ProspectButton leadIds={ids} label={fresh.length ? `Prospectar ${fresh.length === 1 ? 'a nova' : `as ${fresh.length} novas`}` : `Prospectar (${ids.length})`} />
+            {waiting.length > 0 && <ProspectButton leadIds={waiting} label={`Prospectar ${waiting.length === 1 ? 'agora' : `${waiting.length} agora`}`} />}
           </div>
         );
       })()}
