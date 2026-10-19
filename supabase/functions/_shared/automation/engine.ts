@@ -13,6 +13,7 @@ import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STA
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { feedCampaigns } from './feeder.ts';
+import { huntLeads } from './hunter.ts';
 import { addContacts, samePhone, sendDailyReports } from './ownerChat.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
@@ -256,6 +257,8 @@ export interface RunSummary {
   fed?: number;
   /** Relatórios diários enviados ao dono. */
   reports?: number;
+  /** Busca automática: buscas feitas e leads novos criados nesta rodada. */
+  hunted?: { searches: number; created: number };
   errors: string[];
 }
 
@@ -277,6 +280,14 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
     sum.reports = await sendDailyReports(db, now);
   } catch (err) {
     sum.errors.push(`relatório diário: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Busca automática: quando a fila de leads novos está baixa, busca empresas novas no Google.
+  try {
+    const h = await huntLeads(db, now);
+    if (h.searches) sum.hunted = { searches: h.searches, created: h.created };
+  } catch (err) {
+    sum.errors.push(`busca automática: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Prospecção diária: campanhas com entrada automática e limite diário completam o dia com leads da base.

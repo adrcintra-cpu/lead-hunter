@@ -144,3 +144,41 @@ export async function resetAssistant(): Promise<void> {
 export async function savePrefs(s: AssistantSettings, prefs: AssistantPrefs, custom: boolean): Promise<void> {
   await saveAssistant(custom ? s : { name: s.name === DEFAULT_ASSISTANT.name ? '' : s.name, persona: '', knowledge: '', playbooks: '' }, prefs);
 }
+
+/** Busca automática do BEELIE (roda no servidor). */
+export interface HunterPrefs {
+  enabled: boolean;
+  /** Segmentos que ele não busca (e descarta pelo nome). */
+  excluded: string[];
+  /** Buscas feitas hoje (horário de Brasília). */
+  today: number;
+  /** As colunas existem no banco (migration aplicada). No modo de teste é false: só funciona no servidor. */
+  available: boolean;
+}
+
+export async function loadHunter(): Promise<HunterPrefs> {
+  const off: HunterPrefs = { enabled: false, excluded: [], today: 0, available: false };
+  if (dataMode !== 'supabase' || !supabase) return off;
+  const { data, error } = await supabase.from('assistant_settings').select('hunter_enabled, hunter_excluded, hunter_day, hunter_today').maybeSingle();
+  if (error) return off;
+  const todayBr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  return {
+    enabled: data?.hunter_enabled === true,
+    excluded: Array.isArray(data?.hunter_excluded) ? data.hunter_excluded : [],
+    today: data?.hunter_day === todayBr ? Number(data?.hunter_today ?? 0) : 0,
+    available: true,
+  };
+}
+
+export async function saveHunter(enabled: boolean, excluded: string[]): Promise<void> {
+  if (dataMode !== 'supabase' || !supabase) throw new Error('A busca automática só funciona com o banco conectado.');
+  const { data: u } = await supabase.auth.getUser();
+  if (!u.user) throw new Error('Faça login de novo.');
+  const patch = { hunter_enabled: enabled, hunter_excluded: excluded, updated_at: new Date().toISOString() };
+  const upd = await supabase.from('assistant_settings').update(patch).eq('owner_id', u.user.id).select('owner_id');
+  if (upd.error) throw new Error(/hunter_/.test(upd.error.message) ? 'Falta aplicar a migration da busca automática (npx supabase db push).' : upd.error.message);
+  if (!upd.data?.length) {
+    const ins = await supabase.from('assistant_settings').insert({ owner_id: u.user.id, ...patch });
+    if (ins.error) throw new Error(ins.error.message);
+  }
+}

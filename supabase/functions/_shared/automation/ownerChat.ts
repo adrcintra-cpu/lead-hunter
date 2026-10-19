@@ -8,6 +8,7 @@ import { hasClaude, logRun, runTask } from '../ai/claude.ts';
 import { nextWindowStart, startOfDayBRT } from './planner.ts';
 import { formatBr, nationalDigits, ufFromPhone } from './unknownInbound.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from './types.ts';
+import { HUNTER_ORIGIN } from './hunter.ts';
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -336,11 +337,12 @@ async function count(q: Row): Promise<number> {
 export async function buildReport(db: Db, ownerId: string, now = new Date()): Promise<string> {
   const since = startOfDayBRT(now).toISOString();
   const head = { count: 'exact', head: true };
-  const [enrolled, sent, replies, openTasks] = await Promise.all([
+  const [enrolled, sent, replies, openTasks, found] = await Promise.all([
     count(db.from('enrollments').select('id', head).eq('owner_id', ownerId).gte('created_at', since)),
     count(db.from('messages').select('id', head).eq('owner_id', ownerId).eq('channel', 'whatsapp').not('campaign_id', 'is', null).gte('sent_at', since)),
     count(db.from('inbound_messages').select('id', head).eq('owner_id', ownerId).gte('received_at', since)),
     count(db.from('tasks').select('id', head).eq('owner_id', ownerId).eq('status', 'aberta')),
+    count(db.from('leads').select('id', head).eq('owner_id', ownerId).eq('origin', HUNTER_ORIGIN).gte('created_at', since)),
   ]);
   const { data: hot } = await db
     .from('inbound_messages')
@@ -365,6 +367,7 @@ export async function buildReport(db: Db, ownerId: string, now = new Date()): Pr
   return [
     `📊 Resumo de ${date}`,
     `${enrolled} ${enrolled === 1 ? 'novo' : 'novos'} na prospecção · ${sent} ${sent === 1 ? 'mensagem enviada' : 'mensagens enviadas'} · ${replies} ${replies === 1 ? 'resposta recebida' : 'respostas recebidas'} · ${seen.size} em potencial`,
+    found ? `🔎 Encontrei ${found} ${found === 1 ? 'empresa nova' : 'empresas novas'} na busca automática.` : '',
     hotLines.length ? `\n🔥 Em potencial:\n${hotLines.join('\n')}` : '',
     openTasks ? `\n📝 ${openTasks} ${openTasks === 1 ? 'tarefa aberta precisa' : 'tarefas abertas precisam'} de você (Lead Hunter → Tarefas).` : '\n✅ Nenhuma tarefa esperando você.',
   ]

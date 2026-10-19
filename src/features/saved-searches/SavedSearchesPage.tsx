@@ -5,6 +5,7 @@ import { useApp, useDb, useService } from '@/store/AppStore';
 import type { SavedSearch, SearchCriteria } from '@/core/types';
 import { relativeTime } from '@/core/utils';
 import { ConfirmDialog, EmptyState, PageHeader } from '@/components/ui';
+import { HunterPanel } from './HunterPanel';
 
 export function describeCriteria(c: SearchCriteria): string {
   const wa = { obrigatorio: 'WhatsApp obrigatório', preferencial: 'WhatsApp preferencial', indiferente: '' }[c.whatsapp];
@@ -38,8 +39,9 @@ export function SavedSearchesPage() {
     <div className="mx-auto flex max-w-[1100px] flex-col gap-5">
       <PageHeader
         title="Buscas"
-        subtitle="Critérios salvos para rodar de novo, manualmente ou de forma automática (todo dia ou toda semana). A busca automática só traz empresas novas e roda enquanto o Lead Hunter estiver aberto em algum navegador."
+        subtitle="O BEELIE pode buscar empresas novas sozinho, pelo Brasil todo. Você também pode salvar critérios para rodar de novo (as buscas salvas automáticas rodam enquanto o Lead Hunter estiver aberto em algum navegador)."
       />
+      <HunterPanel />
       <section className="flex flex-col gap-3">
         <h2 className="text-[15px] font-extrabold">Salvas</h2>
         {db.savedSearches.length === 0 ? (
