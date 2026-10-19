@@ -71,7 +71,11 @@ const NAME_FILTERS: { when: RegExp; re: RegExp }[] = [
   { when: /marketing|propaganda|publicidade|agencia/, re: /(marketing|propaganda|publicidade|publicit|ag[eê]ncia (digital|de comunica)|comunica[cç][aã]o visual|m[ií]dia digital)/i },
   { when: /audiovisual|video|produtora|filmagem/, re: /(audiovisual|[aá]udio ?visual|produtora|filmes|filmagem|est[uú]dio de (v[ií]deo|[aá]udio|grava[cç][aã]o))/i },
 ];
+/** Órgãos e instituições públicas: não compram serviço por WhatsApp (licitação). */
+const PUBLIC_RE = /(universidade (federal|estadual)|instituto federal|\bfatec\b|\betec\b|prefeitura|secretaria (municipal|estadual|de)|c[aâ]mara municipal|escola (estadual|municipal)|\bcolegio estadual|\bemef\b|\bemei\b|\bubs\b|tribunal|minist[eé]rio|governo do estado|\bdetran\b|\bsenai\b|\bsesi\b|\bsenac\b|\bsesc\b)/i;
+
 export function excludedByName(name: string, excluded: string[]): boolean {
+  if (PUBLIC_RE.test(norm(name))) return true;
   const n = norm(name);
   for (const e of excluded.map(norm).filter(Boolean)) {
     if (e.length >= 6 && n.includes(e)) return true;

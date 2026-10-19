@@ -197,17 +197,8 @@ export async function decideAndTask(db: Row, ownerId: string, leadId: string, re
   const auto = decision && typeof decision === 'object' ? decision : null;
   const task = result.task as { title: string; description: string; campaignId: string | null; ownerName: string | null; dueAt: string } | null;
 
-  if (decision === 'robo') {
-    const name = await companyName(db, leadId);
-    await upsertReplyTask(db, ownerId, leadId, {
-      title: `Atendimento automático: falar com ${name} por outro canal`,
-      description: 'Do outro lado responde um robô (menu, termos, avaliação). O BEELIE parou de responder sozinho. Tente telefone, e-mail ou Instagram para chegar a uma pessoa, ou exclua o lead se não fizer sentido.',
-      campaignId: task?.campaignId,
-      ownerName: task?.ownerName,
-      dueAt: new Date().toISOString(),
-    });
-    return null;
-  }
+  // Robô do outro lado: o BEELIE para e fica só no histórico do lead (sem tarefa: quase nunca vale a pena).
+  if (decision === 'robo') return null;
   if (!task) return auto;
   const human =
     !auto ||

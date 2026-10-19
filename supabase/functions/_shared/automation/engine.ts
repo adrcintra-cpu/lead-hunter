@@ -257,9 +257,31 @@ export interface RunSummary {
   fed?: number;
   /** Relatórios diários enviados ao dono. */
   reports?: number;
+  /** Tarefas antigas de baixo valor concluídas automaticamente. */
+  tasksClosed?: number;
   /** Busca automática: buscas feitas e leads novos criados nesta rodada. */
   hunted?: { searches: number; created: number };
   errors: string[];
+}
+
+/** Tarefas que perdem o sentido com o tempo. Reunião, orçamento e "falar com" nunca são fechadas sozinhas. */
+const STALE_TITLES = ['Ler resposta de%', 'Enviar WhatsApp para%', 'Atendimento automático%', 'Enviar informações para%'];
+export const STALE_TASK_DAYS = 7;
+
+export async function closeStaleTasks(db: Db, now = new Date()): Promise<number> {
+  const before = new Date(now.getTime() - STALE_TASK_DAYS * 864e5).toISOString();
+  let n = 0;
+  for (const t of STALE_TITLES) {
+    const { data } = await db
+      .from('tasks')
+      .update({ status: 'concluida', done_at: now.toISOString() })
+      .eq('status', 'aberta')
+      .like('title', t)
+      .lt('created_at', before)
+      .select('id');
+    n += (data ?? []).length;
+  }
+  return n;
 }
 
 export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
@@ -280,6 +302,13 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
     sum.reports = await sendDailyReports(db, now);
   } catch (err) {
     sum.errors.push(`relatório diário: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Tarefas de baixo valor esquecidas há mais de 7 dias saem da lista (ler resposta, envio manual, robô).
+  try {
+    sum.tasksClosed = await closeStaleTasks(db, now);
+  } catch (err) {
+    sum.errors.push(`limpeza de tarefas: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Busca automática: quando a fila de leads novos está baixa, busca empresas novas no Google.
@@ -542,7 +571,27 @@ async function queueQrSend(body: { ownerId: string; leadId: string; messageId: s
 }
 
 /** O serviço não conseguiu enviar a mensagem da campanha: ela vira tarefa manual (wa.me), como antes. */
+/** Número que não tem WhatsApp (fixo sem WhatsApp Business, número errado). */
+export const NO_WHATSAPP = /n[aã]o tem WhatsApp|not on WhatsApp/i;
+
 export async function qrCampaignFallback(db: Db, ownerId: string, messageId: string, reason: string) {
+  // Sem WhatsApp no número: não adianta virar tarefa manual. A cadência desse lead para.
+  if (NO_WHATSAPP.test(reason)) {
+    const { data: f } = await db
+      .from('messages')
+      .update({ status: 'failed', failed_at: new Date().toISOString(), failure_reason: reason.slice(0, 300) })
+      .eq('id', messageId)
+      .eq('owner_id', ownerId)
+      .eq('status', 'queued')
+      .select('id, lead_id')
+      .maybeSingle();
+    if (!f) return false;
+    const { data: lead } = await db.from('leads').select('company_id').eq('id', f.lead_id).maybeSingle();
+    if (lead?.company_id) await db.from('companies').update({ whatsapp_status: 'desconhecido' }).eq('id', lead.company_id);
+    await db.from('enrollments').update({ status: 'interrompida', stop_reason: 'número sem WhatsApp', next_run_at: null }).eq('lead_id', f.lead_id).in('status', ['ativa', 'pausada', 'pendente']);
+    await log(db, ownerId, f.lead_id, 'message_failed', 'O número deste lead não tem WhatsApp: a prospecção dele parou (sem tarefa para você).', { messageId, reason: 'sem_whatsapp' });
+    return true;
+  }
   const { data: m } = await db
     .from('messages')
     .update({ status: 'draft', provider: null, template: 'Campanha (envio manual)', failure_reason: reason.slice(0, 300) })
