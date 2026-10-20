@@ -1000,7 +1000,14 @@ async function emailReady(db: Db, ownerId: string): Promise<boolean> {
 export async function sendPendingReferralEmails(db: Db, now = new Date()): Promise<number> {
   if (!Deno.env.get('RESEND_API_KEY') || !hasClaude()) return 0;
   const since = new Date(now.getTime() - 3 * 864e5).toISOString();
-  const { data } = await db.from('leads').select('*').not('beelie', 'is', null).gte('updated_at', since).limit(500);
+  // Só leads com contato indicado na memória do BEELIE (são poucos), mais recentes primeiro.
+  const { data } = await db
+    .from('leads')
+    .select('*')
+    .not('beelie->facts->referred_contact', 'is', null)
+    .gte('updated_at', since)
+    .order('updated_at', { ascending: false })
+    .limit(200);
   let n = 0;
   for (const lead of (data ?? []) as Row[]) {
     const f = lead.beelie?.facts ?? {};
@@ -1023,7 +1030,11 @@ export async function sendPendingReferralEmails(db: Db, now = new Date()): Promi
         await db.from('tasks').update({ status: 'concluida', done_at: now.toISOString() }).eq('lead_id', lead.id).eq('status', 'aberta').like('title', 'Falar com%');
       }
     } catch (err) {
-      console.error('referral email (rotina)', err instanceof Error ? err.message : String(err));
+      const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, ' ').slice(0, 220);
+      console.error('referral email (rotina)', why);
+      // O motivo aparece na linha do tempo do lead (no máximo uma vez a cada 6 h).
+      const { count } = await db.from('lead_activities').select('id', { count: 'exact', head: true }).eq('lead_id', lead.id).eq('payload->>kind', 'referral_email_failed').gte('created_at', new Date(now.getTime() - 6 * 3600_000).toISOString());
+      if (!count) await log(db, lead.owner_id, lead.id, 'message_failed', `E-mail para ${name} (${email}) não saiu: ${why}`, { kind: 'referral_email_failed' });
     }
   }
   return n;
