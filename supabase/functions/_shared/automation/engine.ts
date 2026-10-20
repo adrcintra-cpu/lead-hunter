@@ -10,7 +10,7 @@ import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/m
 import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { inWindow, nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
-import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
+import { analyzeSignalsRules, beelieBrief, cleanPersonName, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { feedCampaigns } from './feeder.ts';
 import { huntLeads } from './hunter.ts';
@@ -290,6 +290,7 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
 
   await sweepStaleQrQueue(db).catch(() => undefined);
   await rescueManualWhatsapp(db, now).catch(() => undefined);
+  await sendPendingReferralEmails(db, now).catch(() => undefined);
 
   // Campanhas agendadas que chegaram na hora.
   const scheduled: Row[] = await must(db.from('campaigns').select('id').eq('status', 'agendada').lte('scheduled_at', now.toISOString()));
@@ -979,6 +980,50 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
   return { ...(inbound as Row), suggestion, category: cls.category, interest: hasRealInterest(signals), beelie: intelResult?.intel ?? null, task: i.deferTask ? task : null };
 }
 
+/** E-mail pronto para sair (Resend + remetente configurados) e IA disponível. */
+async function emailReady(db: Db, ownerId: string): Promise<boolean> {
+  if (!Deno.env.get('RESEND_API_KEY') || !hasClaude()) return false;
+  const { data: p } = await db.from('profiles').select('sender_email').eq('id', ownerId).maybeSingle();
+  return !!(p?.sender_email || Deno.env.get('EMAIL_FROM_FALLBACK'));
+}
+
+/**
+ * Indicações por e-mail que ainda não receberam o e-mail de apresentação: indicação de setor sem nome
+ * de pessoa (espera 15 min, o nome costuma vir na mensagem seguinte) ou que chegou fora do horário.
+ * Roda a cada execução do runner; envia dentro do horário de envio, uma vez por destinatário.
+ */
+export async function sendPendingReferralEmails(db: Db, now = new Date()): Promise<number> {
+  if (!Deno.env.get('RESEND_API_KEY') || !hasClaude()) return 0;
+  const since = new Date(now.getTime() - 3 * 864e5).toISOString();
+  const { data } = await db.from('leads').select('*').not('beelie', 'is', null).gte('updated_at', since).limit(500);
+  let n = 0;
+  for (const lead of (data ?? []) as Row[]) {
+    const f = lead.beelie?.facts ?? {};
+    const email = String(f.referred_contact?.value ?? '').toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+    const at = Date.parse(f.referred_contact?.at ?? f.referred_name?.at ?? '');
+    if (!(f.referred_name && cleanPersonName(String(f.referred_name.value))) && Number.isFinite(at) && now.getTime() - at < 15 * 60_000) continue; // o nome pode vir ainda
+    const { data: done } = await db.from('messages').select('id').eq('lead_id', lead.id).eq('channel', 'email').eq('recipient', email).limit(1);
+    if (done?.length) continue;
+    const { data: company } = await db.from('companies').select('*').eq('id', lead.company_id).maybeSingle();
+    if (!company) continue;
+    // Nome guardado por versão antiga pode ser um setor ("Compras"): vale como setor.
+    const person = f.referred_name?.value && cleanPersonName(String(f.referred_name.value)) ? String(f.referred_name.value) : undefined;
+    const dept = (f.referred_role?.value as string | undefined) ?? (f.referred_name && !person ? String(f.referred_name.value) : undefined);
+    const name = person ?? (dept ? `equipe de ${dept}` : 'equipe');
+    try {
+      if (await sendReferralEmail(db, lead.owner_id, lead, company, { name, role: person ? dept : undefined, email })) {
+        n++;
+        // A tarefa "Falar com" desse lead (se havia) perde o sentido: o e-mail saiu.
+        await db.from('tasks').update({ status: 'concluida', done_at: now.toISOString() }).eq('lead_id', lead.id).eq('status', 'aberta').like('title', 'Falar com%');
+      }
+    } catch (err) {
+      console.error('referral email (rotina)', err instanceof Error ? err.message : String(err));
+    }
+  }
+  return n;
+}
+
 /**
  * E-mail de apresentação para a pessoa indicada na conversa ("o contato da responsável é jamille@...").
  * Só envia com e-mail configurado (Resend + remetente), IA disponível, dentro do horário de envio,
@@ -1010,10 +1055,12 @@ export async function sendReferralEmail(db: Db, ownerId: string, lead: Row, comp
         senderName: sdr,
         senderCompany: p.company_name,
         offer: p.offer,
-        contactName: ref.name,
+        contactName: /^equipe/i.test(ref.name) ? undefined : ref.name,
         contactRole: ref.role,
         stage: 'primeira',
-        instructions: `${first} foi indicad${/a$/i.test(first) ? 'a' : 'o'} como responsável${ref.role ? ` (${ref.role})` : ' pela área'} na conversa pelo WhatsApp com ${referrer ? `${referrer}, da ` : 'a equipe da '}${nameOf(company)}. Abra citando a indicação (ex.: "${referrer ? `O ${referrer}` : 'A equipe'} da ${nameOf(company)} me passou seu contato"). E-mail curto, com assunto, uma pergunta e convite para uma conversa rápida.`,
+        instructions: /^equipe/i.test(ref.name)
+          ? `O contato da ${ref.name} (${email}) foi passado na conversa pelo WhatsApp com ${referrer ? `${referrer}, da ` : 'a equipe da '}${nameOf(company)}, sem o nome de uma pessoa. Escreva para a ${ref.name} ("Olá, ${ref.name}"), cite que ${referrer ?? 'o atendimento'} passou o contato e peça, se não for com eles, que encaminhem para quem cuida do marketing ou do comercial. E-mail curto, com assunto.`
+          : `${first} foi indicad${/a$/i.test(first) ? 'a' : 'o'} como responsável${ref.role ? ` (${ref.role})` : ' pela área'} na conversa pelo WhatsApp com ${referrer ? `${referrer}, da ` : 'a equipe da '}${nameOf(company)}. Abra citando a indicação (ex.: "${referrer ? `O ${referrer}` : 'A equipe'} da ${nameOf(company)} me passou seu contato"). E-mail curto, com assunto, uma pergunta e convite para uma conversa rápida.`,
         ...(await conversationContext(db, lead)),
       },
     });
@@ -1111,6 +1158,8 @@ async function applyBeelie(db: Db, ownerId: string, lead: Row, company: Row, sig
         return false;
       });
       if (sent) prospecting = true;
+      // E-mail configurado mas fora do horário (ou falha passageira): a rotina do servidor envia depois.
+      else if (await emailReady(db, ownerId)) prospecting = true;
     }
     if (!prospecting) await upsertReplyTask(db, ownerId, lead.id, {
       campaignId: camp?.id,

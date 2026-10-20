@@ -194,7 +194,7 @@ const norm = (s: string) =>
 
 /** Palavras que nunca são nome de pessoa (respostas curtas, cumprimentos, cargos). */
 const NOT_NAME = new Set(
-  'sim nao ok certo isso eu ele ela voce oi ola bom boa dia tarde noite tudo bem obrigado obrigada valeu aqui la empresa equipe pessoal time setor marketing comercial vendas financeiro rh diretor diretora gerente coordenador coordenadora analista dono dona socio socia proprietario proprietaria ceo cmo responsavel assistente atendimento contato quem que pois porque mas entao ali hoje agora ainda pode claro perfeito exato beleza blz show top legal combinado sou mesmo mesma canal suporte central sac recepcao recepcionista secretaria balcao loja escritorio whatsapp numero telefone bot robo virtual automatico geral administrativo atendente a o de da do das dos e'.split(' '),
+  'sim nao ok certo isso eu ele ela voce oi ola bom boa dia tarde noite tudo bem obrigado obrigada valeu aqui la empresa equipe pessoal time setor marketing comercial vendas financeiro rh diretor diretora gerente coordenador coordenadora analista dono dona socio socia proprietario proprietaria ceo cmo responsavel assistente atendimento contato quem que pois porque mas entao ali hoje agora ainda pode claro perfeito exato beleza blz show top legal combinado sou mesmo mesma canal suporte central sac compras suprimentos juridico logistica faturamento cobranca expedicao producao diretoria gerencia ti recepcao recepcionista secretaria balcao loja escritorio whatsapp numero telefone bot robo virtual automatico geral administrativo atendente a o de da do das dos e'.split(' '),
 );
 const ROLE_WORDS =
   /\b(diretor|diretora|gerente|coordenador|coordenadora|supervisor|supervisora|analista|assistente|socio|socia|dono|dona|proprietario|proprietaria|fundador|fundadora|ceo|cmo|cto|cfo|coo|head|lider|responsavel|executivo|executiva|consultor|consultora|especialista|presidente|vice|administrador|administradora|comprador|compradora|vendedor|vendedora|marketing|comercial)\b/;
@@ -204,7 +204,7 @@ const cap = (w: string) => (w.length <= 2 && /^(da|de|do|das|dos|e)$/i.test(w) ?
 /** Devolve o nome limpo ("ricardo" → "Ricardo") ou null se não parecer nome de pessoa. */
 export function cleanPersonName(raw: string | undefined | null, companyName?: string): string | null {
   if (!raw) return null;
-  const v = raw.replace(/[.!,;:]+$/g, '').replace(/\s+/g, ' ').trim();
+  const v = raw.replace(/[.!,;:]+$/g, '').replace(/\s+/g, ' ').trim().replace(/(\s+(e|de|da|do|das|dos))+$/i, '');
   if (v.length < 2 || v.length > 40) return null;
   if (/[\d@/\\?#()[\]{}<>"*_=+|]/.test(v)) return null;
   const words = v.split(' ');
@@ -248,6 +248,7 @@ const REFERRED = [
   /(?:quem (?:cuida|v[eê]|resolve|trata|responde)[^.?!]{0,40}?|(?:o|a) respons[aá]vel[^.?!]{0,30}?)\s(?:[eé]|eh)\s(?:o|a)\s+([\p{L}'’-]+(?:\s+[\p{L}'’-]+)?)/iu,
   /^(?:n[aã]o)[,.!\s]+(?:quem cuida\s+)?(?:[eé]|eh)\s+(?:o|a|com (?:o|a))\s+([\p{L}'’-]+)/iu,
   /\b(?:fal(?:a|e|ar) com|procur(?:a|e|ar)|chama|chame)\s+(?:o|a)\s+([\p{L}'’-]+)/iu,
+  /\b(?:aos? cuidados? d[aoe]|a\/c\.?|att\.?|aten[cç][aã]o)\s*:?\s*(?:sr\.?|sra\.?|o|a)?\s*([\p{L}'’-]+(?:\s+[\p{L}'’-]+)?)/iu,
 ];
 const NEED_RULES: { area: NeedArea; re: RegExp }[] = [
   { area: 'geracao_de_leads', re: /(site|pagina)[^.?!]{0,40}(nao|pouco|quase nao|praticamente nao|nenhum)[^.?!]{0,25}(gera|traz|vem|converte|recebe|chega)[^.?!]{0,20}(contato|cliente|lead|venda|oportunidade|pedido)|(nao|pouco|poucos|quase nenhum)[^.?!]{0,20}(contatos?|clientes?|leads?)[^.?!]{0,20}(pelo|do|no) site/ },
@@ -290,13 +291,20 @@ export function analyzeSignalsRules(text: string, lastOutbound?: string, ctx: { 
   // Indicação só com o e-mail da pessoa ("o contato da responsável: jamille.rocha@empresa.com.br"):
   // o nome vem do próprio e-mail (só quando parece nome de pessoa; contato@/marketing@ não contam).
   const refEmail = EMAIL.exec(text)?.[0]?.toLowerCase();
-  if (!referred && refEmail && /(respons|encaminh|setor|contato d[aoe]|falar com|entr(e|ar) em contato|procur(e|ar)|envi(e|ar) (para|pro)|mand(e|ar) (para|pro)|cuida d|e-?mail d[aoe])/.test(t)) {
+  let deptRef: string | null = null;
+  if (!referred && refEmail && /(respons|encaminh|setor|contato d[aoe]|falar com|entr(e|ar) em contato|procur(e|ar)|envi(e|ar) (para|pro)|mand(e|ar) (para|pro)|cuida d|e-?mail d[aoe]|via e-? ?mail|pelo e-? ?mail|por e-? ?mail)/.test(t)) {
     const local = refEmail.split('@')[0].replace(/\d+/g, '');
     const parts = local.split(/[._-]+/).filter((x) => x.length >= 2);
     const guess = parts.length ? cleanPersonName(parts.slice(0, 2).join(' '), ctx.companyName) : null;
     if (guess) referred = guess;
+    // E-mail de setor (compras@, marketing@): indicação para o setor; o nome da pessoa pode vir depois.
+    else if (parts.length && !/^(contato|atendimento|sac|info|faleconosco|ola|oi)$/.test(parts[0])) deptRef = parts[0];
   }
   if (referred) add('referred_name', referred);
+  if (deptRef && refEmail) {
+    add('referred_name', deptRef);
+    add('referred_contact', refEmail);
+  }
 
   // Nome de quem fala: frase explícita, ou resposta curta logo depois de "como posso te chamar?".
   const nm = NAME_AFTER.exec(text);
@@ -315,7 +323,7 @@ export function analyzeSignalsRules(text: string, lastOutbound?: string, ctx: { 
   const email = EMAIL.exec(text)?.[0]?.toLowerCase();
   const phone = PHONE.exec(text)?.[0];
   if (referred) add('referred_contact', email ?? phone ?? null);
-  else {
+  else if (!deptRef) {
     if (email) add('email', email);
     if (phone) add('phone', phone.replace(/\D/g, ''));
   }
@@ -422,6 +430,13 @@ export function mergeIntel(
   if (!auto) {
     // Pessoa indicada: registra à parte; nunca vira o nome de quem está falando.
     const refName = cleanPersonName(get('referred_name')?.value, ctx.companyName);
+    const refContact = get('referred_contact')?.value?.trim();
+    if (!refName && refContact && EMAIL.test(refContact)) {
+      // Indicou um setor ("Compras", "o setor de marketing") com e-mail: guarda o contato; o nome pode vir em seguida.
+      setFact(intel, 'referred_contact', EMAIL.exec(refContact)![0].toLowerCase(), 'confirmado', at, learned);
+      const dept = norm(get('referred_name')?.value ?? '').replace(/^(o |a )?(setor|departamento|equipe|time) d[eoa]s? /, '').trim();
+      if (dept && dept.length <= 30 && !/\d/.test(dept)) setFact(intel, 'referred_role', cap(dept), 'provavel', at, learned);
+    }
     if (refName) {
       setFact(intel, 'referred_name', refName, 'confirmado', at, learned);
       const rr = cleanRole(get('referred_role')?.value);
