@@ -287,6 +287,15 @@ export function analyzeSignalsRules(text: string, lastOutbound?: string, ctx: { 
       break;
     }
   }
+  // Indicação só com o e-mail da pessoa ("o contato da responsável: jamille.rocha@empresa.com.br"):
+  // o nome vem do próprio e-mail (só quando parece nome de pessoa; contato@/marketing@ não contam).
+  const refEmail = EMAIL.exec(text)?.[0]?.toLowerCase();
+  if (!referred && refEmail && /(respons|encaminh|setor|contato d[aoe]|falar com|entr(e|ar) em contato|procur(e|ar)|envi(e|ar) (para|pro)|mand(e|ar) (para|pro)|cuida d|e-?mail d[aoe])/.test(t)) {
+    const local = refEmail.split('@')[0].replace(/\d+/g, '');
+    const parts = local.split(/[._-]+/).filter((x) => x.length >= 2);
+    const guess = parts.length ? cleanPersonName(parts.slice(0, 2).join(' '), ctx.companyName) : null;
+    if (guess) referred = guess;
+  }
   if (referred) add('referred_name', referred);
 
   // Nome de quem fala: frase explícita, ou resposta curta logo depois de "como posso te chamar?".

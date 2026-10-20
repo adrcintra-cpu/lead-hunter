@@ -924,6 +924,81 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
   return { ...(inbound as Row), suggestion, category: cls.category, interest: hasRealInterest(signals), beelie: intelResult?.intel ?? null, task: i.deferTask ? task : null };
 }
 
+/**
+ * E-mail de apresentação para a pessoa indicada na conversa ("o contato da responsável é jamille@...").
+ * Só envia com e-mail configurado (Resend + remetente), IA disponível, dentro do horário de envio,
+ * fora da lista de opt-out e uma vez por destinatário. Devolve true quando enviou.
+ */
+export async function sendReferralEmail(db: Db, ownerId: string, lead: Row, company: Row, ref: { name: string; role?: string; email: string }): Promise<boolean> {
+  const email = ref.email;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !hasClaude() || !Deno.env.get('RESEND_API_KEY')) return false;
+  const { data: p } = await db.from('profiles').select('*').eq('id', ownerId).maybeSingle();
+  const sender = p?.sender_email || Deno.env.get('EMAIL_FROM_FALLBACK') || null;
+  if (!p || !sender) return false;
+  if (!inWindow(new Date(), (p.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW)) return false;
+  const { data: supp } = await db.from('suppression_list').select('id').eq('owner_id', ownerId).eq('kind', 'email').eq('value', email).limit(1);
+  if (supp?.length) return false;
+  const { data: dup } = await db.from('messages').select('id').eq('lead_id', lead.id).eq('channel', 'email').eq('recipient', email).limit(1);
+  if (dup?.length) return false;
+
+  const referrer = lead.contact_name ? String(lead.contact_name).split(' ')[0] : null;
+  const first = ref.name.split(' ')[0];
+  const sdr = await sdrName(db, ownerId);
+  const started = Date.now();
+  let raw: string;
+  try {
+    const run = await runTask<string>('generateApproach', {
+      company: companyForAI(company),
+      channel: 'email',
+      options: {
+        variant: 0,
+        senderName: sdr,
+        senderCompany: p.company_name,
+        offer: p.offer,
+        contactName: ref.name,
+        contactRole: ref.role,
+        stage: 'primeira',
+        instructions: `${first} foi indicad${/a$/i.test(first) ? 'a' : 'o'} como responsável${ref.role ? ` (${ref.role})` : ' pela área'} na conversa pelo WhatsApp com ${referrer ? `${referrer}, da ` : 'a equipe da '}${nameOf(company)}. Abra citando a indicação (ex.: "${referrer ? `O ${referrer}` : 'A equipe'} da ${nameOf(company)} me passou seu contato"). E-mail curto, com assunto, uma pergunta e convite para uma conversa rápida.`,
+        ...(await conversationContext(db, lead)),
+      },
+    });
+    raw = run.output;
+    await logRun(db, ownerId, 'generateApproach', started, 'ok', run.usage);
+  } catch (e) {
+    await logRun(db, ownerId, 'generateApproach', started, 'error', {});
+    throw e;
+  }
+  const parsed = parseSubject(raw);
+  let body = parsed.body;
+  if (p.signature && !body.includes(p.signature)) body = `${body}\n\n${p.signature}`;
+  body = withOptOutFooter(body);
+  const subject = parsed.subject || `${nameOf(company)} — indicação`;
+  const html = emailHtml(body, p.signature, { imageUrl: p.signature_image_url, linkUrl: p.signature_link_url, width: p.signature_image_width }) ?? undefined;
+  const r = await sendEmail({ from: sender, fromName: p.company_name ? `${sdr} | ${p.company_name}` : sdr, to: email, subject, text: body, html });
+  const at = new Date().toISOString();
+  await db.from('messages').insert({
+    owner_id: ownerId,
+    lead_id: lead.id,
+    channel: 'email',
+    generated_content: body,
+    final_content: body,
+    status: 'sent',
+    model: MODEL,
+    prompt_version: PROMPT_VERSION,
+    subject,
+    sender,
+    recipient: email,
+    template: 'IA — e-mail para indicado',
+    provider: r.provider,
+    external_id: r.externalId,
+    sent_at: at,
+  });
+  // A resposta dela por e-mail cai neste lead: o e-mail do lead passa a ser o da indicada (se não tinha).
+  if (!lead.email) await db.from('leads').update({ email }).eq('id', lead.id);
+  await log(db, ownerId, lead.id, 'message_sent', `E-mail de apresentação enviado para ${ref.name} (${email}), indicad${/a$/i.test(first) ? 'a' : 'o'} na conversa.`, { channel: 'email', provider: r.provider, kind: 'referral_email' });
+  return true;
+}
+
 /** Aplica a análise ao lead: memória (leads.beelie), cadastro, outro responsável e reunião. */
 async function applyBeelie(db: Db, ownerId: string, lead: Row, company: Row, signals: ConversationSignals, at: string, camp: Row | null, meetingTaskByDecision = false) {
   if (!('beelie' in lead)) return null; // migration ainda não aplicada: segue sem a memória
@@ -973,6 +1048,14 @@ async function applyBeelie(db: Db, ownerId: string, lead: Row, company: Row, sig
         await log(db, ownerId, lead.id, 'lead_updated', res.status === 'em_prospeccao' ? `${r.referred.name} (indicado) já está em prospecção.` : `BEELIE vai falar com ${r.referred.name} (indicado na conversa), na campanha “${added.campaign.name}”.`, { kind: 'referral_prospect', referredLeadId: res.leadId });
         prospecting = true;
       }
+    }
+    // Indicado só com e-mail: o BEELIE manda o e-mail de apresentação na hora, citando quem indicou.
+    if (!prospecting && c.includes('@')) {
+      const sent = await sendReferralEmail(db, ownerId, lead, company, { name: r.referred.name, role: r.referred.role, email: c.trim().toLowerCase() }).catch((err) => {
+        console.error('referral email', err instanceof Error ? err.message : String(err));
+        return false;
+      });
+      if (sent) prospecting = true;
     }
     if (!prospecting) await upsertReplyTask(db, ownerId, lead.id, {
       campaignId: camp?.id,
