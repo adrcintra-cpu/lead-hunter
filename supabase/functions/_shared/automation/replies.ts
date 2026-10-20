@@ -316,6 +316,10 @@ const BOT_PATTERNS = [
   /\bseg(unda)?\.?(-feira)? (a|à) sex(ta)?\.?(-feira)?,? (das )?\d{1,2} ?h/,
   /\bagradecemos (o seu|seu|pelo) contato\b/,
   /\bretornaremos (o mais breve|em breve|assim que)/,
+  /\bresponderemos (a |sua |seu |sua mensagem |seu contato |voc[eê] )?(o mais breve|em breve|assim que)/,
+  /\bseja bem[- ]vind[oa] (a|à|ao)\b/,
+  /\bdevido (a|à) alta demanda\b/,
+  /\bagradece (o |seu |pelo )?contato\b/,
 ];
 
 export function looksAutomated(text: string): boolean {

@@ -217,6 +217,8 @@ export async function decideAndTask(db: Row, ownerId: string, leadId: string, re
   // Robô do outro lado: o BEELIE para e fica só no histórico do lead (sem tarefa: quase nunca vale a pena).
   if (decision === 'robo') return null;
   if (!task) return auto;
+  // Mensagem de robô (boas-vindas, horário de atendimento): o BEELIE tenta chegar numa pessoa; sem tarefa.
+  if (looksAutomated(String(result.body ?? ''))) return auto;
   const human =
     !auto ||
     ['orcamento', 'reuniao'].includes(String(result.category)) ||
