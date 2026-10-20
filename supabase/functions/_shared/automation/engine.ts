@@ -289,6 +289,7 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   const sum: RunSummary = { activated: 0, processed: 0, sent: 0, failed: 0, finished: 0, errors: [] };
 
   await sweepStaleQrQueue(db).catch(() => undefined);
+  await rescueManualWhatsapp(db, now).catch(() => undefined);
 
   // Campanhas agendadas que chegaram na hora.
   const scheduled: Row[] = await must(db.from('campaigns').select('id').eq('status', 'agendada').lte('scheduled_at', now.toISOString()));
@@ -605,9 +606,11 @@ export async function qrCampaignFallback(db: Db, ownerId: string, messageId: str
       .eq('status', 'queued');
     return true;
   }
+  // Já recuperada uma vez de uma tarefa: fica como tarefa de vez (não volta mais para a fila).
+  const final = /recuperada/.test(String(cur.failure_reason ?? ''));
   const { data: m } = await db
     .from('messages')
-    .update({ status: 'draft', provider: null, template: 'Campanha (envio manual)', failure_reason: reason.slice(0, 300) })
+    .update({ status: 'draft', provider: null, template: 'Campanha (envio manual)', failure_reason: `${final ? 'final: ' : ''}${reason}`.slice(0, 300) })
     .eq('id', messageId)
     .eq('owner_id', ownerId)
     .eq('status', 'queued')
@@ -645,7 +648,59 @@ export async function qrCampaignSent(db: Db, ownerId: string, messageId: string,
   await db.from('leads').update({ last_contact_at: at }).eq('id', m.lead_id);
   const { data: camp } = m.campaign_id ? await db.from('campaigns').select('name').eq('id', m.campaign_id).maybeSingle() : { data: null };
   await log(db, ownerId, m.lead_id, 'message_sent', `WhatsApp enviado pelo WhatsApp conectado${camp?.name ? ` (${camp.name})` : ''}`, { messageId, channel: 'whatsapp', provider: 'whatsapp_qr' });
+  // A tarefa de envio manual desse lead (se havia) perde o sentido: a mensagem já saiu.
+  await db.from('tasks').update({ status: 'concluida', done_at: at }).eq('lead_id', m.lead_id).eq('owner_id', ownerId).eq('status', 'aberta').like('title', 'Enviar WhatsApp para%');
   return true;
+}
+
+/**
+ * Mensagens de campanha que viraram tarefa de envio manual (serviço fora do ar, WhatsApp desconectado):
+ * com o WhatsApp conectado de volta e dentro do horário, voltam para a fila e saem sozinhas.
+ * A tarefa é concluída quando a mensagem sai. Só rascunhos dos últimos 7 dias que você não abriu.
+ */
+export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<number> {
+  const since = new Date(now.getTime() - 7 * 864e5).toISOString();
+  const { data } = await db
+    .from('messages')
+    .select('id, owner_id, lead_id, recipient, final_content, template, failure_reason')
+    .eq('channel', 'whatsapp')
+    .eq('status', 'draft')
+    .like('template', '%(envio manual)%')
+    .not('campaign_id', 'is', null)
+    .gte('created_at', since)
+    .limit(30);
+  const ready = new Map<string, boolean>();
+  let n = 0;
+  for (const m of (data ?? []) as Row[]) {
+    if (!ready.has(m.owner_id)) {
+      const [{ data: conn }, { data: p }] = await Promise.all([
+        db.from('whatsapp_connections').select('status').eq('user_id', m.owner_id).maybeSingle(),
+        db.from('profiles').select('send_window, whatsapp_qr_campaigns').eq('id', m.owner_id).maybeSingle(),
+      ]);
+      ready.set(m.owner_id, qrServiceConfigured() && conn?.status === 'conectado' && p?.whatsapp_qr_campaigns !== false && inWindow(now, (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW));
+    }
+    if (!ready.get(m.owner_id) || /^final:/.test(String(m.failure_reason ?? ''))) continue;
+    let phone = String(m.recipient ?? '').replace(/\D/g, '');
+    if (!phone) {
+      const { data: l } = await db.from('leads').select('companies(whatsapp)').eq('id', m.lead_id).maybeSingle();
+      phone = toE164Digits(l?.companies?.whatsapp ?? '');
+    }
+    if (!phone) continue;
+    const { data: moved } = await db
+      .from('messages')
+      .update({ status: 'queued', provider: 'whatsapp_qr', recipient: phone, template: String(m.template).replace(/\s*\(envio manual\)/, ''), failure_reason: 'retry:1: recuperada da tarefa de envio manual' })
+      .eq('id', m.id)
+      .eq('status', 'draft')
+      .select('id')
+      .maybeSingle();
+    if (!moved) continue;
+    const ok = await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone, text: String(m.final_content ?? '') });
+    if (ok) {
+      n++;
+      await log(db, m.owner_id, m.lead_id, 'cadence_step', 'WhatsApp que tinha virado tarefa voltou para a fila do WhatsApp conectado e sai sozinho.', { messageId: m.id });
+    }
+  }
+  return n;
 }
 
 export const QR_MAX_RETRIES = 3;
