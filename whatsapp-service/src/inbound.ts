@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { config } from './config.js';
+import { mediaFailReason } from './vision.js';
 import { log, maskPhone, maskUser } from './log.js';
 
 /**
@@ -429,7 +430,9 @@ export class InboundRelay {
       return `[Imagem] ${text}${caption}`.slice(0, 4000);
     } catch (err) {
       log.warn({ user: maskUser(userId), err: err instanceof Error ? err.message : String(err) }, audio ? 'áudio de lead não transcrito' : 'imagem de lead não lida');
-      return null;
+      // Aviso com o motivo (vale para o histórico e para a resposta ao dono).
+      const why = mediaFailReason(err);
+      return audio ? `[Áudio recebido — não transcrito: ${why}]` : `[Imagem recebida — não lida: ${why}]`;
     }
   }
 

@@ -10,6 +10,7 @@
 //   unknown      número que não é lead escreveu: com a opção ligada e mensagem comercial, vira lead e segue como resposta.
 // Publicar sem verificação de JWT: supabase functions deploy whatsapp-qr-inbound --no-verify-jwt
 
+import { describeImageClaude, logRun } from '../_shared/ai/claude.ts';
 import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent, upsertReplyTask } from '../_shared/automation/engine.ts';
 import { inWindow } from '../_shared/automation/planner.ts';
 import { looksAutomated } from '../_shared/automation/replies.ts';
@@ -81,6 +82,22 @@ Deno.serve(async (req) => {
   const ownerId = String(b.ownerId ?? '');
   if (!UUID.test(ownerId)) return new Response('Dados inválidos', { status: 400 });
   const db = adminClient();
+
+  // Leitura de imagem com o Claude (o serviço do WhatsApp manda quando a OpenAI não está disponível).
+  if (b.action === 'vision') {
+    const image = typeof b.image === 'string' ? b.image : '';
+    if (!image || image.length > 8_000_000) return new Response('Imagem inválida', { status: 400 });
+    const started = Date.now();
+    try {
+      const r = await describeImageClaude(image, String(b.mimetype ?? 'image/jpeg'), typeof b.caption === 'string' ? b.caption : undefined);
+      await logRun(db, ownerId, 'describeImage', started, 'ok', r.usage);
+      return Response.json({ ok: true, text: r.text });
+    } catch (err) {
+      await logRun(db, ownerId, 'describeImage', started, 'error', {});
+      console.error('vision', err instanceof Error ? err.message : String(err));
+      return Response.json({ ok: false, error: 'falha na leitura' }, { status: 502 });
+    }
+  }
 
   // Mensagem do dono (o seu WhatsApp pessoal) para o BEELIE: pedido, contato para prospectar ou relatório.
   if (b.action === 'owner') {

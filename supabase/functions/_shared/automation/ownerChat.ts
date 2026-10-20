@@ -416,7 +416,11 @@ export const AUDIO_FAILED = 'Não consegui ouvir esse áudio agora. Pode mandar 
 
 /** Mensagem do dono: entende o pedido e devolve a resposta. `history` = conversa recente com ele. */
 export async function handleOwnerMessage(db: Db, ownerId: string, text: string, now = new Date(), history?: string): Promise<string> {
-  if (/^\[Áudio recebido/i.test(text.trim())) return AUDIO_FAILED;
+  const media = /^\[(Áudio|Imagem) recebid[oa](?: — n[aã]o (?:transcrito|lida): ([^\]]+))?/i.exec(text.trim());
+  if (media) {
+    const why = media[2] && !/ouça|veja/i.test(media[2]) ? ` (${media[2].trim()})` : '';
+    return media[1].toLowerCase() === 'áudio' ? `${AUDIO_FAILED.replace('agora.', `agora${why}.`)}` : `Não consegui ler essa imagem agora${why}. Pode mandar de novo ou escrever o que precisa?`;
+  }
   const last = await lastOwnerContact(db, ownerId, now);
   const it = await understand(db, ownerId, text, last, history);
   if (it.intent === 'add_context' && last) return addContext(db, ownerId, last, it.context ?? { company: null, note: null }, text);

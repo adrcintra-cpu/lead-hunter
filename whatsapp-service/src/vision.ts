@@ -44,3 +44,41 @@ export async function describeImage(image: Buffer, mimetype = 'image/jpeg', capt
   const json = (await res.json().catch(() => ({}))) as { choices?: { message?: { content?: string } }[] };
   return (json.choices?.[0]?.message?.content ?? '').trim();
 }
+
+/** Motivo curto e legível de uma falha de leitura (para o aviso ao dono e o histórico). */
+export function mediaFailReason(err: unknown): string {
+  const m = err instanceof Error ? err.message : String(err);
+  if (/insufficient_quota|billing|credit|cr[eé]dito|\(429\)/i.test(m)) return 'sem crédito na OpenAI';
+  if (/OPENAI_API_KEY|\(401\)|invalid_api_key/i.test(m)) return 'chave da OpenAI inválida ou ausente no Railway';
+  if (/grande demais|mais de/i.test(m)) return 'arquivo grande demais';
+  if (/sess[aã]o/i.test(m)) return 'WhatsApp desconectado';
+  return 'falha na leitura';
+}
+
+/** Lê a imagem com o Claude, pela função do Supabase (a chave da IA fica lá). */
+async function describeViaClaude(image: Buffer, mimetype: string, caption: string | undefined, ownerId: string): Promise<string> {
+  const url = config.inboundUrl || `${config.supabaseUrl.replace(/\/+$/, '')}/functions/v1/whatsapp-qr-inbound`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-inbound-secret': config.inboundSecret },
+    body: JSON.stringify({ action: 'vision', ownerId, mimetype, caption: caption?.slice(0, 300), image: image.toString('base64') }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) throw new Error(`Falha ao ler a imagem com o Claude (${res.status}).`);
+  const j = (await res.json().catch(() => ({}))) as { text?: string };
+  return (j.text ?? '').trim();
+}
+
+/** Lê a imagem: OpenAI quando configurada; se falhar (ou sem chave), o Claude. */
+export async function describeImageAny(image: Buffer, mimetype: string, caption: string | undefined, ownerId: string): Promise<string> {
+  if (image.length > MAX_IMAGE_BYTES) throw new Error('Imagem grande demais para ler.');
+  if (config.openaiKey) {
+    try {
+      const t = await describeImage(image, mimetype, caption);
+      if (t) return t;
+    } catch {
+      /* tenta com o Claude */
+    }
+  }
+  return describeViaClaude(image, mimetype, caption, ownerId);
+}

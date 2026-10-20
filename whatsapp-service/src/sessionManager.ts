@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import { clearAuthState, useDatabaseAuthState } from './authState.js';
 import { InboundRelay, phoneKey } from './inbound.js';
 import { MAX_TRANSCRIBE_SECONDS, textToSpeech, transcribe, ttsAvailable } from './tts.js';
-import { describeImage, MAX_IMAGE_BYTES } from './vision.js';
+import { describeImageAny, MAX_IMAGE_BYTES } from './vision.js';
 import { config } from './config.js';
 import { libLogger, log, maskPhone, maskUser } from './log.js';
 import { formatPhone, normalizePhone, toJid } from './phone.js';
@@ -449,13 +449,14 @@ export class SessionManager {
     const audio = inner?.audioMessage;
     const image = inner?.imageMessage;
     if (!audio && !image) return null;
-    if (!ttsAvailable()) throw new Error('falta OPENAI_API_KEY nas variáveis do Railway');
+    // Áudio precisa da OpenAI; imagem também pode ser lida pelo Claude.
+    if (audio && !ttsAvailable()) throw new Error('falta OPENAI_API_KEY nas variáveis do Railway');
     if (!s?.sock) throw new Error('sessão do WhatsApp fechada');
     if (audio && Number(audio.seconds) > MAX_TRANSCRIBE_SECONDS) throw new Error(`áudio com mais de ${MAX_TRANSCRIBE_SECONDS / 60} min`);
     if (image && Number(image.fileLength ?? 0) > MAX_IMAGE_BYTES) throw new Error('imagem grande demais');
     const sock = s.sock;
     const buf = (await downloadMediaMessage(raw, 'buffer', {}, { logger: libLogger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
-    return audio ? transcribe(buf, audio.mimetype ?? 'audio/ogg') : describeImage(buf, image.mimetype ?? 'image/jpeg', image.caption ?? undefined);
+    return audio ? transcribe(buf, audio.mimetype ?? 'audio/ogg') : describeImageAny(buf, image.mimetype ?? 'image/jpeg', image.caption ?? undefined, userId);
   }
 
   /** Aviso ou relatório para o WhatsApp pessoal do dono (precisa da sessão conectada). */

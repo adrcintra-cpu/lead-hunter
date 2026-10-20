@@ -88,3 +88,38 @@ export async function logRun(db: any, ownerId: string, fn: string, started: numb
     status,
   });
 }
+
+/**
+ * Lê uma imagem recebida no WhatsApp (print de contato, cartão de visita, documento) e devolve
+ * em texto só o que está visível: nomes, cargos, telefones, e-mails, sites e textos importantes.
+ */
+export async function describeImageClaude(base64: string, mediaType: string, caption?: string): Promise<{ text: string; usage: ClaudeRun['usage'] }> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurada no servidor');
+  const type = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mediaType) ? mediaType : 'image/jpeg';
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 400,
+      system:
+        'Você lê imagens enviadas no WhatsApp de uma empresa. Responda em português do Brasil, em até 4 linhas, só com o que está visível: ' +
+        'nomes de pessoas e empresas, cargos, telefones (com DDD), e-mails, sites e textos importantes. Se for print de perfil ou cartão de contato, escreva "Contato: <nome> — <telefone>". ' +
+        'Se a imagem não tiver texto relevante, descreva em uma frase curta. Nunca invente nem complete dados que não estejam legíveis.',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: type, data: base64 } },
+            { type: 'text', text: caption ? `Legenda enviada junto: ${caption.slice(0, 300)}` : 'Leia a imagem.' },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const text = (data.content ?? []).filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('').trim();
+  return { text, usage: data.usage ?? {} };
+}
