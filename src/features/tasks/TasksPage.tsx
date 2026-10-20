@@ -26,7 +26,7 @@ export function TaskItem({ t, showLead = true }: { t: Task; showLead?: boolean }
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
       : undefined;
   return (
-    <li className="flex items-start gap-3 px-5 py-3">
+    <li className="flex flex-wrap items-start gap-x-3 gap-y-2 px-5 py-3">
       <button
         type="button"
         aria-label={t.status === 'aberta' ? 'Concluir tarefa' : 'Reabrir tarefa'}
@@ -35,7 +35,7 @@ export function TaskItem({ t, showLead = true }: { t: Task; showLead?: boolean }
       >
         {t.status === 'aberta' ? <Circle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
       </button>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[220px] flex-1">
         <button type="button" className="group block w-full text-left" aria-expanded={open} onClick={() => setOpen(!open)}>
           <div className={cx('flex items-start gap-1.5 text-sm font-bold group-hover:text-accent', t.status === 'concluida' && 'text-ink-faint line-through')}>
             <span className="min-w-0 flex-1">{t.title}</span>
@@ -54,10 +54,10 @@ export function TaskItem({ t, showLead = true }: { t: Task; showLead?: boolean }
             </button>
           )}
         </div>
-        {open && t.leadId && <TaskDetail leadId={t.leadId} onOpenLead={() => drawer.open(t.leadId!)} />}
+        {open && t.leadId && <TaskDetail leadId={t.leadId} pending={waMessage?.finalContent} onOpenLead={() => drawer.open(t.leadId!)} />}
       </div>
       {t.actionUrl && t.status === 'aberta' && (
-        <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
+        <div className="flex w-full shrink-0 flex-wrap gap-1.5 pl-8 md:w-auto md:pl-0">
           {waMessage && <SendConnectedButton messageId={waMessage.id} small />}
           <a
             href={t.actionUrl}
@@ -80,7 +80,7 @@ export function TaskItem({ t, showLead = true }: { t: Task; showLead?: boolean }
 }
 
 /** Detalhe da tarefa: últimas mensagens da conversa e a resposta que o BEELIE deixou pronta. */
-function TaskDetail({ leadId, onOpenLead }: { leadId: string; onOpenLead: () => void }) {
+function TaskDetail({ leadId, pending, onOpenLead }: { leadId: string; pending?: string; onOpenLead: () => void }) {
   const db = useDb();
   const service = useService();
   const { toast } = useApp();
@@ -119,7 +119,13 @@ function TaskDetail({ leadId, onOpenLead }: { leadId: string; onOpenLead: () => 
       ) : (
         <p className="text-[13px] text-ink-faint">Ainda sem conversa com este lead.</p>
       )}
-      {draft && (
+      {pending && (
+        <div className="rounded-lg border border-accent/40 bg-surface p-3">
+          <div className="text-xs font-bold text-ink-soft">Mensagem que vai ser enviada agora</div>
+          <p className="mt-1 whitespace-pre-wrap text-[13px]">{pending}</p>
+        </div>
+      )}
+      {draft && !pending && (
         <div className="rounded-lg border border-line bg-surface p-3">
           <div className="text-xs font-bold text-ink-soft">Resposta pronta do BEELIE (ainda não enviada)</div>
           <p className="mt-1 whitespace-pre-wrap text-[13px]">{draft.finalContent}</p>

@@ -8,7 +8,7 @@ import { withDefaults } from '../ai/assistantDefaults.ts';
 import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { emailHtml, sendEmail } from '../channels/resend.ts';
-import { nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
+import { inWindow, nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
@@ -592,6 +592,19 @@ export async function qrCampaignFallback(db: Db, ownerId: string, messageId: str
     await log(db, ownerId, f.lead_id, 'message_failed', 'O número deste lead não tem WhatsApp: a prospecção dele parou (sem tarefa para você).', { messageId, reason: 'sem_whatsapp' });
     return true;
   }
+  // Falha passageira (serviço reiniciou, WhatsApp desconectado, intervalo): fica na fila e tenta de novo
+  // sozinho (até 3 vezes, em 30 min, dentro do horário). Só depois vira tarefa para você.
+  const { data: cur } = await db.from('messages').select('id, failure_reason').eq('id', messageId).eq('owner_id', ownerId).eq('status', 'queued').maybeSingle();
+  if (!cur) return false;
+  const tries = Number(/^retry:(\d+)/.exec(String(cur.failure_reason ?? ''))?.[1] ?? 0);
+  if (tries < QR_MAX_RETRIES) {
+    await db
+      .from('messages')
+      .update({ failure_reason: `retry:${tries + 1}: ${reason.slice(0, 200)}`, updated_at: new Date().toISOString() })
+      .eq('id', messageId)
+      .eq('status', 'queued');
+    return true;
+  }
   const { data: m } = await db
     .from('messages')
     .update({ status: 'draft', provider: null, template: 'Campanha (envio manual)', failure_reason: reason.slice(0, 300) })
@@ -635,11 +648,37 @@ export async function qrCampaignSent(db: Db, ownerId: string, messageId: string,
   return true;
 }
 
-/** Fila perdida (serviço reiniciou antes de enviar): depois de 2 h na fila, a mensagem vira tarefa manual. */
-async function sweepStaleQrQueue(db: Db) {
-  const before = new Date(Date.now() - 2 * 3600_000).toISOString();
-  const { data } = await db.from('messages').select('id, owner_id').eq('provider', 'whatsapp_qr').eq('status', 'queued').lt('created_at', before).limit(50);
-  for (const m of (data ?? []) as Row[]) await qrCampaignFallback(db, m.owner_id, m.id, 'o serviço de WhatsApp reiniciou antes de enviar');
+export const QR_MAX_RETRIES = 3;
+
+/**
+ * Fila do WhatsApp conectado parada há mais de 30 min (serviço reiniciou, falha passageira):
+ * manda de novo para o serviço, dentro do horário de envio. Depois de 3 tentativas, vira tarefa manual.
+ */
+export async function sweepStaleQrQueue(db: Db, now = new Date()) {
+  const before = new Date(now.getTime() - 30 * 60_000).toISOString();
+  const { data } = await db
+    .from('messages')
+    .select('id, owner_id, lead_id, recipient, final_content, failure_reason, updated_at, created_at')
+    .eq('provider', 'whatsapp_qr')
+    .eq('status', 'queued')
+    .lt('updated_at', before)
+    .limit(30);
+  const windows = new Map<string, SendWindow>();
+  for (const m of (data ?? []) as Row[]) {
+    if (!windows.has(m.owner_id)) {
+      const { data: p } = await db.from('profiles').select('send_window').eq('id', m.owner_id).maybeSingle();
+      windows.set(m.owner_id, (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW);
+    }
+    if (!inWindow(now, windows.get(m.owner_id)!)) continue; // tenta de novo no horário de envio
+    const tries = Number(/^retry:(\d+)/.exec(String(m.failure_reason ?? ''))?.[1] ?? 0);
+    if (tries >= QR_MAX_RETRIES || !m.recipient) {
+      await qrCampaignFallback(db, m.owner_id, m.id, String(m.failure_reason ?? 'o serviço de WhatsApp não enviou').replace(/^retry:\d+:\s*/, ''));
+      continue;
+    }
+    await db.from('messages').update({ failure_reason: `retry:${tries + 1}: reenviada para a fila`, updated_at: now.toISOString() }).eq('id', m.id).eq('status', 'queued');
+    const ok = await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone: String(m.recipient), text: String(m.final_content ?? '') });
+    if (ok) await log(db, m.owner_id, m.lead_id, 'cadence_step', 'WhatsApp reenviado para a fila do WhatsApp conectado (tentativa automática).', { messageId: m.id, retry: tries + 1 });
+  }
 }
 
 // ---------- Status de entrega (webhooks) ----------
