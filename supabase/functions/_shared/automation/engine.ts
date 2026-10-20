@@ -9,7 +9,7 @@ import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { inWindow, nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
-import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
+import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, looksAutomated, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, cleanPersonName, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { feedCampaigns } from './feeder.ts';
@@ -895,6 +895,11 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
 
   // Interesse só com sinal real na conversa (não basta responder).
   const signals = combineSignals(aiSignals, analyzeSignalsRules(text, lastOutbound, { companyName: name, category: cls.category }));
+  // Mensagem de robô (menu, "é só chamar no número", horário de atendimento) não é interesse, orçamento nem reunião.
+  if (looksAutomated(text) && ['interessado', 'informacoes', 'orcamento', 'reuniao'].includes(cls.category)) {
+    cls = { ...cls, category: 'nao_identificado', classification: 'outro', suggestedAction: 'Atendimento automático: buscar uma pessoa por outro canal.' };
+  }
+  if (looksAutomated(text)) signals.intent = 'resposta_automatica';
   cls = checkInterest(cls, signals);
 
   const active: Row[] = await must(db.from('enrollments').select('id, status, campaign_id').eq('lead_id', lead.id).in('status', ['ativa', 'pausada']));

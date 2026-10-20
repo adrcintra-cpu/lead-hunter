@@ -306,6 +306,16 @@ const BOT_PATTERNS = [
   /\bvoc[eê] concorda\b/,
   /\bhor[aá]rio de atendimento\b/,
   /\bem breve (um|uma|nosso|nossa) (atendente|consultor|consultora|especialista)/,
+  /\bop[cç][oõ]es v[aá]lidas\b/,
+  /\beu sou o whats\b/,
+  /\bsou (o|a) (assistente|atendente) (virtual|digital)\b/,
+  /\bassistente (virtual|de compras|de vendas|de atendimento)\b/,
+  /\bsua experi[eê]ncia (seja|ser[aá]) (simples|r[aá]pida|[aá]gil)/,
+  /\b(é|e) s[oó] (chamar|clicar) no (n[uú]mero|link|bot[aã]o)[^.!?]{0,60}(assistente|atendimento|central|sac)\b/,
+  /\batendimento (de|das?) seg(unda)?\.?(-feira)? (a|à|até) sex/,
+  /\bseg(unda)?\.?(-feira)? (a|à) sex(ta)?\.?(-feira)?,? (das )?\d{1,2} ?h/,
+  /\bagradecemos (o seu|seu|pelo) contato\b/,
+  /\bretornaremos (o mais breve|em breve|assim que)/,
 ];
 
 export function looksAutomated(text: string): boolean {
