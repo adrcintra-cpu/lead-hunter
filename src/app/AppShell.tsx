@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useSearchParams } from 'react-router-dom';
-import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow } from 'lucide-react';
+import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow, Send } from 'lucide-react';
 import { SimClock } from './SimClock';
 import { useApp, useDb } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
@@ -15,6 +15,7 @@ const NAV = [
   { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
   { to: '/cadencias', label: 'Cadências', icon: Workflow },
   { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
+  { to: '/envios', label: 'Envios', icon: Send },
   { to: '/listas', label: 'Listas', icon: List },
   { to: '/buscas', label: 'Buscas', icon: Bookmark },
   { to: '/configuracoes', label: 'Configurações', icon: Settings },

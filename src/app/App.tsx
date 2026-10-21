@@ -15,6 +15,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage';
 import { CampaignDetailPage, CampaignsPage } from '@/features/campaigns/CampaignsPage';
 import { CadenceEditorPage, CadencesPage } from '@/features/cadences/CadencesPage';
 import { TasksPage } from '@/features/tasks/TasksPage';
+import { MessagesPage } from '@/features/messages/MessagesPage';
 
 export function App() {
   const { session, loading, loadError, service, signOut } = useApp();
@@ -65,6 +66,7 @@ export function App() {
         <Route path="cadencias" element={<CadencesPage />} />
         <Route path="cadencias/:cadenceId" element={<CadenceEditorPage />} />
         <Route path="tarefas" element={<TasksPage />} />
+        <Route path="envios" element={<MessagesPage />} />
         <Route path="configuracoes" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
