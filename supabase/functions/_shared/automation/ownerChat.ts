@@ -5,6 +5,7 @@
 // Só mensagens do número cadastrado em Configurações são tratadas como do dono.
 
 import { hasClaude, logRun, runTask } from '../ai/claude.ts';
+import { explainClaudeError } from '../ai/errors.ts';
 import { nextWindowStart, startOfDayBRT } from './planner.ts';
 import { formatBr, nationalDigits, ufFromPhone } from './unknownInbound.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from './types.ts';
@@ -431,7 +432,7 @@ export async function handleOwnerMessage(db: Db, ownerId: string, text: string, 
   if (asked) {
     const r = await answerOwner(db, ownerId, text, it.lookup ?? null, now, history);
     if (r.answer) return r.answer;
-    return `Não consegui montar a resposta agora${r.error ? ` (${r.error})` : ''}. Enquanto isso, o resumo de hoje:\n\n${await buildReport(db, ownerId, now)}`;
+    return `Não consegui montar a resposta agora.${r.error ? `\n${r.error[0].toUpperCase()}${r.error.slice(1)}` : ''}\n\nEnquanto isso, o resumo de hoje:\n\n${await buildReport(db, ownerId, now)}`;
   }
   return HELP;
 }
@@ -552,6 +553,8 @@ export async function answerOwner(db: Db, ownerId: string, text: string, lookup:
     await logRun(db, ownerId, 'ownerAsk', started, 'error', {});
     console.error('ownerAsk', step, msg);
     // Motivo curto, sem detalhes técnicos longos.
+    const api = /Claude API (\d{3}): (.*)/s.exec(msg);
+    if (step === 'IA' && api) return { answer: null, error: explainClaudeError(Number(api[1]), api[2]) };
     return { answer: null, error: `falha ao ${step === 'IA' ? 'consultar a IA' : 'ler os dados'}: ${msg.replace(/\s+/g, ' ').slice(0, 140)}` };
   }
 }
