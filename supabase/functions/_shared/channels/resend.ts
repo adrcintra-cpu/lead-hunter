@@ -96,7 +96,7 @@ export async function verifySvix(rawBody: string, headers: Headers): Promise<boo
   const sigs = headers.get('svix-signature');
   if (!secret || !id || !ts || !sigs) return false;
   if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // replay
-  let keyBytes: Uint8Array;
+  let keyBytes: Uint8Array<ArrayBuffer>;
   try {
     keyBytes = Uint8Array.from(atob(secret.replace(/^whsec_/, '')), (c) => c.charCodeAt(0));
   } catch {
