@@ -14,6 +14,7 @@ import { analyzeSignalsRules, beelieBrief, cleanPersonName, combineSignals, merg
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
 import { feedCampaigns } from './feeder.ts';
 import { huntLeads } from './hunter.ts';
+import { checkAiHealth } from './healthAlert.ts';
 import { addContacts, samePhone, sendDailyReports } from './ownerChat.ts';
 import { DEFAULT_SEND_WINDOW, REPLY_CATEGORY_LABEL, type Cadence, type CadenceStep, type ContextField, type MessageDraft, type ReplyAnalysis, type SendChannel, type SendWindow } from './types.ts';
 
@@ -318,6 +319,13 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
     sum.reports = await sendDailyReports(db, now);
   } catch (err) {
     sum.errors.push(`relatório diário: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Aviso no WhatsApp do dono quando a IA para (limite de gasto, crédito, chave) e quando volta.
+  try {
+    await checkAiHealth(db, now);
+  } catch (err) {
+    sum.errors.push(`alerta da IA: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Tarefas de baixo valor esquecidas há mais de 7 dias saem da lista (ler resposta, envio manual, robô).
