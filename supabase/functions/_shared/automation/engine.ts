@@ -337,6 +337,14 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
     sum.errors.push(`relatório diário: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Buscas que ficaram "em andamento" (aba fechada, função interrompida) não ficam assim para sempre.
+  await db
+    .from('searches')
+    .update({ status: 'error', error: 'Busca interrompida antes de terminar.' })
+    .eq('status', 'running')
+    .lt('created_at', new Date(now.getTime() - 15 * 60_000).toISOString())
+    .then(() => undefined, () => undefined);
+
   // Aviso no WhatsApp do dono quando a IA para (limite de gasto, crédito, chave) e quando volta.
   try {
     await checkAiHealth(db, now);

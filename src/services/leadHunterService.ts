@@ -298,11 +298,8 @@ export class LeadHunterService {
       // Score em paralelo (até 5 por vez): com a Claude real, cada lead é uma chamada (só dos que ficam).
       const scores = new Map<Candidate, LeadScore>();
       const leadIds = new Map<Candidate, string>(fresh.map((c) => [c, uid('lead')]));
-      for (let i = 0; i < fresh.length; i += 5) {
-        await Promise.all(
-          fresh.slice(i, i + 5).map(async (c) => scores.set(c, await this.ai.scoreLead(c.company, profile, leadIds.get(c)!))),
-        );
-      }
+      // Pontuação de regras na hora; o ajuste da IA (uma chamada por lead) roda depois, sem segurar a busca.
+      for (const c of fresh) scores.set(c, this.ai.quickScore(c.company, profile, leadIds.get(c)!));
 
       const results: { company: Company; lead: Lead; isNew: boolean; provider: string }[] = [];
       for (const cand of candidates) {
@@ -380,10 +377,32 @@ export class LeadHunterService {
       // Empresas novas entram sozinhas nas campanhas ativas com "entrada automática".
       this.lastAutoEnroll = this.automation.autoEnrollNewLeads(limited.filter((r) => r.isNew).map((r) => r.lead.id));
       onStep('done');
+      void this.refineScores(fresh.map((c) => ({ company: c.company, leadId: leadIds.get(c)! })));
       return this.db.searches.find((s) => s.id === search.id) ?? { ...search, status: 'done', resultCount: limited.length, newCount: limited.filter((r) => r.isNew).length, duplicatesRemoved: duplicates };
     } catch (err) {
       this.repo.update('searches', search.id, { status: 'error', error: err instanceof Error ? err.message : String(err) });
       throw err;
+    }
+  }
+
+  /** Ajuste da IA nas pontuações dos leads novos, em segundo plano (8 por vez). Falha mantém a nota de regras. */
+  private async refineScores(items: { company: Company; leadId: string }[]) {
+    const profile = this.profile;
+    for (let i = 0; i < items.length; i += 8) {
+      await Promise.all(
+        items.slice(i, i + 8).map(async ({ company, leadId }) => {
+          try {
+            const score = await this.ai.scoreLead(company, profile, leadId);
+            if (!score.aiAdjustment || !this.db.leads.some((l) => l.id === leadId)) return;
+            this.repo.batch(() => {
+              this.repo.insert('leadScores', score);
+              this.repo.update('leads', leadId, { currentScore: score.score, scoreTier: score.tier });
+            });
+          } catch {
+            /* fica a nota de regras */
+          }
+        }),
+      );
     }
   }
 

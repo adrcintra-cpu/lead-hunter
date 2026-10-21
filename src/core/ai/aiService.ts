@@ -56,6 +56,11 @@ export class AIService {
     }
   }
 
+  /** Só a base de regras, na hora (sem IA): usada para a busca terminar rápido. */
+  quickScore(company: Company, profile: Profile, leadId: string, extras: ScoreExtras = {}): LeadScore {
+    return this.buildScore(company, profile, leadId, extras, 0, 'ajuste da IA em andamento');
+  }
+
   async scoreLead(company: Company, profile: Profile, leadId: string, extras: ScoreExtras = {}): Promise<LeadScore> {
     const base = ruleScore(company, profile, extras);
     let adjustment = 0;
@@ -67,6 +72,11 @@ export class AIService {
     } catch {
       /* mantém só a base de regras */
     }
+    return this.buildScore(company, profile, leadId, extras, adjustment, reason);
+  }
+
+  private buildScore(company: Company, profile: Profile, leadId: string, extras: ScoreExtras, adjustment: number, reason: string): LeadScore {
+    const base = ruleScore(company, profile, extras);
     const score = Math.max(0, Math.min(100, base.total + adjustment));
     const tier = tierOf(score);
     const top = [...base.rules].sort((a, b) => b.points / b.max - a.points / a.max);

@@ -140,7 +140,7 @@ export interface EnrichBudget {
   sites: number;
   until: number;
 }
-export const newBudget = (sites = 24, ms = 45_000): EnrichBudget => ({ sites, until: Date.now() + ms });
+export const newBudget = (sites = 24, ms = 20_000): EnrichBudget => ({ sites, until: Date.now() + ms });
 
 export async function enrichWhatsapp(list: RawCompany[], ownerId: string | null, fetchImpl: Fetch = fetch, budget: EnrichBudget = newBudget()): Promise<{ confirmed: number; fromSite: number; emails: number }> {
   const out = { confirmed: 0, fromSite: 0, emails: 0 };
@@ -159,12 +159,12 @@ export async function enrichWhatsapp(list: RawCompany[], ownerId: string | null,
       }
     }
   }
-  // Site da empresa: WhatsApp (para quem ainda não tem) e e-mail (até 16 por vez, 4 em paralelo).
+  // Site da empresa: WhatsApp (para quem ainda não tem) e e-mail (até 16 por vez, 6 em paralelo).
   const take = Date.now() < budget.until ? Math.max(0, Math.min(16, budget.sites)) : 0;
   const toScan = list.filter((c) => c.website && (!c.whatsapp || !c.email)).sort((x, y) => Number(!!x.whatsapp) - Number(!!y.whatsapp)).slice(0, take);
   budget.sites -= toScan.length;
   const sites: RawCompany[] = [];
-  await pool(toScan, 4, async (c) => {
+  await pool(toScan, 6, async (c) => {
     if (Date.now() > budget.until) return;
     const r = await scanSite(c.website!, fetchImpl);
     if (r.email && !c.email) {
