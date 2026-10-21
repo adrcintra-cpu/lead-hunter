@@ -90,13 +90,19 @@ export function emailHtml(text: string, signature: string | null | undefined, im
 
 /** Confere a assinatura svix dos webhooks do Resend. */
 export async function verifySvix(rawBody: string, headers: Headers): Promise<boolean> {
-  const secret = Deno.env.get('RESEND_WEBHOOK_SECRET');
+  const secret = (Deno.env.get('RESEND_WEBHOOK_SECRET') ?? '').trim().replace(/^["']|["']$/g, '');
   const id = headers.get('svix-id');
   const ts = headers.get('svix-timestamp');
   const sigs = headers.get('svix-signature');
   if (!secret || !id || !ts || !sigs) return false;
   if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // replay
-  const keyBytes = Uint8Array.from(atob(secret.replace(/^whsec_/, '')), (c) => c.charCodeAt(0));
+  let keyBytes: Uint8Array;
+  try {
+    keyBytes = Uint8Array.from(atob(secret.replace(/^whsec_/, '')), (c) => c.charCodeAt(0));
+  } catch {
+    console.error('RESEND_WEBHOOK_SECRET inválido: copie o "Signing secret" (whsec_…) do webhook no Resend.');
+    return false;
+  }
   const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${id}.${ts}.${rawBody}`)));
   const expected = btoa(String.fromCharCode(...mac));
