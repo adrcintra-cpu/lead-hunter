@@ -264,6 +264,20 @@ export interface RunSummary {
   errors: string[];
 }
 
+/** Tarefas repetidas (mesmo lead e mesmo título): fica só a mais recente. */
+export async function closeDuplicateTasks(db: Db, now = new Date()): Promise<number> {
+  const { data } = await db.from('tasks').select('id, lead_id, title, created_at').eq('status', 'aberta').not('lead_id', 'is', null).order('created_at', { ascending: false }).limit(1000);
+  const seen = new Set<string>();
+  const dup: string[] = [];
+  for (const t of (data ?? []) as Row[]) {
+    const k = `${t.lead_id}|${t.title}`;
+    if (seen.has(k)) dup.push(t.id);
+    else seen.add(k);
+  }
+  for (let i = 0; i < dup.length; i += 100) await db.from('tasks').update({ status: 'concluida', done_at: now.toISOString() }).in('id', dup.slice(i, i + 100));
+  return dup.length;
+}
+
 /** Tarefas que perdem o sentido com o tempo. Reunião, orçamento e "falar com" nunca são fechadas sozinhas. */
 const STALE_TITLES = ['Ler resposta de%', 'Enviar WhatsApp para%', 'Atendimento automático%', 'Enviar informações para%'];
 export const STALE_TASK_DAYS = 7;
@@ -308,7 +322,7 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
 
   // Tarefas de baixo valor esquecidas há mais de 7 dias saem da lista (ler resposta, envio manual, robô).
   try {
-    sum.tasksClosed = await closeStaleTasks(db, now);
+    sum.tasksClosed = (await closeStaleTasks(db, now)) + (await closeDuplicateTasks(db, now));
   } catch (err) {
     sum.errors.push(`limpeza de tarefas: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -427,6 +441,22 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
         await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
         return { sent: 0, failed: 0 };
       }
+    }
+  }
+
+  // Limite total do número de WhatsApp (todas as campanhas juntas): o serviço aceita poucos envios por
+  // dia e as respostas do BEELIE também contam. Passou do limite, a etapa fica para amanhã.
+  if (send && 'step' in send && send.step.channel === 'whatsapp') {
+    const { count: today } = await db
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', owner)
+      .eq('channel', 'whatsapp')
+      .not('campaign_id', 'is', null)
+      .gte('created_at', startOfDayBRT(new Date()).toISOString());
+    if ((today ?? 0) >= QR_CAMPAIGN_DAILY_CAP()) {
+      await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
+      return { sent: 0, failed: 0 };
     }
   }
 
@@ -596,8 +626,13 @@ export async function qrCampaignFallback(db: Db, ownerId: string, messageId: str
   }
   // Falha passageira (serviço reiniciou, WhatsApp desconectado, intervalo): fica na fila e tenta de novo
   // sozinho (até 3 vezes, em 30 min, dentro do horário). Só depois vira tarefa para você.
-  const { data: cur } = await db.from('messages').select('id, failure_reason').eq('id', messageId).eq('owner_id', ownerId).eq('status', 'queued').maybeSingle();
+  const { data: cur } = await db.from('messages').select('id, failure_reason, template').eq('id', messageId).eq('owner_id', ownerId).eq('status', 'queued').maybeSingle();
   if (!cur) return false;
+  if (DAILY_LIMIT.test(reason)) {
+    // Fica na fila; a rotina tenta de novo no dia seguinte (sem tarefa, sem gastar tentativa).
+    await db.from('messages').update({ failure_reason: `limite: ${reason.slice(0, 200)}`, updated_at: new Date().toISOString() }).eq('id', messageId).eq('status', 'queued');
+    return true;
+  }
   const tries = Number(/^retry:(\d+)/.exec(String(cur.failure_reason ?? ''))?.[1] ?? 0);
   if (tries < QR_MAX_RETRIES) {
     await db
@@ -608,10 +643,10 @@ export async function qrCampaignFallback(db: Db, ownerId: string, messageId: str
     return true;
   }
   // Já recuperada uma vez de uma tarefa: fica como tarefa de vez (não volta mais para a fila).
-  const final = /recuperada/.test(String(cur.failure_reason ?? ''));
+  const final = String(cur.template ?? '').includes(RESCUED) || /recuperada/.test(String(cur.failure_reason ?? ''));
   const { data: m } = await db
     .from('messages')
-    .update({ status: 'draft', provider: null, template: 'Campanha (envio manual)', failure_reason: `${final ? 'final: ' : ''}${reason}`.slice(0, 300) })
+    .update({ status: 'draft', provider: null, template: `Campanha (envio manual)${final ? ` ${RESCUED}` : ''}`, failure_reason: `${final ? 'final: ' : ''}${reason}`.slice(0, 300) })
     .eq('id', messageId)
     .eq('owner_id', ownerId)
     .eq('status', 'queued')
@@ -622,6 +657,9 @@ export async function qrCampaignFallback(db: Db, ownerId: string, messageId: str
   const { data: c } = lead ? await db.from('companies').select('*').eq('id', lead.company_id).maybeSingle() : { data: null };
   const { data: camp } = m.campaign_id ? await db.from('campaigns').select('owner_name').eq('id', m.campaign_id).maybeSingle() : { data: null };
   await log(db, ownerId, m.lead_id, 'message_failed', `WhatsApp da campanha não saiu pelo WhatsApp conectado (${reason.slice(0, 120)}). Ficou como tarefa para você enviar.`, { messageId });
+  // Uma tarefa de envio manual por lead (nunca repetida).
+  const { data: openTask } = await db.from('tasks').select('id').eq('lead_id', m.lead_id).eq('status', 'aberta').like('title', 'Enviar WhatsApp para%').limit(1);
+  if (openTask?.length) return true;
   await createTask(db, ownerId, {
     leadId: m.lead_id,
     campaignId: m.campaign_id,
@@ -680,7 +718,7 @@ export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<nu
       ]);
       ready.set(m.owner_id, qrServiceConfigured() && conn?.status === 'conectado' && p?.whatsapp_qr_campaigns !== false && inWindow(now, (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW));
     }
-    if (!ready.get(m.owner_id) || /^final:/.test(String(m.failure_reason ?? ''))) continue;
+    if (!ready.get(m.owner_id) || /^final:/.test(String(m.failure_reason ?? '')) || String(m.template ?? '').includes(RESCUED)) continue;
     let phone = String(m.recipient ?? '').replace(/\D/g, '');
     if (!phone) {
       const { data: l } = await db.from('leads').select('companies(whatsapp)').eq('id', m.lead_id).maybeSingle();
@@ -689,7 +727,7 @@ export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<nu
     if (!phone) continue;
     const { data: moved } = await db
       .from('messages')
-      .update({ status: 'queued', provider: 'whatsapp_qr', recipient: phone, template: String(m.template).replace(/\s*\(envio manual\)/, ''), failure_reason: 'retry:1: recuperada da tarefa de envio manual' })
+      .update({ status: 'queued', provider: 'whatsapp_qr', recipient: phone, template: `${String(m.template).replace(/\s*\(envio manual\)/, '')} ${RESCUED}`, failure_reason: 'retry:1: recuperada da tarefa de envio manual' })
       .eq('id', m.id)
       .eq('status', 'draft')
       .select('id')
@@ -705,6 +743,12 @@ export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<nu
 }
 
 export const QR_MAX_RETRIES = 3;
+/** Envios de campanha por dia no WhatsApp conectado (todas as campanhas). O serviço aceita 60 no total. */
+export const QR_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('QR_CAMPAIGN_DAILY_CAP') ?? 45);
+/** O serviço recusou porque o número já mandou o máximo do dia: não é falha, espera o dia seguinte. */
+const DAILY_LIMIT = /Limite de \d+ envios por dia/i;
+/** Marca de mensagem já recuperada de uma tarefa (fica no template, que as novas tentativas não apagam). */
+const RESCUED = '[recuperada]';
 
 /**
  * Fila do WhatsApp conectado parada há mais de 30 min (serviço reiniciou, falha passageira):
@@ -726,6 +770,13 @@ export async function sweepStaleQrQueue(db: Db, now = new Date()) {
       windows.set(m.owner_id, (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW);
     }
     if (!inWindow(now, windows.get(m.owner_id)!)) continue; // tenta de novo no horário de envio
+    // Recusada pelo limite do dia: só tenta de novo no dia seguinte, sem contar como tentativa.
+    if (/^limite:/.test(String(m.failure_reason ?? ''))) {
+      if (String(m.updated_at) >= startOfDayBRT(now).toISOString()) continue;
+      await db.from('messages').update({ failure_reason: 'retry:0: novo dia', updated_at: now.toISOString() }).eq('id', m.id).eq('status', 'queued');
+      if (m.recipient) await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone: String(m.recipient), text: String(m.final_content ?? '') });
+      continue;
+    }
     const tries = Number(/^retry:(\d+)/.exec(String(m.failure_reason ?? ''))?.[1] ?? 0);
     if (tries >= QR_MAX_RETRIES || !m.recipient) {
       await qrCampaignFallback(db, m.owner_id, m.id, String(m.failure_reason ?? 'o serviço de WhatsApp não enviou').replace(/^retry:\d+:\s*/, ''));
