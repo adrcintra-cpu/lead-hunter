@@ -183,6 +183,19 @@ async function conversationContext(db: Db, lead: Row) {
   };
 }
 
+/**
+ * As instruções da cadência supõem contatos anteriores ("já recebeu um WhatsApp"). Quando eles não
+ * aconteceram (lead sem WhatsApp, etapa pulada), a mensagem não pode dizer que aconteceram.
+ */
+export function priorContactRule(history: { channel: string }[]): string {
+  if (!history.length) {
+    return 'IMPORTANTE (vale mais que as instruções acima): este é o PRIMEIRO contato com este lead. Nenhuma mensagem foi enviada antes, nem WhatsApp nem e-mail. Não diga nem dê a entender que já entrou em contato ("te chamei", "mandei mensagem", "complementando", "retomando"). Apresente-se em uma frase.';
+  }
+  const chans = [...new Set(history.map((h) => h.channel))];
+  const missing = ['WhatsApp', 'E-mail'].filter((c) => !chans.includes(c));
+  return `IMPORTANTE (vale mais que as instruções acima): os únicos contatos anteriores com este lead foram por ${chans.join(' e ')} (${history.length} mensagem${history.length > 1 ? 's' : ''}).${missing.length ? ` Nunca houve contato por ${missing.join(' nem por ')}: não diga que houve.` : ''}`;
+}
+
 async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: Cadence, stepIndex: number, campaignName?: string): Promise<MessageDraft> {
   const step = cad.steps[stepIndex] as Extract<CadenceStep, { type: 'send' }>;
   const stage = messageStage(cad.steps, stepIndex);
@@ -204,6 +217,8 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
   if (!hasClaude()) throw new Error('Etapa com IA, mas ANTHROPIC_API_KEY não está configurada.');
   const started = Date.now();
   let raw: string;
+  const conv = await conversationContext(db, lead);
+  const facts = priorContactRule(conv.history);
   try {
     const run = await runTask<string>('generateApproach', {
       company: companyForAI(c),
@@ -216,9 +231,9 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
         offer: p.offer,
         contactName: lead.contact_name,
         contactRole: lead.contact_role,
-        stage,
-        instructions: step.template || undefined,
-        ...(await conversationContext(db, lead)),
+        stage: conv.history.length ? stage : 'primeira',
+        instructions: [step.template, facts].filter(Boolean).join('\n\n') || undefined,
+        ...conv,
         campaignName,
       },
     });
@@ -306,6 +321,7 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   await sweepStaleQrQueue(db).catch(() => undefined);
   await rescueManualWhatsapp(db, now).catch(() => undefined);
   await sendPendingReferralEmails(db, now).catch(() => undefined);
+  await resendFailedEmails(db, now).catch(() => undefined);
 
   // Campanhas agendadas que chegaram na hora.
   const scheduled: Row[] = await must(db.from('campaigns').select('id').eq('status', 'agendada').lte('scheduled_at', now.toISOString()));
@@ -463,6 +479,21 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
       .not('campaign_id', 'is', null)
       .gte('created_at', startOfDayBRT(new Date()).toISOString());
     if ((today ?? 0) >= QR_CAMPAIGN_DAILY_CAP()) {
+      await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
+      return { sent: 0, failed: 0 };
+    }
+  }
+
+  // Limite total de e-mails de campanha por dia: protege a reputação do domínio (e o plano do Resend).
+  if (send && 'step' in send && send.step.channel === 'email') {
+    const { count: today } = await db
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', owner)
+      .eq('channel', 'email')
+      .not('campaign_id', 'is', null)
+      .gte('created_at', startOfDayBRT(new Date()).toISOString());
+    if ((today ?? 0) >= EMAIL_CAMPAIGN_DAILY_CAP()) {
       await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
       return { sent: 0, failed: 0 };
     }
@@ -753,6 +784,7 @@ export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<nu
 export const QR_MAX_RETRIES = 3;
 /** Envios de campanha por dia no WhatsApp conectado (todas as campanhas). O serviço aceita 60 no total. */
 export const QR_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('QR_CAMPAIGN_DAILY_CAP') ?? 45);
+export const EMAIL_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('EMAIL_CAMPAIGN_DAILY_CAP') ?? 50);
 /** O serviço recusou porque o número já mandou o máximo do dia: não é falha, espera o dia seguinte. */
 const DAILY_LIMIT = /Limite de \d+ envios por dia/i;
 /** Marca de mensagem já recuperada de uma tarefa (fica no template, que as novas tentativas não apagam). */
@@ -1260,4 +1292,53 @@ async function applyBeelie(db: Db, ownerId: string, lead: Row, company: Row, sig
     }
   }
   return r;
+}
+
+/** E-mails de campanha que não saíram porque a chave do Resend estava inválida. */
+const KEY_FAILURE = 'Resend 401%';
+const RESENT = 'reenvio: ';
+
+/**
+ * Reenvia os e-mails de campanha que falharam por chave inválida: a cadência volta para a etapa do
+ * e-mail, que é escrito de novo pela IA (com o histórico real do lead) e sai dentro do limite diário.
+ * Fica de fora quem respondeu, pediu para sair, saiu da cadência ou já recebeu e-mail nesse endereço.
+ * A falha antiga é marcada ("reenvio: …") para não ser reenviada duas vezes.
+ */
+export async function resendFailedEmails(db: Db, now = new Date(), batch = 100): Promise<number> {
+  if (!Deno.env.get('RESEND_API_KEY')) return 0;
+  const { data } = await db
+    .from('messages')
+    .select('id, owner_id, lead_id, enrollment_id, step_index, recipient, failure_reason, created_at')
+    .eq('channel', 'email')
+    .eq('status', 'failed')
+    .like('failure_reason', KEY_FAILURE)
+    .not('enrollment_id', 'is', null)
+    .order('created_at')
+    .limit(batch);
+  const rows = (data ?? []) as Row[];
+  if (!rows.length) return 0;
+  const mark = (m: Row, why: string) => db.from('messages').update({ failure_reason: `${RESENT}${why} | ${m.failure_reason}`.slice(0, 300) }).eq('id', m.id);
+  let n = 0;
+  const seen = new Set<string>();
+  for (const m of rows) {
+    const to = String(m.recipient ?? '').toLowerCase();
+    const { data: e } = await db.from('enrollments').select('id, status, step_index, started_at, created_at').eq('id', m.enrollment_id).maybeSingle();
+    if (!e || e.status !== 'ativa' || Number(e.step_index) < Number(m.step_index)) {
+      await mark(m, 'cadência não está mais ativa');
+      continue;
+    }
+    const [{ data: supp }, { data: replies }, { data: other }] = await Promise.all([
+      db.from('suppression_list').select('id').eq('owner_id', m.owner_id).eq('kind', 'email').eq('value', to).limit(1),
+      db.from('inbound_messages').select('id').eq('lead_id', m.lead_id).limit(1),
+      db.from('messages').select('id').eq('owner_id', m.owner_id).eq('channel', 'email').eq('recipient', m.recipient).in('status', ['queued', 'sent', 'delivered', 'read', 'replied']).limit(1),
+    ]);
+    if (supp?.length) { await mark(m, 'pediu para não receber'); continue; }
+    if (replies?.length) { await mark(m, 'lead já respondeu'); continue; }
+    if (other?.length || seen.has(to)) { await mark(m, 'endereço já recebeu e-mail'); continue; }
+    seen.add(to);
+    await db.from('enrollments').update({ step_index: m.step_index, next_run_at: now.toISOString() }).eq('id', e.id);
+    await mark(m, `etapa reaberta em ${now.toISOString().slice(0, 10)}`);
+    n++;
+  }
+  return n;
 }
