@@ -346,7 +346,7 @@ export async function runOne(db: Db, st: HunterState, target: { segment: string;
     const score = huntScore(raw, profile ?? {});
     const { data: lead, error: leadErr } = await db
       .from('leads')
-      .insert({ owner_id: st.ownerId, company_id: co.id, stage: 'novo', current_score: score.total, score_tier: score.tier, first_search_id: searchId, origin: HUNTER_ORIGIN, discovered_at: at, last_activity_at: at, created_by: null })
+      .insert({ owner_id: st.ownerId, company_id: co.id, stage: 'novo', current_score: score.total, score_tier: score.tier, first_search_id: searchId, origin: HUNTER_ORIGIN, email: raw.email ?? null, discovered_at: at, last_activity_at: at, created_by: null })
       .select('id')
       .single();
     if (leadErr || !lead?.id) continue;

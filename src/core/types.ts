@@ -87,6 +87,8 @@ export interface RawCompany {
   phone?: string;
   whatsapp?: string;
   whatsappStatus?: WhatsappStatus;
+  /** E-mail publicado no site da empresa (vai para o lead). */
+  email?: string;
   instagram?: string;
   linkedin?: string;
   employeesRange?: string;

@@ -317,6 +317,7 @@ export class LeadHunterService {
             scoreTier: score.tier,
             firstSearchId: search.id,
             origin: this.providerLabel(cand.provider),
+            email: cand.raws.find((r) => r.email)?.email,
             discoveredAt: nowIso(),
             lastActivityAt: nowIso(),
             createdAt: nowIso(),
@@ -337,6 +338,9 @@ export class LeadHunterService {
             sourceRows(cand).forEach((row) => this.repo.insert('leadSources', row));
           });
           const lead = this.db.leads.find((l) => l.companyId === cand.company.id);
+          // E-mail achado no site completa o lead que ainda não tinha.
+          const found = cand.raws.find((r) => r.email)?.email;
+          if (lead && found && !lead.email) this.repo.update('leads', lead.id, { email: found });
           if (lead) results.push({ company: cand.company, lead, isNew: false, provider: cand.provider });
         }
       }

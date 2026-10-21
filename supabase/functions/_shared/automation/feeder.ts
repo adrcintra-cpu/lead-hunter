@@ -61,6 +61,9 @@ export interface FeedSummary {
 }
 
 /** Completa a cota diária das campanhas com entrada automática. Barato quando a cota do dia já foi atingida. */
+/** Leads só com e-mail por dia em cada campanha WhatsApp + e-mail sem limite de e-mail definido. */
+export const EMAIL_ONLY_DAILY = 20;
+
 export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSummary> {
   const sum: FeedSummary = { enrolled: 0, campaigns: 0 };
   const { data: camps } = await db
@@ -68,7 +71,7 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
     .select('id, owner_id, name, audience, cadence_id, channel, daily_limit_whatsapp, daily_limit_email')
     .eq('status', 'ativa')
     .eq('auto_enroll', true);
-  const live = ((camps ?? []) as Row[]).filter((c) => Number(c.daily_limit_whatsapp ?? 0) > 0 || (c.channel === 'email' && Number(c.daily_limit_email ?? 0) > 0));
+  const live = ((camps ?? []) as Row[]).filter((c) => Number(c.daily_limit_whatsapp ?? 0) > 0 || Number(c.daily_limit_email ?? 0) > 0);
   if (!live.length) return sum;
 
   const dayStart = startOfDayBRT(now).toISOString();
@@ -82,7 +85,17 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
 
     // Cota de cada campanha: limite diário menos o que já entrou hoje e o que já saiu hoje.
     const quotas = new Map<string, number>();
+    const emailOnlyToday = new Map<string, number>();
     for (const c of list) {
+      // Quem entrou hoje só com e-mail não gasta a cota de WhatsApp.
+      const { data: today } = await db.from('enrollments').select('lead_id').eq('campaign_id', c.id).gte('created_at', dayStart);
+      const todayIds = ((today ?? []) as Row[]).map((e) => e.lead_id);
+      if (todayIds.length && c.channel !== 'email') {
+        const { data: ls } = await db.from('leads').select('id, company_id').in('id', todayIds);
+        const cids = ((ls ?? []) as Row[]).map((l) => l.company_id);
+        const { data: cs } = cids.length ? await db.from('companies').select('id, whatsapp').in('id', cids) : { data: [] };
+        emailOnlyToday.set(c.id, ((cs ?? []) as Row[]).filter((x) => !x.whatsapp).length);
+      }
       const limit = Number(c.channel === 'email' ? c.daily_limit_email : c.daily_limit_whatsapp) || 0;
       const { count: enrolledToday } = await db.from('enrollments').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id).gte('created_at', dayStart);
       const ch = c.channel === 'email' ? 'email' : 'whatsapp';
@@ -96,13 +109,26 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
         .like('template', 'IA — resposta sugerida%')
         .gte('created_at', dayStart);
       const sentToday = (msgsToday ?? 0) - (repliesToday ?? 0);
-      const q = Math.min(limit - (enrolledToday ?? 0), limit - sentToday);
+      const q = Math.min(limit - ((enrolledToday ?? 0) - (emailOnlyToday.get(c.id) ?? 0)), limit - sentToday);
       if (q > 0) quotas.set(c.id, q);
     }
-    if (!quotas.size) continue;
 
     const { data: cads } = await db.from('cadences').select('id, steps').in('id', [...new Set(list.map((c) => c.cadence_id))]);
     const usesWa = new Map<string, boolean>(((cads ?? []) as Row[]).map((c) => [c.id, ((c.steps ?? []) as Row[]).some((s) => s.type === 'send' && s.channel === 'whatsapp')]));
+    const usesEmail = new Map<string, boolean>(((cads ?? []) as Row[]).map((c) => [c.id, ((c.steps ?? []) as Row[]).some((s) => s.type === 'send' && s.channel === 'email')]));
+
+    // Cota extra para quem só tem e-mail (achado no site), nas campanhas WhatsApp + e-mail.
+    const emailQuotas = new Map<string, number>();
+    if (Deno.env.get('RESEND_API_KEY')) {
+      for (const c of list) {
+        if (c.channel === 'email' || !usesEmail.get(c.cadence_id)) continue;
+        const limit = Number(c.daily_limit_email ?? EMAIL_ONLY_DAILY) || 0;
+        if (limit <= 0) continue;
+        const emailOnly = emailOnlyToday.get(c.id) ?? 0;
+        if (limit - emailOnly > 0) emailQuotas.set(c.id, limit - emailOnly);
+      }
+    }
+    if (!quotas.size && !emailQuotas.size) continue;
 
     // Base do dono: leads, empresas, quem já passou por campanha, opt-out e listas.
     const leads = await all(() => db.from('leads').eq('owner_id', owner), 'id, company_id, stage, current_score, tags, email');
@@ -122,23 +148,28 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
       .sort((a, b) => Number(b.current_score ?? 0) - Number(a.current_score ?? 0));
 
     const taken = new Set<string>();
-    const ordered = [...list].filter((c) => quotas.has(c.id)).sort((a, b) => specificity(b.audience) - specificity(a.audience));
+    const ordered = [...list].filter((c) => quotas.has(c.id) || emailQuotas.has(c.id)).sort((a, b) => specificity(b.audience) - specificity(a.audience));
     for (const c of ordered) {
       let left = quotas.get(c.id) ?? 0;
+      let leftEmail = emailQuotas.get(c.id) ?? 0;
       const listId = c.audience?.listId as string | undefined;
       const inList = listId ? new Set((await all(() => db.from('lead_lists').eq('list_id', listId), 'list_id, lead_id')).map((x) => x.lead_id)) : null;
       const needWa = usesWa.get(c.cadence_id) ?? c.channel !== 'email';
       const picked: Row[] = [];
       for (const l of pool) {
-        if (left <= 0) break;
+        if (left <= 0 && leftEmail <= 0) break;
         if (taken.has(l.id)) continue;
         const comp = compById.get(l.company_id);
         if (!comp) continue;
-        if (needWa ? !comp.whatsapp : !l.email) continue;
+        // Sem WhatsApp mas com e-mail: entra pela cota de e-mail (as etapas de WhatsApp são puladas).
+        const emailOnly = needWa && !comp.whatsapp && !!l.email && emailQuotas.has(c.id);
+        if (emailOnly ? leftEmail <= 0 : left <= 0) continue;
+        if (!emailOnly && (needWa ? !comp.whatsapp : !l.email)) continue;
         if (!matchesAudience(c.audience, l, comp, inList) || suppressed(comp, l)) continue;
         picked.push(l);
         taken.add(l.id);
-        left--;
+        if (emailOnly) leftEmail--;
+        else left--;
       }
       if (!picked.length) continue;
       const at = now.toISOString();
