@@ -69,6 +69,14 @@ export const EMAIL_ONLY_DAILY = 20;
 export const QR_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('QR_CAMPAIGN_DAILY_CAP') ?? 20);
 export const EMAIL_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('EMAIL_CAMPAIGN_DAILY_CAP') ?? 40);
 
+/** Quantos WhatsApps de prospecção cabem por dia: a soma dos limites dos números ativos (ou o limite geral). */
+export async function waCapacity(db: Db, owner: string): Promise<number> {
+  const { data, error } = await db.from('whatsapp_connections').select('daily_limit, active').eq('user_id', owner);
+  const nums = ((data ?? []) as Row[]).filter((n) => n.active !== false);
+  if (error || !nums.length) return QR_CAMPAIGN_DAILY_CAP();
+  return nums.reduce((t, n) => t + Number(n.daily_limit ?? QR_CAMPAIGN_DAILY_CAP()), 0);
+}
+
 export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSummary> {
   const sum: FeedSummary = { enrolled: 0, campaigns: 0 };
   const { data: camps } = await db
@@ -90,6 +98,7 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
 
     // Cota de cada campanha: limite diário menos o que já entrou hoje e o que já saiu hoje.
     const quotas = new Map<string, number>();
+    const waCap = await waCapacity(db, owner);
     const emailOnlyToday = new Map<string, number>();
     for (const c of list) {
       // Quem entrou hoje só com e-mail não gasta a cota de WhatsApp.
@@ -102,7 +111,7 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
         emailOnlyToday.set(c.id, ((cs ?? []) as Row[]).filter((x) => !x.whatsapp).length);
       }
       // A campanha não puxa mais gente do que o limite geral do canal consegue mandar no dia.
-      const limit = Math.min(Number(c.channel === 'email' ? c.daily_limit_email : c.daily_limit_whatsapp) || 0, c.channel === 'email' ? EMAIL_CAMPAIGN_DAILY_CAP() : QR_CAMPAIGN_DAILY_CAP());
+      const limit = Math.min(Number(c.channel === 'email' ? c.daily_limit_email : c.daily_limit_whatsapp) || 0, c.channel === 'email' ? EMAIL_CAMPAIGN_DAILY_CAP() : waCap);
       const { count: enrolledToday } = await db.from('enrollments').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id).gte('created_at', dayStart);
       const ch = c.channel === 'email' ? 'email' : 'whatsapp';
       const { count: msgsToday } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('channel', ch).gte('created_at', dayStart);

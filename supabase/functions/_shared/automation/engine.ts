@@ -419,6 +419,51 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   return sum;
 }
 
+/**
+ * Por qual número de WhatsApp a próxima mensagem para o lead sai.
+ * - O lead fica sempre com o mesmo número (o da última conversa), se esse número continua ativo.
+ * - Lead novo: o número conectado e ativo com mais folga no limite diário.
+ * undefined = sem a migration de vários números (comportamento antigo); null = todos no limite hoje.
+ */
+export async function chooseWaSlot(db: Db, owner: string, leadId: string, now = new Date()): Promise<string | null | undefined> {
+  const { data: nums, error } = await db.from('whatsapp_connections').select('slot, status, active, daily_limit').eq('user_id', owner);
+  if (error) return undefined;
+  const active = ((nums ?? []) as Row[]).filter((n) => n.active !== false);
+  if (!active.length) return undefined;
+  const since = startOfDayBRT(now).toISOString();
+  const { data: today } = await db
+    .from('messages')
+    .select('wa_slot, template')
+    .eq('owner_id', owner)
+    .eq('channel', 'whatsapp')
+    .not('campaign_id', 'is', null)
+    .gte('created_at', since)
+    .limit(2000);
+  const used = new Map<string, number>();
+  for (const m of (today ?? []) as Row[]) {
+    if (String(m.template ?? '').startsWith('IA — resposta sugerida')) continue;
+    const k = (m.wa_slot as string | null) ?? 'principal';
+    used.set(k, (used.get(k) ?? 0) + 1);
+  }
+  const room = (n: Row) => Number(n.daily_limit ?? QR_CAMPAIGN_DAILY_CAP()) - (used.get(n.slot) ?? 0);
+
+  // Número do lead: última mensagem enviada ou recebida com número; conversa antiga (antes dos vários números) = principal.
+  const [{ data: out }, { data: inb }] = await Promise.all([
+    db.from('messages').select('wa_slot, created_at').eq('lead_id', leadId).eq('channel', 'whatsapp').not('sent_at', 'is', null).order('created_at', { ascending: false }).limit(1),
+    db.from('inbound_messages').select('wa_slot, received_at').eq('lead_id', leadId).eq('channel', 'whatsapp').order('received_at', { ascending: false }).limit(1),
+  ]);
+  const o = (out ?? [])[0] as Row | undefined;
+  const i = (inb ?? [])[0] as Row | undefined;
+  const last = !o ? i : !i ? o : String(i.received_at) > String(o.created_at) ? i : o;
+  if (last) {
+    const sticky = (last.wa_slot as string | null) ?? 'principal';
+    const n = active.find((x) => x.slot === sticky);
+    if (n) return room(n) > 0 ? sticky : null;
+  }
+  const live = active.filter((n) => n.status === 'conectado' && room(n) > 0).sort((a, b) => room(b) - room(a));
+  return live[0]?.slot ?? null;
+}
+
 /** Mensagens de prospecção (campanhas) criadas hoje no canal, sem contar as respostas a quem respondeu. */
 async function prospectingToday(db: Db, owner: string, channel: 'whatsapp' | 'email'): Promise<number> {
   const since = startOfDayBRT(new Date()).toISOString();
@@ -486,11 +531,16 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
 
   // Limite diário de prospecção no WhatsApp (todas as campanhas juntas). As respostas do BEELIE a quem
   // respondeu não contam: quem conversa sempre recebe resposta. Passou do limite, a etapa fica para amanhã.
+  // Com vários números: cada um tem o próprio limite e o lead fica sempre com o mesmo número.
+  let waSlot: string | undefined;
   if (send && 'step' in send && send.step.channel === 'whatsapp') {
-    if ((await prospectingToday(db, owner, 'whatsapp')) >= QR_CAMPAIGN_DAILY_CAP()) {
+    const pick = await chooseWaSlot(db, owner, lead.id);
+    const full = pick === null || (pick === undefined && (await prospectingToday(db, owner, 'whatsapp')) >= QR_CAMPAIGN_DAILY_CAP());
+    if (full) {
       await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
       return { sent: 0, failed: 0 };
     }
+    waSlot = pick ?? undefined;
   }
 
   // Limite total de e-mails de campanha por dia: protege a reputação do domínio (e o plano do Resend).
@@ -504,7 +554,7 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
   let sent = 0;
   let failed = 0;
   for (const eff of result.effects) {
-    const r = await applyEffect(db, eff, e, camp, lead, company, p, cad);
+    const r = await applyEffect(db, eff, e, camp, lead, company, p, cad, waSlot);
     if (r === 'sent') sent++;
     if (r === 'failed') failed++;
   }
@@ -527,7 +577,7 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
   return { sent, failed };
 }
 
-async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c: Row, p: Row, cad: Cadence): Promise<'sent' | 'failed' | 'other'> {
+async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c: Row, p: Row, cad: Cadence, waSlot?: string): Promise<'sent' | 'failed' | 'other'> {
   const owner = e.owner_id as string;
   if (eff.kind === 'skipped') {
     await log(db, owner, lead.id, 'cadence_step', `Etapa ${eff.stepIndex + 1} pulada: ${eff.reason}`, { enrollmentId: e.id });
@@ -571,8 +621,8 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
     // WhatsApp conectado (QR): a mensagem entra na fila do serviço e sai sozinha, com intervalo entre envios.
     // Se o serviço não aceitar (desligado, desconectado, sem configuração), vira tarefa manual como antes.
     if (p?.whatsapp_qr_campaigns !== false && qrServiceConfigured() && recipient) {
-      const queued: Row = await must(db.from('messages').insert({ ...base, status: 'queued', provider: 'whatsapp_qr' }).select('id').single());
-      const ok = await queueQrSend({ ownerId: owner, leadId: lead.id, messageId: queued.id, phone: recipient, text: draft.body });
+      const queued: Row = await must(db.from('messages').insert({ ...base, status: 'queued', provider: 'whatsapp_qr', ...(waSlot ? { wa_slot: waSlot } : {}) }).select('id').single());
+      const ok = await queueQrSend({ ownerId: owner, leadId: lead.id, messageId: queued.id, phone: recipient, text: draft.body, slot: waSlot });
       if (ok) {
         await log(db, owner, lead.id, 'cadence_step', `WhatsApp na fila do WhatsApp conectado${camp?.name ? ` (${camp.name})` : ''}`, { messageId: queued.id, channel: 'whatsapp', provider: 'whatsapp_qr' });
         return 'sent';
@@ -629,7 +679,7 @@ const qrSecret = () => (Deno.env.get('WHATSAPP_INBOUND_SECRET') ?? '').trim();
 export const qrServiceConfigured = () => !!qrUrl() && !!qrSecret();
 
 /** Entrega a mensagem à fila do serviço de WhatsApp. true = aceita (o envio acontece em seguida, com intervalo). */
-async function queueQrSend(body: { ownerId: string; leadId: string; messageId: string; phone: string; text: string }): Promise<boolean> {
+async function queueQrSend(body: { ownerId: string; leadId: string; messageId: string; phone: string; text: string; slot?: string | null }): Promise<boolean> {
   try {
     const res = await fetch(`${qrUrl()}/internal/campaign-send`, {
       method: 'POST',
@@ -754,10 +804,10 @@ export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<nu
   for (const m of (data ?? []) as Row[]) {
     if (!ready.has(m.owner_id)) {
       const [{ data: conn }, { data: p }] = await Promise.all([
-        db.from('whatsapp_connections').select('status').eq('user_id', m.owner_id).maybeSingle(),
+        db.from('whatsapp_connections').select('status').eq('user_id', m.owner_id),
         db.from('profiles').select('send_window, whatsapp_qr_campaigns').eq('id', m.owner_id).maybeSingle(),
       ]);
-      ready.set(m.owner_id, qrServiceConfigured() && conn?.status === 'conectado' && p?.whatsapp_qr_campaigns !== false && inWindow(now, (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW));
+      ready.set(m.owner_id, qrServiceConfigured() && ((conn ?? []) as Row[]).some((x) => x.status === 'conectado') && p?.whatsapp_qr_campaigns !== false && inWindow(now, (p?.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW));
     }
     if (!ready.get(m.owner_id) || /^final:/.test(String(m.failure_reason ?? '')) || String(m.template ?? '').includes(RESCUED)) continue;
     let phone = String(m.recipient ?? '').replace(/\D/g, '');
@@ -774,7 +824,9 @@ export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<nu
       .select('id')
       .maybeSingle();
     if (!moved) continue;
-    const ok = await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone, text: String(m.final_content ?? '') });
+    const slot = await chooseWaSlot(db, m.owner_id, m.lead_id).catch(() => undefined);
+    if (slot) await db.from('messages').update({ wa_slot: slot }).eq('id', m.id);
+    const ok = await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone, text: String(m.final_content ?? ''), slot });
     if (ok) {
       n++;
       await log(db, m.owner_id, m.lead_id, 'cadence_step', 'WhatsApp que tinha virado tarefa voltou para a fila do WhatsApp conectado e sai sozinho.', { messageId: m.id });
@@ -799,7 +851,7 @@ export async function sweepStaleQrQueue(db: Db, now = new Date()) {
   const before = new Date(now.getTime() - 30 * 60_000).toISOString();
   const { data } = await db
     .from('messages')
-    .select('id, owner_id, lead_id, recipient, final_content, failure_reason, updated_at, created_at')
+    .select('id, owner_id, lead_id, recipient, final_content, failure_reason, updated_at, created_at, wa_slot')
     .eq('provider', 'whatsapp_qr')
     .eq('status', 'queued')
     .lt('updated_at', before)
@@ -815,7 +867,7 @@ export async function sweepStaleQrQueue(db: Db, now = new Date()) {
     if (/^limite:/.test(String(m.failure_reason ?? ''))) {
       if (String(m.updated_at) >= startOfDayBRT(now).toISOString()) continue;
       await db.from('messages').update({ failure_reason: 'retry:0: novo dia', updated_at: now.toISOString() }).eq('id', m.id).eq('status', 'queued');
-      if (m.recipient) await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone: String(m.recipient), text: String(m.final_content ?? '') });
+      if (m.recipient) await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone: String(m.recipient), text: String(m.final_content ?? ''), slot: m.wa_slot });
       continue;
     }
     const tries = Number(/^retry:(\d+)/.exec(String(m.failure_reason ?? ''))?.[1] ?? 0);
@@ -824,7 +876,7 @@ export async function sweepStaleQrQueue(db: Db, now = new Date()) {
       continue;
     }
     await db.from('messages').update({ failure_reason: `retry:${tries + 1}: reenviada para a fila`, updated_at: now.toISOString() }).eq('id', m.id).eq('status', 'queued');
-    const ok = await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone: String(m.recipient), text: String(m.final_content ?? '') });
+    const ok = await queueQrSend({ ownerId: m.owner_id, leadId: m.lead_id, messageId: m.id, phone: String(m.recipient), text: String(m.final_content ?? ''), slot: m.wa_slot });
     if (ok) await log(db, m.owner_id, m.lead_id, 'cadence_step', 'WhatsApp reenviado para a fila do WhatsApp conectado (tentativa automática).', { messageId: m.id, retry: tries + 1 });
   }
 }

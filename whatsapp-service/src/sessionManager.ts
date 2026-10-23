@@ -1,7 +1,11 @@
 import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, generateMessageIDV2, type WASocket, type proto } from '@whiskeysockets/baileys';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
-import { clearAuthState, useDatabaseAuthState } from './authState.js';
+import { clearAuthState, MAIN_SLOT, useDatabaseAuthState } from './authState.js';
+
+export { MAIN_SLOT };
+/** Identificador de número aceito nas rotas (o principal ou um gerado pelo serviço). */
+export const SLOT_RE = /^[a-z0-9_-]{1,24}$/;
 import { InboundRelay, phoneKey } from './inbound.js';
 import { MAX_TRANSCRIBE_SECONDS, textToSpeech, transcribe, ttsAvailable } from './tts.js';
 import { describeImageAny, MAX_IMAGE_BYTES } from './vision.js';
@@ -12,6 +16,8 @@ import { formatPhone, normalizePhone, toJid } from './phone.js';
 export type ConnectionStatus = 'desconectado' | 'aguardando_qr' | 'conectando' | 'conectado' | 'reconectando' | 'erro';
 
 export interface StatusView {
+  /** Qual número (o "principal" é o primeiro, que já existia). */
+  slot: string;
   status: ConnectionStatus;
   /** QR em imagem (data URL), só enquanto aguarda a leitura. */
   qr: string | null;
@@ -21,8 +27,17 @@ export interface StatusView {
   error: string | null;
 }
 
+/** Um número na lista do usuário (Configurações → WhatsApp). */
+export interface NumberView extends StatusView {
+  label: string | null;
+  dailyLimit: number;
+  active: boolean;
+  sentToday: number;
+}
+
 interface Session {
   userId: string;
+  slot: string;
   sock: WASocket | null;
   status: ConnectionStatus;
   qr: string | null;
@@ -75,7 +90,10 @@ const TAKEOVER_WAITS = [1, 2, 5].map((x) => x * config.takeoverWaitSeconds * 100
  * Uma sessão de WhatsApp por usuário, isolada. Toda a lógica da biblioteca fica aqui:
  * o resto do serviço só chama estes métodos.
  */
+const skey = (userId: string, slot: string) => (slot === MAIN_SLOT ? userId : `${userId}#${slot}`);
+
 export class SessionManager {
+  /** Uma sessão por número: chave = usuário (principal) ou usuário#número. */
   private sessions = new Map<string, Session>();
   /** O processo está sendo desligado (SIGTERM do deploy): não retoma sessões. */
   private stopping = false;
@@ -85,17 +103,27 @@ export class SessionManager {
   constructor(private db: SupabaseClient) {
     this.inbound = new InboundRelay(
       db,
-      (userId, phone, text, o) => this.sendMessage(userId, phone, text, { ...o, typing: true, own: true }),
-      (userId, raw) => this.transcribeIncoming(userId, raw),
-      (userId, phone) => this.sessions.get(userId)?.known.has(phoneKey(phone)) ?? false,
+      (userId, slot, phone, text, o) => this.sendMessage(userId, slot, phone, text, { ...o, typing: true, own: true }),
+      (userId, slot, raw) => this.transcribeIncoming(userId, slot, raw),
+      // Contato seu em qualquer um dos seus números.
+      (userId, phone) => this.sessionsOf(userId).some((x) => x.known.has(phoneKey(phone))),
     );
   }
 
-  private get(userId: string): Session {
-    let s = this.sessions.get(userId);
+  private sessionsOf(userId: string): Session[] {
+    return [...this.sessions.values()].filter((x) => x.userId === userId);
+  }
+
+  private find(userId: string, slot: string): Session | undefined {
+    return this.sessions.get(skey(userId, slot));
+  }
+
+  private get(userId: string, slot: string): Session {
+    let s = this.sessions.get(skey(userId, slot));
     if (!s) {
       s = {
         userId,
+        slot,
         sock: null,
         status: 'desconectado',
         qr: null,
@@ -115,23 +143,33 @@ export class SessionManager {
         sent: new Map(),
         known: new Set(),
       };
-      this.sessions.set(userId, s);
+      this.sessions.set(skey(userId, slot), s);
     }
     return s;
   }
 
-  view(userId: string): StatusView {
-    const s = this.sessions.get(userId);
-    if (!s) return { status: 'desconectado', qr: null, phone: null, connectedAt: null, lastSeenAt: null, error: null };
-    return { status: s.status, qr: s.status === 'aguardando_qr' ? s.qr : null, phone: s.phone, connectedAt: s.connectedAt, lastSeenAt: s.lastSeenAt, error: s.error };
+  view(userId: string, slot: string = MAIN_SLOT): StatusView {
+    const s = this.find(userId, slot);
+    if (!s) return { slot, status: 'desconectado', qr: null, phone: null, connectedAt: null, lastSeenAt: null, error: null };
+    return { slot, status: s.status, qr: s.status === 'aguardando_qr' ? s.qr : null, phone: s.phone, connectedAt: s.connectedAt, lastSeenAt: s.lastSeenAt, error: s.error };
   }
 
-  /** Status atual, completando com o que está salvo no banco (ex.: depois de reiniciar o serviço). */
-  async status(userId: string): Promise<StatusView> {
-    if (this.sessions.has(userId)) return this.view(userId);
-    const { data } = await this.db.from('whatsapp_connections').select('*').eq('user_id', userId).maybeSingle();
-    if (!data) return this.view(userId);
+  /**
+   * Status de um número. Sem número indicado: o principal, ou o primeiro conectado se o principal
+   * não estiver (as telas que só querem saber "dá para enviar pelo WhatsApp?").
+   */
+  async status(userId: string, slot?: string): Promise<StatusView> {
+    if (!slot) {
+      const live = this.sessionsOf(userId).filter((x) => x.sock && x.status === 'conectado');
+      const main = live.find((x) => x.slot === MAIN_SLOT) ?? live[0];
+      if (main) return this.view(userId, main.slot);
+      slot = MAIN_SLOT;
+    }
+    if (this.find(userId, slot)) return this.view(userId, slot);
+    const { data } = await this.db.from('whatsapp_connections').select('*').eq('user_id', userId).eq('slot', slot).maybeSingle();
+    if (!data) return this.view(userId, slot);
     return {
+      slot,
       status: data.status === 'conectado' ? 'reconectando' : 'desconectado',
       qr: null,
       phone: data.phone_number,
@@ -145,13 +183,14 @@ export class SessionManager {
     const { error } = await this.db.from('whatsapp_connections').upsert(
       {
         user_id: s.userId,
+        slot: s.slot,
         phone_number: s.phone,
         status: s.status,
         last_error: s.error,
         connected_at: s.connectedAt,
         last_seen_at: s.lastSeenAt,
       },
-      { onConflict: 'user_id' },
+      { onConflict: 'user_id,slot' },
     );
     if (error) log.error({ user: maskUser(s.userId), err: error.message }, 'falha ao salvar o status da conexão');
   }
@@ -162,15 +201,15 @@ export class SessionManager {
   }
 
   /** Inicia (ou retoma) a sessão. Sem sessão salva, gera QR code. */
-  async connect(userId: string, opts: { restoring?: boolean } = {}): Promise<StatusView> {
-    const s = this.get(userId);
-    if (s.sock && (s.status === 'conectado' || s.status === 'aguardando_qr' || s.status === 'conectando')) return this.view(userId);
+  async connect(userId: string, slot: string = MAIN_SLOT, opts: { restoring?: boolean } = {}): Promise<StatusView> {
+    const s = this.get(userId, slot);
+    if (s.sock && (s.status === 'conectado' || s.status === 'aguardando_qr' || s.status === 'conectando')) return this.view(userId, slot);
     s.closing = false;
     s.yielded = false;
     this.set(s, { status: opts.restoring ? 'reconectando' : 'conectando', error: null, qr: null });
 
     try {
-      const auth = await useDatabaseAuthState(this.db, userId);
+      const auth = await useDatabaseAuthState(this.db, userId, slot);
       s.flush = auth.flushNow;
       const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined as unknown as [number, number, number] }));
       const sock = makeWASocket({
@@ -247,7 +286,7 @@ export class SessionManager {
             const jid: string = m.key?.remoteJid ?? '';
             const kind = jid.endsWith('@g.us') ? 'grupo' : jid.endsWith('@lid') ? 'lid' : jid.endsWith('@s.whatsapp.net') ? 'telefone' : 'outro';
             if (kind !== 'grupo' && kind !== 'outro') log.info({ user: maskUser(userId), type, kind, alt: !!(m.key?.remoteJidAlt || m.key?.senderPn) }, 'mensagem recebida');
-            if (type === 'notify') void this.inbound.handle(userId, m);
+            if (type === 'notify') void this.inbound.handle(userId, m, slot);
           }
         });
       });
@@ -276,7 +315,7 @@ export class SessionManager {
           if (code === DisconnectReason.loggedOut) {
             // Desconectado pelo celular (Aparelhos conectados → sair): sessão inválida.
             log.warn({ user: maskUser(userId) }, 'sessão desconectada pelo celular');
-            await clearAuthState(this.db, userId).catch(() => undefined);
+            await clearAuthState(this.db, userId, slot).catch(() => undefined);
             this.set(s, { status: 'desconectado', qr: null, phone: null, error: 'O WhatsApp foi desconectado pelo celular. Conecte de novo.' });
             return;
           }
@@ -302,14 +341,14 @@ export class SessionManager {
             setTimeout(() => {
               if (this.stopping || !s.yielded || s.sock) return;
               log.info({ user: maskUser(userId) }, 'retomando a sessão');
-              void this.connect(userId, { restoring: true });
+              void this.connect(userId, slot, { restoring: true });
             }, wait);
             return;
           }
           if (code === DisconnectReason.restartRequired) {
             // Normal logo após a leitura do QR: a biblioteca pede para abrir um socket novo.
             this.set(s, { status: 'conectando', qr: null });
-            setTimeout(() => void this.connect(userId, { restoring: opts.restoring }), 500);
+            setTimeout(() => void this.connect(userId, slot, { restoring: opts.restoring }), 500);
             return;
           }
           if (s.status === 'aguardando_qr' && code === DisconnectReason.timedOut) {
@@ -326,7 +365,7 @@ export class SessionManager {
           const wait = Math.min(30_000, 1500 * 2 ** (s.retries - 1));
           log.warn({ user: maskUser(userId), code, retry: s.retries, waitMs: wait }, 'reconexão');
           this.set(s, { status: 'reconectando' });
-          setTimeout(() => void this.connect(userId, { restoring: true }), wait);
+          setTimeout(() => void this.connect(userId, slot, { restoring: true }), wait);
         }
       });
     } catch (err) {
@@ -334,18 +373,25 @@ export class SessionManager {
       log.error({ user: maskUser(userId), err: msg }, 'erro de autenticação');
       this.set(s, { status: 'erro', error: msg });
     }
-    return this.view(userId);
+    return this.view(userId, slot);
   }
 
-  /** A sessão do usuário está conectada e pronta para enviar. */
-  isConnected(userId: string) {
-    const s = this.sessions.get(userId);
+  /** O número está conectado e pronto para enviar. Sem número: algum dos números do usuário. */
+  isConnected(userId: string, slot?: string) {
+    if (!slot) return this.sessionsOf(userId).some((x) => !!x.sock && x.status === 'conectado');
+    const s = this.find(userId, slot);
     return !!s?.sock && s.status === 'conectado';
   }
 
+  /** Número para envios sem número definido (avisos ao dono, consultas): o principal, se conectado; senão outro conectado. */
+  pickSlot(userId: string): string | null {
+    const live = this.sessionsOf(userId).filter((x) => !!x.sock && x.status === 'conectado');
+    return (live.find((x) => x.slot === MAIN_SLOT) ?? live[0])?.slot ?? null;
+  }
+
   /** Verifica se a sessão está de fato ativa (consulta o próprio número no WhatsApp). */
-  async test(userId: string): Promise<{ ok: boolean; message: string }> {
-    const s = this.sessions.get(userId);
+  async test(userId: string, slot: string = MAIN_SLOT): Promise<{ ok: boolean; message: string }> {
+    const s = this.find(userId, slot);
     if (!s?.sock || s.status !== 'conectado') return { ok: false, message: 'WhatsApp não conectado.' };
     try {
       const me = s.sock.user?.id?.split(/[:@]/)[0];
@@ -359,8 +405,8 @@ export class SessionManager {
   }
 
   /** Encerra a sessão no WhatsApp, apaga a autenticação salva e libera um novo QR. */
-  async disconnect(userId: string) {
-    const s = this.get(userId);
+  async disconnect(userId: string, slot: string = MAIN_SLOT) {
+    const s = this.get(userId, slot);
     s.closing = true;
     s.yielded = false;
     try {
@@ -374,9 +420,65 @@ export class SessionManager {
       /* ignore */
     }
     s.sock = null;
-    await clearAuthState(this.db, userId);
+    await clearAuthState(this.db, userId, slot);
     this.set(s, { status: 'desconectado', qr: null, phone: null, connectedAt: null, error: null, retries: 0 });
-    log.info({ user: maskUser(userId) }, 'sessão desconectada pelo usuário');
+    log.info({ user: maskUser(userId), slot }, 'sessão desconectada pelo usuário');
+  }
+
+  /** Lista dos números do usuário (banco + estado ao vivo). O principal aparece mesmo sem registro. */
+  async list(userId: string): Promise<NumberView[]> {
+    const { data, error } = await this.db.from('whatsapp_connections').select('*').eq('user_id', userId).order('created_at');
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    if (!rows.some((r) => (r.slot ?? MAIN_SLOT) === MAIN_SLOT)) rows.unshift({ slot: MAIN_SLOT, daily_limit: 20, active: true });
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const out: NumberView[] = [];
+    for (const r of rows) {
+      const slot = String(r.slot ?? MAIN_SLOT);
+      const live = this.find(userId, slot);
+      const base = await this.status(userId, slot);
+      out.push({
+        ...base,
+        phone: base.phone ?? (r.phone_number as string | null) ?? null,
+        label: (r.label as string | null) ?? null,
+        dailyLimit: Number(r.daily_limit ?? 20),
+        active: r.active !== false,
+        sentToday: live && live.sentDay === today ? live.sentToday : 0,
+      });
+    }
+    return out;
+  }
+
+  /** Novo número: cria o registro e já gera o QR para ler no celular. */
+  async add(userId: string, label: string | null): Promise<StatusView> {
+    const { data } = await this.db.from('whatsapp_connections').select('slot').eq('user_id', userId);
+    if ((data ?? []).length >= 10) throw new Error('Limite de 10 números por conta.');
+    const slot = `n${Math.random().toString(36).slice(2, 8)}`;
+    const { error } = await this.db.from('whatsapp_connections').insert({ user_id: userId, slot, label: label?.slice(0, 40) || null, status: 'desconectado' });
+    if (error) throw new Error(error.message);
+    log.info({ user: maskUser(userId), slot }, 'número novo');
+    return this.connect(userId, slot);
+  }
+
+  /** Nome, limite diário e ligado/desligado de um número. */
+  async update(userId: string, slot: string, patch: { label?: string | null; dailyLimit?: number; active?: boolean }) {
+    const row: Record<string, unknown> = {};
+    if (patch.label !== undefined) row.label = patch.label ? String(patch.label).slice(0, 40) : null;
+    if (patch.dailyLimit !== undefined) row.daily_limit = Math.max(1, Math.min(200, Math.round(Number(patch.dailyLimit) || 20)));
+    if (patch.active !== undefined) row.active = !!patch.active;
+    if (!Object.keys(row).length) return;
+    // O principal pode ainda não ter registro (nunca conectou): cria.
+    const { error } = await this.db.from('whatsapp_connections').upsert({ user_id: userId, slot, ...row }, { onConflict: 'user_id,slot' });
+    if (error) throw new Error(error.message);
+  }
+
+  /** Remove um número extra: desconecta, apaga a sessão e o registro. O principal não pode ser removido. */
+  async remove(userId: string, slot: string) {
+    if (slot === MAIN_SLOT) throw new Error('O número principal não pode ser removido (só desconectado).');
+    await this.disconnect(userId, slot);
+    this.sessions.delete(skey(userId, slot));
+    const { error } = await this.db.from('whatsapp_connections').delete().eq('user_id', userId).eq('slot', slot);
+    if (error) throw new Error(error.message);
   }
 
   /**
@@ -386,11 +488,12 @@ export class SessionManager {
    */
   async sendMessage(
     userId: string,
+    slot: string,
     rawPhone: string,
     message: string,
     opts: { audio?: boolean; voice?: string; typing?: boolean; /** Enviada pelo BEELIE (resposta automática ou campanha): o eco não cancela a resposta automática. */ own?: boolean } = {},
   ): Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }> {
-    const s = this.sessions.get(userId);
+    const s = this.find(userId, slot);
     if (!s?.sock || s.status !== 'conectado') return { ok: false, error: 'WhatsApp não conectado. Conecte em Configurações → WhatsApp.' };
     const text = typeof message === 'string' ? message.trim() : '';
     if (!text) return { ok: false, error: 'A mensagem está vazia.' };
@@ -431,7 +534,7 @@ export class SessionManager {
       remember(s, sent?.key?.id, sent?.message);
       s.sentToday += 1;
       this.set(s, { lastSeenAt: new Date().toISOString() });
-      log.info({ user: maskUser(userId), to: maskPhone(phone), today: s.sentToday, audio: !!audio }, 'mensagem enviada');
+      log.info({ user: maskUser(userId), slot, to: maskPhone(phone), today: s.sentToday, audio: !!audio }, 'mensagem enviada');
       return { ok: true, id: sent?.key?.id ?? '', to: phone };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -442,8 +545,8 @@ export class SessionManager {
 
   /** Baixa o áudio recebido pela sessão do usuário e transcreve. Só é chamado para mensagens de leads e as suas (dono). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async transcribeIncoming(userId: string, raw: any): Promise<string | null> {
-    const s = this.sessions.get(userId);
+  private async transcribeIncoming(userId: string, slot: string, raw: any): Promise<string | null> {
+    const s = this.find(userId, slot);
     const msg = raw?.message;
     const inner = msg?.ephemeralMessage?.message ?? msg?.viewOnceMessage?.message ?? msg;
     const audio = inner?.audioMessage;
@@ -461,9 +564,9 @@ export class SessionManager {
 
   /** Aviso ou relatório para o WhatsApp pessoal do dono (precisa da sessão conectada). */
   notifyOwner(userId: string, text: string): Promise<boolean> {
-    const s = this.sessions.get(userId);
-    if (!s?.sock || s.status !== 'conectado') return Promise.resolve(false);
-    return this.inbound.notifyOwner(userId, text);
+    const slot = this.pickSlot(userId);
+    if (!slot) return Promise.resolve(false);
+    return this.inbound.notifyOwner(userId, text, slot);
   }
 
   /** Resultado da consulta por número (DDD + 8 últimos dígitos), por 30 dias: não consulta de novo. */
@@ -476,7 +579,8 @@ export class SessionManager {
    * Em lotes de 20, com pausa entre eles; no máximo 300 números novos por hora por usuário.
    */
   async checkWhatsapp(userId: string, phones: string[]): Promise<{ ok: true; found: string[]; unchecked: string[] } | { ok: false; error: string }> {
-    const s = this.sessions.get(userId);
+    const picked = this.pickSlot(userId);
+    const s = picked ? this.find(userId, picked) : undefined;
     if (!s?.sock || s.status !== 'conectado') return { ok: false, error: 'WhatsApp desconectado' };
     const norm = (raw: string) => {
       let d = raw.replace(/\D/g, '');
@@ -504,6 +608,7 @@ export class SessionManager {
     for (let i = 0; i < batch.length; i += 20) {
       const part = batch.slice(i, i + 20);
       try {
+        if (!s.sock) throw new Error('sessão fechada');
         const res = (await s.sock.onWhatsApp(...part.map((x) => `55${x.d}`))) ?? [];
         const ok = new Set(res.filter((r) => r.exists).map((r) => kOf(String(r.jid).split('@')[0].replace(/^55/, ''))));
         for (const x of part) {
@@ -525,14 +630,15 @@ export class SessionManager {
 
   /** Ao subir o serviço: reconecta quem estava conectado (sessão salva no banco). */
   async restoreAll() {
-    const { data, error } = await this.db.from('whatsapp_connections').select('user_id').in('status', ['conectado', 'reconectando', 'conectando']);
+    const { data, error } = await this.db.from('whatsapp_connections').select('user_id, slot').in('status', ['conectado', 'reconectando', 'conectando']);
     if (error) {
       log.error({ err: error.message }, 'falha ao listar sessões para restaurar');
       return;
     }
     for (const row of data ?? []) {
-      log.info({ user: maskUser(row.user_id) }, 'restaurando sessão');
-      await this.connect(row.user_id, { restoring: true });
+      const slot = (row as { slot?: string }).slot ?? MAIN_SLOT;
+      log.info({ user: maskUser(row.user_id), slot }, 'restaurando sessão');
+      await this.connect(row.user_id, slot, { restoring: true });
     }
   }
 

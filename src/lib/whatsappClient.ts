@@ -14,6 +14,8 @@ export const whatsappQrAvailable = dataMode === 'supabase' && !!supabase && !!ba
 export type WaStatus = 'desconectado' | 'aguardando_qr' | 'conectando' | 'conectado' | 'reconectando' | 'erro';
 
 export interface WaStatusView {
+  /** Qual número ("principal" é o primeiro). */
+  slot?: string;
   status: WaStatus;
   qr: string | null;
   phone: string | null;
@@ -24,9 +26,19 @@ export interface WaStatusView {
   audio?: boolean;
 }
 
+/** Um dos seus números de WhatsApp (Configurações → WhatsApp). */
+export interface WaNumber extends WaStatusView {
+  slot: string;
+  label: string | null;
+  dailyLimit: number;
+  active: boolean;
+  sentToday: number;
+}
+
 export type WaSendResult = { ok: true; id: string; to: string } | { ok: false; error: string };
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
+  // (GET quando não há corpo; o número vai em ?slot=)
   if (!whatsappQrAvailable || !supabase) throw new Error('Serviço de WhatsApp não configurado.');
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -71,11 +83,18 @@ async function voicePreview(voice: string, name: string): Promise<string> {
 
 export const whatsappClient = {
   voicePreview,
-  status: () => call<WaStatusView>('/whatsapp/status'),
-  connect: () => call<WaStatusView>('/whatsapp/connect', {}),
-  test: () => call<{ ok: boolean; message: string }>('/whatsapp/test', {}),
-  disconnect: () => call<WaStatusView>('/whatsapp/disconnect', {}),
-  send: (phone: string, message: string, opts: { audio?: boolean; voice?: string } = {}) => call<WaSendResult>('/whatsapp/send', { phone, message, ...opts }),
+  /** Sem número: o principal, ou outro conectado (para saber se dá para enviar). */
+  status: (slot?: string) => call<WaStatusView>(slot ? `/whatsapp/status?slot=${encodeURIComponent(slot)}` : '/whatsapp/status'),
+  connect: (slot?: string) => call<WaStatusView>('/whatsapp/connect', slot ? { slot } : {}),
+  test: (slot?: string) => call<{ ok: boolean; message: string }>('/whatsapp/test', slot ? { slot } : {}),
+  disconnect: (slot?: string) => call<WaStatusView>('/whatsapp/disconnect', slot ? { slot } : {}),
+  numbers: () => call<{ numbers: WaNumber[] }>('/whatsapp/numbers').then((r) => r.numbers),
+  addNumber: (label: string) => call<WaStatusView>('/whatsapp/numbers/add', { label }),
+  updateNumber: (slot: string, patch: { label?: string | null; dailyLimit?: number; active?: boolean }) =>
+    call<{ numbers: WaNumber[] }>('/whatsapp/numbers/update', { slot, ...patch }).then((r) => r.numbers),
+  removeNumber: (slot: string) => call<{ numbers: WaNumber[] }>('/whatsapp/numbers/remove', { slot }).then((r) => r.numbers),
+  /** Com leadId, sai pelo número em que o lead já conversa. */
+  send: (phone: string, message: string, opts: { audio?: boolean; voice?: string; leadId?: string; messageId?: string } = {}) => call<WaSendResult>('/whatsapp/send', { phone, message, ...opts }),
 };
 
 // ---------- status compartilhado entre as telas ----------

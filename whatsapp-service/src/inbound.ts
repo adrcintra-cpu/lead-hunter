@@ -114,7 +114,7 @@ interface Index {
 }
 
 /** Envio usado pela resposta automática (o SessionManager implementa). */
-export type AutoSender = (userId: string, phone: string, text: string, o: { audio?: boolean; voice?: string }) => Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }>;
+export type AutoSender = (userId: string, slot: string, phone: string, text: string, o: { audio?: boolean; voice?: string }) => Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }>;
 
 /** O que a Edge Function devolve quando o BEELIE deve responder sozinho. */
 interface AutoReply {
@@ -143,7 +143,7 @@ export class InboundRelay {
     private send?: AutoSender,
     /** Transcreve um áudio recebido (baixa a mídia pela sessão do usuário). Sem ele, o áudio vira um aviso. */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private transcriber?: (userId: string, raw: any) => Promise<string | null>,
+    private transcriber?: (userId: string, slot: string, raw: any) => Promise<string | null>,
     /** O número já é contato seu (agenda ou conversa anterior)? Esses nunca viram lead sozinhos. */
     private isKnownContact?: (userId: string, phone: string) => boolean,
   ) {}
@@ -169,12 +169,12 @@ export class InboundRelay {
   }
 
   /** Envia (com nova tentativa se outra mensagem acabou de sair) e marca como do BEELIE. */
-  private async sendOwn(userId: string, phone: string, text: string): Promise<boolean> {
+  private async sendOwn(userId: string, slot: string, phone: string, text: string): Promise<boolean> {
     if (!this.send) return false;
-    let r = await this.send(userId, phone, text, {});
+    let r = await this.send(userId, slot, phone, text, {});
     for (let i = 0; i < 3 && !r.ok && /^Aguarde (\d+) s/.test(r.error); i++) {
       await new Promise((ok) => setTimeout(ok, (Number(/^Aguarde (\d+) s/.exec(r.ok ? '' : r.error)?.[1] ?? 10) + 1) * 1000));
-      r = await this.send(userId, phone, text, {});
+      r = await this.send(userId, slot, phone, text, {});
     }
     if (!r.ok) {
       log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'mensagem para o dono não enviada');
@@ -185,19 +185,19 @@ export class InboundRelay {
   }
 
   /** Aviso ou relatório para o seu WhatsApp pessoal. */
-  async notifyOwner(userId: string, text: string): Promise<boolean> {
+  async notifyOwner(userId: string, text: string, slot: string): Promise<boolean> {
     const owner = await this.ownerPhone(userId);
     const d = owner ? toDigits(owner) : null;
     if (!d || !text.trim()) return false;
-    const ok = await this.sendOwn(userId, d, text.slice(0, 3500));
+    const ok = await this.sendOwn(userId, slot, d, text.slice(0, 3500));
     if (ok) log.info({ user: maskUser(userId) }, 'aviso enviado para o dono');
     return ok;
   }
 
   /** Mensagem sua para o BEELIE: pedido, contato para prospectar (cartão, texto ou print) ou relatório. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleOwner(userId: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'error'> {
-    const body = (await this.audioText(userId, raw)) ?? m.text;
+  private async handleOwner(userId: string, slot: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'error'> {
+    const body = (await this.audioText(userId, slot, raw)) ?? m.text;
     const history = this.ownerHistory(userId);
     const res = await this.post({ action: 'owner', ownerId: userId, from: m.phone, body, history: history || undefined });
     if (!res.ok) throw new Error(`função respondeu ${res.status}`);
@@ -205,7 +205,7 @@ export class InboundRelay {
     log.info({ user: maskUser(userId) }, 'pedido do dono recebido');
     this.rememberOwner(userId, `Você: ${body}`);
     if (data.reply) {
-      await this.sendOwn(userId, m.phone, data.reply);
+      await this.sendOwn(userId, slot, m.phone, data.reply);
       this.rememberOwner(userId, `BEELIE: ${data.reply}`);
     }
     return 'forwarded';
@@ -236,7 +236,7 @@ export class InboundRelay {
 
   /** Número que não é lead: com a opção ligada, a Edge Function decide se é contato comercial. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleUnknown(userId: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'ignored'> {
+  private async handleUnknown(userId: string, slot: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'ignored'> {
     const skip = (why: string) => {
       log.info({ user: maskUser(userId), why }, 'mensagem de contato que não é lead (ignorada)');
       return 'ignored' as const;
@@ -248,16 +248,16 @@ export class InboundRelay {
     if (Date.now() - Date.parse(m.at) > 15 * 60_000) return skip('mensagem antiga');
     if (!m.phone.startsWith('55')) return skip('número de fora do Brasil');
     const name = typeof raw?.pushName === 'string' ? raw.pushName.slice(0, 60) : undefined;
-    const res = await this.post({ action: 'unknown', ownerId: userId, from: m.phone, body: m.text, name, externalId: m.id, receivedAt: m.at });
+    const res = await this.post({ action: 'unknown', ownerId: userId, from: m.phone, body: m.text, name, externalId: m.id, receivedAt: m.at, waSlot: slot });
     if (!res.ok) throw new Error(`função respondeu ${res.status}`);
     const data = (await res.json().catch(() => ({}))) as { leadId?: string | null; created?: boolean; auto?: AutoReply | null; notify?: string | null };
     if (!data.leadId) return skip('não é contato comercial');
-    if (data.notify) void this.notifyOwner(userId, data.notify);
+    if (data.notify) void this.notifyOwner(userId, data.notify, slot);
     // Daqui em diante o número é lead: as próximas mensagens seguem o caminho normal.
     const idx = this.indexes.get(userId);
     if (idx) idx.map.set(phoneKey(m.phone), data.leadId);
     log.info({ user: maskUser(userId), from: maskPhone(m.phone), created: !!data.created }, 'contato novo virou lead');
-    if (data.auto?.body && data.auto.messageId) this.schedule(userId, data.leadId, m.phone, data.auto);
+    if (data.auto?.body && data.auto.messageId) this.schedule(userId, slot, data.leadId, m.phone, data.auto);
     return 'forwarded';
   }
 
@@ -371,7 +371,7 @@ export class InboundRelay {
     }
   }
 
-  private schedule(userId: string, leadId: string, phone: string, reply: AutoReply) {
+  private schedule(userId: string, slot: string, leadId: string, phone: string, reply: AutoReply) {
     let auto = reply;
     if (!this.send) return;
     const key = this.chatKey(userId, phone);
@@ -380,17 +380,17 @@ export class InboundRelay {
     const delay = Math.max(config.autoMinDelaySeconds, Math.min(600, auto.delaySec)) * 1000;
     const t = setTimeout(async () => {
       this.pending.delete(key);
-      let r = await this.send!(userId, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
+      let r = await this.send!(userId, slot, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
       // Outra mensagem acabou de sair (ex.: campanha para outro lead): espera o intervalo mínimo e tenta de novo.
       for (let i = 0; i < 3 && !r.ok && /^Aguarde (\d+) s/.test(r.error); i++) {
         await new Promise((ok) => setTimeout(ok, (Number(/^Aguarde (\d+) s/.exec(r.ok ? '' : r.error)?.[1] ?? 10) + 1) * 1000));
-        r = await this.send!(userId, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
+        r = await this.send!(userId, slot, phone, auto.body, { audio: auto.format === 'audio', voice: auto.voice });
       }
       if (!r.ok && auto.format === 'audio' && /udio|OPENAI/i.test(r.error)) {
         // A voz falhou (chave, crédito ou instabilidade): o lead recebe em texto em vez de ficar sem resposta.
         log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'áudio indisponível: resposta enviada em texto');
         auto = { ...auto, format: 'texto' };
-        r = await this.send!(userId, phone, auto.body, {});
+        r = await this.send!(userId, slot, phone, auto.body, {});
       }
       if (!r.ok) {
         log.warn({ user: maskUser(userId), to: maskPhone(phone), err: r.error }, 'resposta automática não enviada');
@@ -399,7 +399,7 @@ export class InboundRelay {
       }
       if (r.id) this.markOwn(r.id);
       log.info({ user: maskUser(userId), to: maskPhone(phone), audio: auto.format === 'audio' }, 'O BEELIE respondeu automaticamente');
-      await this.post({ action: 'sent', ownerId: userId, leadId, messageId: auto.messageId, externalId: r.id, to: r.to, format: auto.format, intent: auto.intent }).catch((err) =>
+      await this.post({ action: 'sent', ownerId: userId, leadId, messageId: auto.messageId, externalId: r.id, to: r.to, format: auto.format, intent: auto.intent, waSlot: slot }).catch((err) =>
         log.error({ err: err instanceof Error ? err.message : String(err) }, 'falha ao registrar envio automático'),
       );
     }, delay);
@@ -412,14 +412,14 @@ export class InboundRelay {
    * Devolve null quando não é mídia ou não deu para ler (fica o aviso de sempre).
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async audioText(userId: string, raw: any): Promise<string | null> {
+  private async audioText(userId: string, slot: string, raw: any): Promise<string | null> {
     const msg = raw?.message;
     const m = msg?.ephemeralMessage?.message ?? msg?.viewOnceMessage?.message ?? msg;
     const audio = m?.audioMessage;
     const image = m?.imageMessage;
     if ((!audio && !image) || !this.transcriber) return null;
     try {
-      const text = await this.transcriber(userId, raw);
+      const text = await this.transcriber(userId, slot, raw);
       if (!text) return null;
       if (audio) {
         log.info({ user: maskUser(userId), seconds: Number(audio.seconds) || undefined }, 'áudio de lead transcrito');
@@ -438,7 +438,7 @@ export class InboundRelay {
 
   /** Processa uma mensagem recebida: se for de um lead, encaminha (e agenda a resposta automática, se houver). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async handle(userId: string, raw: any): Promise<'forwarded' | 'ignored' | 'error'> {
+  async handle(userId: string, raw: any, slot = 'principal'): Promise<'forwarded' | 'ignored' | 'error'> {
     if (!this.enabled) {
       if (!this.warnedDisabled) log.warn('respostas desligadas: falta WHATSAPP_INBOUND_SECRET no Railway');
       this.warnedDisabled = true;
@@ -456,18 +456,18 @@ export class InboundRelay {
     }
     try {
       // Você (o dono) escrevendo do seu WhatsApp pessoal: conversa com o BEELIE, não vira lead.
-      if (await this.isOwner(userId, m.phone)) return await this.handleOwner(userId, m, raw);
+      if (await this.isOwner(userId, m.phone)) return await this.handleOwner(userId, slot, m, raw);
       const leadId = await this.findLead(userId, m.phone);
       log.info({ user: maskUser(userId), from: maskPhone(m.phone), lead: !!leadId }, 'mensagem de WhatsApp recebida');
       // Não é lead: conversa pessoal não sai daqui, a menos que a opção de atender desconhecidos esteja ligada.
-      if (!leadId) return await this.handleUnknown(userId, m, raw);
-      const body = (await this.audioText(userId, raw)) ?? m.text;
-      const res = await this.post({ ownerId: userId, leadId, from: m.phone, body, externalId: m.id, receivedAt: m.at });
+      if (!leadId) return await this.handleUnknown(userId, slot, m, raw);
+      const body = (await this.audioText(userId, slot, raw)) ?? m.text;
+      const res = await this.post({ ownerId: userId, leadId, from: m.phone, body, externalId: m.id, receivedAt: m.at, waSlot: slot });
       if (!res.ok) throw new Error(`função respondeu ${res.status}`);
       log.info({ user: maskUser(userId), from: maskPhone(m.phone) }, 'resposta de lead registrada');
       const data = (await res.json().catch(() => ({}))) as { auto?: AutoReply | null; notify?: string | null };
-      if (data.notify) void this.notifyOwner(userId, data.notify);
-      if (data.auto?.body && data.auto.messageId) this.schedule(userId, leadId, m.phone, data.auto);
+      if (data.notify) void this.notifyOwner(userId, data.notify, slot);
+      if (data.auto?.body && data.auto.messageId) this.schedule(userId, slot, leadId, m.phone, data.auto);
       // Sem resposta automática para esta mensagem (robô do outro lado, limite, fora do horário):
       // a resposta que estava agendada para a mensagem anterior também não sai.
       else this.dropPending(userId, m.phone);

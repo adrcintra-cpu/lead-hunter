@@ -1,16 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { MessageCircle, PlugZap, RefreshCw, Unplug } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { MessageCircle, Pencil, PlugZap, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { formatDateTime } from '@/core/utils';
 import { ConfirmDialog, ErrorBox, Modal, Spinner, cx } from '@/components/ui';
-import { waStatusStore, whatsappClient, whatsappQrAvailable, type WaStatus } from '@/lib/whatsappClient';
-import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection';
+import { waStatusStore, whatsappClient, whatsappQrAvailable, type WaNumber, type WaStatus, type WaStatusView } from '@/lib/whatsappClient';
 
 const LABEL: Record<WaStatus, string> = {
   desconectado: 'Desconectado',
   aguardando_qr: 'Aguardando QR Code',
   conectando: 'Conectando',
-  conectado: 'Conectado',
+  conectado: 'Ativo',
   reconectando: 'Reconectando',
   erro: 'Erro',
 };
@@ -34,31 +33,53 @@ const DOT: Record<WaStatus, string> = {
 };
 
 const STEPS = ['Abra o WhatsApp no celular.', 'Vá em Configurações.', 'Selecione Aparelhos conectados.', 'Toque em Conectar aparelho.', 'Escaneie o QR Code.'];
+const WORKING: WaStatus[] = ['aguardando_qr', 'conectando', 'reconectando'];
 
-/** Configurações → WhatsApp: conectar o próprio WhatsApp por QR code (sessão no servidor, nunca no navegador). */
+const nameOf = (n: WaNumber) => n.label || (n.slot === 'principal' ? 'Número principal' : 'Número extra');
+
+/**
+ * Configurações → WhatsApp: seus números (QR code), cada um com o próprio limite diário.
+ * A sessão fica no servidor, nunca no navegador. O lead fica sempre com o mesmo número.
+ */
 export function WhatsAppConnectionCard() {
   const { toast } = useApp();
-  const conn = useWhatsAppConnection();
-  const [busy, setBusy] = useState<'' | 'connect' | 'test' | 'disconnect'>('');
-  const [qrOpen, setQrOpen] = useState(false);
-  const [confirm, setConfirm] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [numbers, setNumbers] = useState<WaNumber[] | null>(null);
   const [error, setError] = useState('');
-  const prev = useRef<WaStatus | null>(null);
+  const [busy, setBusy] = useState('');
+  const [qrSlot, setQrSlot] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [confirm, setConfirm] = useState<{ kind: 'disconnect' | 'remove'; n: WaNumber } | null>(null);
+  const [tests, setTests] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const status: WaStatus = conn?.status ?? 'desconectado';
+  const load = useCallback(async () => {
+    try {
+      const list = await whatsappClient.numbers();
+      setNumbers(list);
+      setError('');
+      return list;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  }, []);
 
-  // QR lido: fecha o modal e avisa.
+  // Atualiza sozinho: rápido enquanto algum número espera o QR ou conecta, lento quando estável.
   useEffect(() => {
-    if (status === 'conectado' && prev.current && prev.current !== 'conectado' && qrOpen) {
-      setQrOpen(false);
-      toast('WhatsApp conectado.', 'success');
-    }
-    if (qrOpen && (status === 'desconectado' || status === 'erro') && prev.current && prev.current !== status) {
-      setQrOpen(false);
-    }
-    prev.current = status;
-  }, [status, qrOpen, toast]);
+    if (!whatsappQrAvailable) return;
+    let alive = true;
+    const tick = async () => {
+      const list = await load();
+      if (!alive) return;
+      const fast = !!list?.some((n) => WORKING.includes(n.status)) || !!qrSlot;
+      timer.current = setTimeout(tick, fast ? 2500 : 30_000);
+    };
+    void tick();
+    return () => {
+      alive = false;
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [load, qrSlot]);
 
   if (!whatsappQrAvailable) {
     return (
@@ -71,8 +92,8 @@ export function WhatsAppConnectionCard() {
     );
   }
 
-  async function run<T>(kind: typeof busy, fn: () => Promise<T>): Promise<T | undefined> {
-    setBusy(kind);
+  async function run<T>(key: string, fn: () => Promise<T>): Promise<T | undefined> {
+    setBusy(key);
     setError('');
     try {
       return await fn();
@@ -84,125 +105,303 @@ export function WhatsAppConnectionCard() {
     }
   }
 
-  async function connect() {
-    setTestResult(null);
-    const v = await run('connect', whatsappClient.connect);
+  const afterChange = async () => {
+    await load();
+    void waStatusStore.refresh();
+  };
+
+  async function connect(n: WaNumber) {
+    const v = await run(`connect:${n.slot}`, () => whatsappClient.connect(n.slot));
     if (v) {
-      waStatusStore.set(v);
-      if (v.status !== 'conectado') setQrOpen(true);
+      await afterChange();
+      if (v.status !== 'conectado') setQrSlot(n.slot);
     }
   }
 
-  async function test() {
-    const r = await run('test', whatsappClient.test);
-    if (r) {
-      setTestResult(r);
+  async function test(n: WaNumber) {
+    const r = await run(`test:${n.slot}`, () => whatsappClient.test(n.slot));
+    if (r) setTests((t) => ({ ...t, [n.slot]: r }));
+  }
+
+  async function disconnect(n: WaNumber) {
+    const v = await run(`disconnect:${n.slot}`, () => whatsappClient.disconnect(n.slot));
+    if (v) {
+      await afterChange();
+      toast(`${nameOf(n)} desconectado.`);
+    }
+  }
+
+  async function remove(n: WaNumber) {
+    const list = await run(`remove:${n.slot}`, () => whatsappClient.removeNumber(n.slot));
+    if (list) {
+      setNumbers(list);
       void waStatusStore.refresh();
+      toast(`${nameOf(n)} removido.`);
     }
   }
 
-  async function disconnect() {
-    const v = await run('disconnect', whatsappClient.disconnect);
-    if (v) {
-      waStatusStore.set(v);
-      setTestResult(null);
-      toast('WhatsApp desconectado.');
+  async function update(n: WaNumber, patch: { label?: string | null; dailyLimit?: number; active?: boolean }) {
+    const list = await run(`update:${n.slot}`, () => whatsappClient.updateNumber(n.slot, patch));
+    if (list) setNumbers(list);
+  }
+
+  async function add(label: string) {
+    const v = await run('add', () => whatsappClient.addNumber(label));
+    if (v?.slot) {
+      setAdding(false);
+      await load();
+      setQrSlot(v.slot);
     }
   }
 
-  const connected = status === 'conectado';
-  const working = status === 'aguardando_qr' || status === 'conectando' || status === 'reconectando';
+  const connectedCount = numbers?.filter((n) => n.status === 'conectado' && n.active).length ?? 0;
+  const capacity = numbers?.filter((n) => n.active).reduce((t, n) => t + n.dailyLimit, 0) ?? 0;
 
   return (
     <section className="card px-5 py-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-[15px] font-extrabold"><MessageCircle className="h-4 w-4" /> {connected ? 'WhatsApp conectado' : 'Conectar WhatsApp'}</h2>
-          {!connected && (
-            <p className="mt-1 text-[13px] text-ink-faint">Conecte seu WhatsApp ao Lead Hunter para utilizar as automações de mensagens.</p>
-          )}
+          <h2 className="flex items-center gap-2 text-[15px] font-extrabold"><MessageCircle className="h-4 w-4" /> Seus números de WhatsApp</h2>
+          <p className="mt-1 text-[13px] text-ink-faint">
+            {numbers
+              ? `${connectedCount} de ${numbers.length} conectado${numbers.length > 1 ? 's' : ''} · até ${capacity} mensagens de prospecção por dia no total.`
+              : 'Carregando…'}{' '}
+            Cada lead conversa sempre pelo mesmo número.
+          </p>
         </div>
-        <span className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold', TONE[status])} role="status" aria-live="polite">
-          {conn ? <span className={cx('h-2 w-2 rounded-full', DOT[status])} aria-hidden /> : <Spinner className="h-3 w-3" />}
-          {conn ? (connected ? 'Ativo' : LABEL[status]) : 'Verificando…'}
-        </span>
+        <button type="button" className="btn-outline min-h-[36px] px-3 text-sm" onClick={() => setAdding(true)} disabled={!!busy || !numbers}>
+          <Plus className="h-4 w-4" /> Adicionar número
+        </button>
       </div>
 
-      {connected && conn && (
-        <dl className="mt-4 grid gap-2 text-[13.5px] sm:grid-cols-3">
-          <div className="rounded-lg border border-line px-3 py-2.5">
-            <dt className="text-xs text-ink-faint">Número</dt>
-            <dd className="font-mono font-semibold">{conn.phone ?? '—'}</dd>
-          </div>
-          <div className="rounded-lg border border-line px-3 py-2.5">
-            <dt className="text-xs text-ink-faint">Status</dt>
-            <dd className="font-semibold text-good">Ativo</dd>
-          </div>
-          <div className="rounded-lg border border-line px-3 py-2.5">
-            <dt className="text-xs text-ink-faint">Última conexão</dt>
-            <dd className="font-semibold">{conn.lastSeenAt ? formatDateTime(conn.lastSeenAt) : conn.connectedAt ? formatDateTime(conn.connectedAt) : '—'}</dd>
-          </div>
-        </dl>
+      {error && <div className="mt-3"><ErrorBox>{error}</ErrorBox></div>}
+
+      {!numbers ? (
+        <div className="mt-4 flex items-center gap-2 text-sm text-ink-faint"><Spinner /> Verificando…</div>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-3">
+          {numbers.map((n) => (
+            <NumberRow
+              key={n.slot}
+              n={n}
+              busy={busy}
+              test={tests[n.slot]}
+              onConnect={() => void connect(n)}
+              onShowQr={() => setQrSlot(n.slot)}
+              onTest={() => void test(n)}
+              onDisconnect={() => setConfirm({ kind: 'disconnect', n })}
+              onRemove={() => setConfirm({ kind: 'remove', n })}
+              onUpdate={(patch) => void update(n, patch)}
+            />
+          ))}
+        </ul>
       )}
 
-      {status === 'reconectando' && <p className="mt-3 text-[13px] text-warn">Restabelecendo a sessão salva. Não é preciso ler o QR code de novo.</p>}
-      {conn?.error && status !== 'conectado' && <div className="mt-3"><ErrorBox>{conn.error}</ErrorBox></div>}
-      {error && error !== conn?.error && <div className="mt-3"><ErrorBox>{error}</ErrorBox></div>}
-      {testResult && (
-        <p className={cx('mt-3 text-[13px] font-semibold', testResult.ok ? 'text-good' : 'text-bad')}>{testResult.message}</p>
-      )}
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {connected ? (
-          <>
-            <button type="button" className="btn-primary" onClick={test} disabled={!!busy}>
-              {busy === 'test' ? <Spinner /> : <PlugZap className="h-4 w-4" />} TESTAR CONEXÃO
-            </button>
-            <button type="button" className="btn-outline text-bad" onClick={() => setConfirm(true)} disabled={!!busy}>
-              {busy === 'disconnect' ? <Spinner /> : <Unplug className="h-4 w-4" />} DESCONECTAR WHATSAPP
-            </button>
-          </>
-        ) : (
-          <button type="button" className="btn-primary" onClick={connect} disabled={!!busy || status === 'reconectando'}>
-            {busy === 'connect' ? <Spinner /> : <MessageCircle className="h-4 w-4" />} {working && status === 'aguardando_qr' ? 'MOSTRAR QR CODE' : 'CONECTAR WHATSAPP'}
-          </button>
-        )}
-      </div>
-
-      <p className="mt-3 text-xs text-ink-faint">
-        A sessão fica salva e criptografada no servidor, não no navegador. Envios são individuais, com intervalo mínimo e limite diário, e respeitam a lista de supressão. Usar o WhatsApp por fora da API oficial pode levar a bloqueio do número pelo WhatsApp: prefira um número comercial e evite volume alto.
+      <p className="mt-4 text-xs text-ink-faint">
+        A sessão de cada número fica salva e criptografada no servidor, não no navegador. Envios são individuais, com intervalo entre mensagens e limite diário por número, e respeitam a lista de supressão.
+        Usar o WhatsApp por fora da API oficial pode levar a bloqueio: cada número tem a própria reputação, e mais números não reduzem esse risco. Mantenha limites baixos (até 20 por número) e use números comerciais.
       </p>
 
-      {qrOpen && (
-        <Modal title="Conectar WhatsApp" onClose={() => setQrOpen(false)}>
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-            <div className="flex h-[248px] w-[248px] shrink-0 items-center justify-center rounded-xl border border-line bg-white p-2">
-              {status === 'aguardando_qr' && conn?.qr ? (
-                <img src={conn.qr} alt="QR code para conectar o WhatsApp" className="h-full w-full" />
-              ) : (
-                <div className="flex flex-col items-center gap-2 text-[13px] text-neutral-500">
-                  <Spinner />
-                  {status === 'conectando' ? 'Conectando…' : 'Gerando QR code…'}
-                </div>
-              )}
-            </div>
-            <div>
-              <ol className="list-decimal space-y-1.5 pl-5 text-[13.5px]">
-                {STEPS.map((s) => <li key={s}>{s}</li>)}
-              </ol>
-              <p className="mt-3 flex items-start gap-1.5 text-xs text-ink-faint">
-                <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" /> O QR code se renova sozinho quando expira. Esta janela fecha ao conectar.
-              </p>
-            </div>
-          </div>
-        </Modal>
-      )}
+      {qrSlot && <QrModal slot={qrSlot} name={numbers?.find((n) => n.slot === qrSlot) ? nameOf(numbers.find((n) => n.slot === qrSlot)!) : 'Novo número'} onDone={(ok) => { setQrSlot(null); void afterChange(); if (ok) toast('WhatsApp conectado.', 'success'); }} />}
+
+      {adding && <AddModal busy={busy === 'add'} onClose={() => setAdding(false)} onAdd={(label) => void add(label)} />}
 
       {confirm && (
-        <ConfirmDialog title="Desconectar WhatsApp" confirmLabel="Desconectar" onClose={() => setConfirm(false)} onConfirm={() => void disconnect()}>
-          Tem certeza que deseja desconectar este WhatsApp?
+        <ConfirmDialog
+          title={confirm.kind === 'remove' ? `Remover ${nameOf(confirm.n)}` : `Desconectar ${nameOf(confirm.n)}`}
+          confirmLabel={confirm.kind === 'remove' ? 'Remover' : 'Desconectar'}
+          onClose={() => setConfirm(null)}
+          onConfirm={() => void (confirm.kind === 'remove' ? remove(confirm.n) : disconnect(confirm.n))}
+        >
+          {confirm.kind === 'remove'
+            ? 'O número sai do Lead Hunter. Os leads que conversavam por ele passam a receber pelo número com mais folga.'
+            : 'Os leads deste número esperam até você conectar de novo (não mudam de número).'}
         </ConfirmDialog>
       )}
     </section>
+  );
+}
+
+function NumberRow(props: {
+  n: WaNumber;
+  busy: string;
+  test?: { ok: boolean; message: string };
+  onConnect: () => void;
+  onShowQr: () => void;
+  onTest: () => void;
+  onDisconnect: () => void;
+  onRemove: () => void;
+  onUpdate: (patch: { label?: string | null; dailyLimit?: number; active?: boolean }) => void;
+}) {
+  const { n, busy } = props;
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(n.label ?? '');
+  const [limit, setLimit] = useState(String(n.dailyLimit));
+  useEffect(() => setLimit(String(n.dailyLimit)), [n.dailyLimit]);
+  const connected = n.status === 'conectado';
+  const mine = (k: string) => busy === `${k}:${n.slot}`;
+
+  return (
+    <li className={cx('rounded-xl border border-line p-4', !n.active && 'opacity-70')}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          {editing ? (
+            <form
+              className="flex items-center gap-1.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                props.onUpdate({ label: label.trim() || null });
+                setEditing(false);
+              }}
+            >
+              <label htmlFor={`wa-label-${n.slot}`} className="sr-only">Nome do número</label>
+              <input id={`wa-label-${n.slot}`} className="input min-h-[34px] w-[200px] py-0 text-sm" maxLength={40} value={label} onChange={(e) => setLabel(e.target.value)} autoFocus />
+              <button type="submit" className="btn-outline min-h-[34px] px-2.5 text-xs">Salvar</button>
+            </form>
+          ) : (
+            <button type="button" className="group flex items-center gap-1.5 text-left text-sm font-bold" onClick={() => setEditing(true)}>
+              {nameOf(n)} <Pencil className="h-3.5 w-3.5 text-ink-faint group-hover:text-accent" aria-label="Renomear" />
+            </button>
+          )}
+          <div className="mt-0.5 font-mono text-[13px] text-ink-soft">{n.phone ?? '—'}</div>
+        </div>
+        <span className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold', TONE[n.status])} role="status" aria-live="polite">
+          <span className={cx('h-2 w-2 rounded-full', DOT[n.status])} aria-hidden /> {LABEL[n.status]}
+        </span>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
+        <div className="flex items-center gap-1.5">
+          <label htmlFor={`wa-limit-${n.slot}`} className="text-ink-faint">Limite por dia</label>
+          <input
+            id={`wa-limit-${n.slot}`}
+            type="number"
+            min={1}
+            max={200}
+            className="input min-h-[32px] w-[72px] py-0 text-sm"
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            onBlur={() => {
+              const v = Math.max(1, Math.min(200, Math.round(Number(limit) || n.dailyLimit)));
+              setLimit(String(v));
+              if (v !== n.dailyLimit) props.onUpdate({ dailyLimit: v });
+            }}
+          />
+        </div>
+        <span className="text-ink-faint">Hoje: <b className="text-ink">{n.sentToday}</b> enviadas</span>
+        {n.lastSeenAt && connected && <span className="text-ink-faint">Ativo em {formatDateTime(n.lastSeenAt)}</span>}
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={n.active} onChange={(e) => props.onUpdate({ active: e.target.checked })} />
+          Usar na prospecção
+        </label>
+      </div>
+
+      {n.status === 'reconectando' && <p className="mt-2 text-[13px] text-warn">Restabelecendo a sessão salva. Não é preciso ler o QR code de novo.</p>}
+      {n.error && !connected && <div className="mt-2"><ErrorBox>{n.error}</ErrorBox></div>}
+      {props.test && <p className={cx('mt-2 text-[13px] font-semibold', props.test.ok ? 'text-good' : 'text-bad')}>{props.test.message}</p>}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {connected ? (
+          <>
+            <button type="button" className="btn-outline min-h-[34px] px-3 text-xs" onClick={props.onTest} disabled={!!busy}>
+              {mine('test') ? <Spinner /> : <PlugZap className="h-3.5 w-3.5" />} Testar
+            </button>
+            <button type="button" className="btn-outline min-h-[34px] px-3 text-xs text-bad" onClick={props.onDisconnect} disabled={!!busy}>
+              {mine('disconnect') ? <Spinner /> : <Unplug className="h-3.5 w-3.5" />} Desconectar
+            </button>
+          </>
+        ) : n.status === 'aguardando_qr' ? (
+          <button type="button" className="btn-primary min-h-[34px] px-3 text-xs" onClick={props.onShowQr}>Mostrar QR Code</button>
+        ) : (
+          <button type="button" className="btn-primary min-h-[34px] px-3 text-xs" onClick={props.onConnect} disabled={!!busy || n.status === 'reconectando'}>
+            {mine('connect') ? <Spinner /> : <MessageCircle className="h-3.5 w-3.5" />} Conectar
+          </button>
+        )}
+        {n.slot !== 'principal' && (
+          <button type="button" className="btn-ghost min-h-[34px] px-3 text-xs text-bad" onClick={props.onRemove} disabled={!!busy}>
+            {mine('remove') ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />} Remover
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** QR do número escolhido: atualiza sozinho e fecha ao conectar. */
+function QrModal({ slot, name, onDone }: { slot: string; name: string; onDone: (connected: boolean) => void }) {
+  const [v, setV] = useState<WaStatusView | null>(null);
+  const prev = useRef<WaStatus | null>(null);
+  const done = useRef(onDone);
+  done.current = onDone;
+  useEffect(() => {
+    let alive = true;
+    let t: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const s = await whatsappClient.status(slot);
+        if (!alive) return;
+        setV(s);
+        if (s.status === 'conectado') return done.current(true);
+        if ((s.status === 'desconectado' || s.status === 'erro') && prev.current && prev.current !== s.status) return done.current(false);
+        prev.current = s.status;
+      } catch {
+        /* tenta de novo */
+      }
+      if (alive) t = setTimeout(tick, 2500);
+    };
+    void tick();
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [slot]);
+
+  return (
+    <Modal title={`Conectar WhatsApp — ${name}`} onClose={() => onDone(false)}>
+      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+        <div className="flex h-[248px] w-[248px] shrink-0 items-center justify-center rounded-xl border border-line bg-white p-2">
+          {v?.status === 'aguardando_qr' && v.qr ? (
+            <img src={v.qr} alt="QR code para conectar o WhatsApp" className="h-full w-full" />
+          ) : (
+            <div className="flex flex-col items-center gap-2 text-[13px] text-neutral-500">
+              <Spinner />
+              {v?.status === 'conectando' ? 'Conectando…' : 'Gerando QR code…'}
+            </div>
+          )}
+        </div>
+        <div>
+          <ol className="list-decimal space-y-1.5 pl-5 text-[13.5px]">
+            {STEPS.map((s) => <li key={s}>{s}</li>)}
+          </ol>
+          <p className="mt-3 text-xs text-ink-faint">Use o celular do número que você quer conectar.</p>
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-faint">
+            <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" /> O QR code se renova sozinho quando expira. Esta janela fecha ao conectar.
+          </p>
+          {v?.error && <div className="mt-3"><ErrorBox>{v.error}</ErrorBox></div>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function AddModal({ busy, onClose, onAdd }: { busy: boolean; onClose: () => void; onAdd: (label: string) => void }) {
+  const [label, setLabel] = useState('');
+  return (
+    <Modal title="Adicionar número de WhatsApp" onClose={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onAdd(label.trim());
+        }}
+      >
+        <label htmlFor="wa-new-label" className="label">Nome do número</label>
+        <input id="wa-new-label" className="input" placeholder="Ex.: Comercial 2" maxLength={40} value={label} onChange={(e) => setLabel(e.target.value)} autoFocus />
+        <p className="mt-2 text-xs text-ink-faint">Em seguida aparece o QR code: leia com o celular desse número. Ele começa com limite de 20 mensagens de prospecção por dia.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={busy}>{busy ? <Spinner /> : <Plus className="h-4 w-4" />} Gerar QR code</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

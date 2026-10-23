@@ -136,6 +136,7 @@ Deno.serve(async (req) => {
       });
       const task = (result?.task as { title?: string } | null)?.title ?? null;
       const auto = await decideAndTask(db, ownerId, r.leadId, result);
+      await tagSlot(db, ownerId, b, auto?.messageId);
       const notify = await leadAlert(db, ownerId, r.leadId, { category: result?.category, summary: result?.summary, taskTitle: task }).catch(() => null);
       return Response.json({ ok: true, leadId: r.leadId, created: r.created, auto, notify });
     } catch (err) {
@@ -184,6 +185,7 @@ Deno.serve(async (req) => {
     });
     const task = (result?.task as { title?: string } | null)?.title ?? null;
     const auto = await decideAndTask(db, ownerId, leadId, result);
+    await tagSlot(db, ownerId, b, auto?.messageId);
     // Lead em potencial: aviso para o seu WhatsApp (o serviço envia).
     const notify = await leadAlert(db, ownerId, leadId, { category: result?.category, summary: result?.summary, taskTitle: task }).catch(() => null);
     return Response.json({ ok: true, auto, notify });
@@ -192,6 +194,15 @@ Deno.serve(async (req) => {
     return Response.json({ error: 'Falha ao registrar a resposta.' }, { status: 500 });
   }
 });
+
+/** Por qual número de WhatsApp a mensagem chegou (e a resposta automática vai sair). Sem a coluna, nada acontece. */
+async function tagSlot(db: Row, ownerId: string, b: Row, autoMessageId?: string) {
+  const slot = typeof b.waSlot === 'string' && /^[a-z0-9_-]{1,24}$/.test(b.waSlot) ? b.waSlot : null;
+  if (!slot) return;
+  const ext = typeof b.externalId === 'string' && b.externalId ? `qr:${b.externalId.slice(0, 100)}` : null;
+  if (ext) await db.from('inbound_messages').update({ wa_slot: slot }).eq('owner_id', ownerId).eq('external_id', ext).then(() => undefined, () => undefined);
+  if (autoMessageId) await db.from('messages').update({ wa_slot: slot }).eq('id', autoMessageId).eq('owner_id', ownerId).then(() => undefined, () => undefined);
+}
 
 type AutoReply = { messageId: string; body: string; intent: string; format: 'texto' | 'audio'; voice: string; delaySec: number };
 type Skip = 'off' | 'horario' | 'limite' | 'robo';
@@ -293,7 +304,7 @@ async function markAutoSent(db: Row, ownerId: string, leadId: string, b: Row) {
   const at = new Date().toISOString();
   const { data: msg } = await db
     .from('messages')
-    .update({ status: 'sent', provider: 'whatsapp_qr', external_id: typeof b.externalId === 'string' ? b.externalId.slice(0, 100) : null, recipient: String(b.to ?? '').replace(/\D/g, '') || null, sent_at: at })
+    .update({ status: 'sent', provider: 'whatsapp_qr', external_id: typeof b.externalId === 'string' ? b.externalId.slice(0, 100) : null, recipient: String(b.to ?? '').replace(/\D/g, '') || null, sent_at: at, ...(typeof b.waSlot === 'string' && /^[a-z0-9_-]{1,24}$/.test(b.waSlot) ? { wa_slot: b.waSlot } : {}) })
     .eq('id', messageId)
     .eq('owner_id', ownerId)
     .eq('status', 'draft')

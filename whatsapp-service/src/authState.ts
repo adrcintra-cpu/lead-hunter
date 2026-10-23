@@ -18,13 +18,29 @@ import { log, maskUser } from './log.js';
  * Leitura: tudo do usuário é carregado uma vez para a memória.
  * Escrita: as mudanças são agrupadas e gravadas em lote (a biblioteca grava muitas chaves seguidas).
  */
-export async function useDatabaseAuthState(db: SupabaseClient, userId: string) {
+/** Número principal: chaves sem prefixo (como sempre foi). Os outros: "~slot~chave" (o "~" não aparece nas chaves da biblioteca). */
+export const MAIN_SLOT = 'principal';
+const prefixOf = (slot: string) => (slot === MAIN_SLOT ? '' : `~${slot}~`);
+
+/** Só as linhas deste número (o principal ignora as chaves com prefixo dos outros). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ofSlot(q: any, slot: string) {
+  return slot === MAIN_SLOT ? q.not('key', 'like', '~%') : q.like('key', `${prefixOf(slot)}%`);
+}
+
+export async function useDatabaseAuthState(db: SupabaseClient, userId: string, slot: string = MAIN_SLOT) {
+  const prefix = prefixOf(slot);
   const cache = new Map<string, unknown>();
-  const { data, error } = await db.from('whatsapp_auth').select('key, value').eq('user_id', userId);
-  if (error) throw new Error(`Falha ao carregar a sessão: ${error.message}`);
-  for (const row of data ?? []) {
+  const rowsAll: { key: string; value: string }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await ofSlot(db.from('whatsapp_auth').select('key, value').eq('user_id', userId), slot).order('key').range(from, from + 999);
+    if (error) throw new Error(`Falha ao carregar a sessão: ${error.message}`);
+    rowsAll.push(...((data ?? []) as { key: string; value: string }[]));
+    if (!data || data.length < 1000) break;
+  }
+  for (const row of rowsAll) {
     try {
-      cache.set(row.key as string, JSON.parse(decrypt(row.value as string), BufferJSON.reviver));
+      cache.set(row.key.slice(prefix.length), JSON.parse(decrypt(row.value), BufferJSON.reviver));
     } catch {
       log.warn({ user: maskUser(userId), key: row.key }, 'chave de sessão ilegível ignorada');
     }
@@ -45,7 +61,7 @@ export async function useDatabaseAuthState(db: SupabaseClient, userId: string) {
       if (writes.length) {
         const rows = writes.map(([key, value]) => ({
           user_id: userId,
-          key,
+          key: prefix + key,
           value: encrypt(JSON.stringify(value, BufferJSON.replacer)),
           updated_at: new Date().toISOString(),
         }));
@@ -56,7 +72,7 @@ export async function useDatabaseAuthState(db: SupabaseClient, userId: string) {
       }
       // Em lotes: muitas chaves numa só lista estouram o tamanho da URL ("fetch failed").
       for (let i = 0; i < deletes.length; i += 100) {
-        const { error: e } = await db.from('whatsapp_auth').delete().eq('user_id', userId).in('key', deletes.slice(i, i + 100));
+        const { error: e } = await db.from('whatsapp_auth').delete().eq('user_id', userId).in('key', deletes.slice(i, i + 100).map((k) => prefix + k));
         if (e) log.error({ user: maskUser(userId), err: e.message }, 'falha ao remover chaves da sessão');
       }
     });
@@ -129,8 +145,8 @@ export async function useDatabaseAuthState(db: SupabaseClient, userId: string) {
   };
 }
 
-/** Apaga a sessão salva de um usuário (desconexão). */
-export async function clearAuthState(db: SupabaseClient, userId: string) {
-  const { error } = await db.from('whatsapp_auth').delete().eq('user_id', userId);
+/** Apaga a sessão salva de um número do usuário (desconexão). Os outros números não são afetados. */
+export async function clearAuthState(db: SupabaseClient, userId: string, slot: string = MAIN_SLOT) {
+  const { error } = await ofSlot(db.from('whatsapp_auth').delete().eq('user_id', userId), slot);
   if (error) throw new Error(`Falha ao remover a sessão: ${error.message}`);
 }

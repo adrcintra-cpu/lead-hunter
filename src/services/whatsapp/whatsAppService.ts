@@ -82,7 +82,7 @@ export class WhatsAppService {
     try {
       if (opts.audio && body.length > 1500) return { ok: false, error: 'Texto longo demais para áudio (máx. 1.500 caracteres).' };
       const voice = opts.audio ? (await loadAssistant().catch(() => null))?.prefs.voice : undefined;
-      const r = await whatsappClient.send(company.whatsapp, body, opts.audio ? { audio: true, voice } : {});
+      const r = await whatsappClient.send(company.whatsapp, body, { ...(opts.audio ? { audio: true, voice } : {}), leadId: lead.id, messageId });
       if (!r.ok) {
         this.svc.log(lead.id, 'message_failed', 'Falha ao enviar pelo WhatsApp conectado', { messageId, channel: 'whatsapp', status: 'Falha no envio', error: r.error, user: this.svc.profile.email });
         return r;

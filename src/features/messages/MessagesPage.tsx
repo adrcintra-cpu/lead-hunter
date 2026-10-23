@@ -1,10 +1,37 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, Mail, MessageCircle, Search, Send } from 'lucide-react';
 import { useDb, useService } from '@/store/AppStore';
 import type { Message } from '@/core/types';
 import { formatDateTime, relativeTime } from '@/core/utils';
 import { EmptyState, PageHeader, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
+import { supabase } from '@/lib/supabase';
+import { whatsappClient, whatsappQrAvailable, type WaNumber } from '@/lib/whatsappClient';
+
+/** Por qual dos seus números cada WhatsApp saiu (id da mensagem → nome do número). Sem a coluna, vazio. */
+function useWaSlots(enabled: boolean) {
+  const [bySlot, setBySlot] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    const sb = supabase;
+    if (!enabled || !sb) return;
+    let alive = true;
+    (async () => {
+      const since = new Date(Date.now() - 60 * 864e5).toISOString();
+      const [{ data, error }, nums] = await Promise.all([
+        sb.from('messages').select('id, wa_slot').eq('channel', 'whatsapp').not('wa_slot', 'is', null).gte('created_at', since).limit(5000),
+        whatsappQrAvailable ? whatsappClient.numbers().catch((): WaNumber[] => []) : Promise.resolve<WaNumber[]>([]),
+      ]);
+      if (!alive || error || !data) return;
+      const names = new Map(nums.map((n) => [n.slot, n.label || n.phone || (n.slot === 'principal' ? 'Número principal' : 'Número extra')]));
+      if (nums.length < 2) return; // um número só: não precisa mostrar
+      setBySlot(new Map((data as { id: string; wa_slot: string }[]).map((m) => [m.id, names.get(m.wa_slot) ?? 'Número removido'])));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [enabled]);
+  return bySlot;
+}
 
 type Channel = 'email' | 'whatsapp';
 type Stage = 'fila' | 'enviado' | 'entregue' | 'aberto' | 'respondeu' | 'falhou';
@@ -42,6 +69,7 @@ export function MessagesPage() {
   const [period, setPeriod] = useState<Period>(30);
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  const slots = useWaSlots(channel === 'whatsapp');
 
   const rows = useMemo<Row[]>(() => {
     const since = period ? service.now().getTime() - period * 864e5 : 0;
@@ -167,7 +195,7 @@ export function MessagesPage() {
         ) : (
           <ul className="divide-y divide-line">
             {shown.slice(0, 300).map((r) => (
-              <MessageRow key={r.m.id} r={r} open={openId === r.m.id} onToggle={() => setOpenId(openId === r.m.id ? null : r.m.id)} onOpenLead={() => drawer.open(r.leadId)} />
+              <MessageRow key={r.m.id} r={r} via={slots.get(r.m.id)} open={openId === r.m.id} onToggle={() => setOpenId(openId === r.m.id ? null : r.m.id)} onOpenLead={() => drawer.open(r.leadId)} />
             ))}
           </ul>
         )}
@@ -177,7 +205,7 @@ export function MessagesPage() {
   );
 }
 
-function MessageRow({ r, open, onToggle, onOpenLead }: { r: Row; open: boolean; onToggle: () => void; onOpenLead: () => void }) {
+function MessageRow({ r, via, open, onToggle, onOpenLead }: { r: Row; via?: string; open: boolean; onToggle: () => void; onOpenLead: () => void }) {
   const { m } = r;
   const title = m.channel === 'email' ? m.subject || '(sem assunto)' : m.finalContent.slice(0, 90);
   const steps: { label: string; at?: string; done: boolean; bad?: boolean }[] =
@@ -201,6 +229,7 @@ function MessageRow({ r, open, onToggle, onOpenLead }: { r: Row; open: boolean; 
           <span className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-ink-faint">
             <span className="font-semibold text-ink-soft">{r.company}</span>
             {m.recipient && <span className="truncate">{m.recipient}</span>}
+            {via && <span>pelo {via}</span>}
             <span>{relativeTime(m.sentAt ?? m.failedAt ?? m.createdAt)}</span>
           </span>
         </span>

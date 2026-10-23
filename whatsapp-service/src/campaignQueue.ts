@@ -12,15 +12,18 @@ import { log, maskPhone, maskUser } from './log.js';
 
 export interface CampaignJob {
   ownerId: string;
+  /** Por qual número sai (o lead fica sempre com o mesmo número). */
+  slot: string;
   leadId: string;
   messageId: string;
   phone: string;
   text: string;
 }
 
-type Sender = (userId: string, phone: string, text: string) => Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }>;
+type Sender = (userId: string, slot: string, phone: string, text: string) => Promise<{ ok: true; id: string; to: string } | { ok: false; error: string }>;
 
 const MAX_PER_USER = 300;
+const qkey = (j: { ownerId: string; slot: string }) => `${j.ownerId}#${j.slot}`;
 
 export class CampaignQueue {
   private queues = new Map<string, CampaignJob[]>();
@@ -29,27 +32,29 @@ export class CampaignQueue {
 
   constructor(
     private send: Sender,
-    private isConnected: (userId: string) => boolean,
+    private isConnected: (userId: string, slot: string) => boolean,
     private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {}
 
   /** Coloca na fila. false = não dá para enviar agora (WhatsApp desconectado ou fila cheia). */
   enqueue(job: CampaignJob): boolean {
-    if (!this.isConnected(job.ownerId)) return false;
+    if (!this.isConnected(job.ownerId, job.slot)) return false;
     if (this.seen.has(job.messageId)) return true;
-    const q = this.queues.get(job.ownerId) ?? [];
+    const key = qkey(job);
+    const q = this.queues.get(key) ?? [];
     if (q.length >= MAX_PER_USER) return false;
     q.push(job);
-    this.queues.set(job.ownerId, q);
+    this.queues.set(key, q);
     this.seen.add(job.messageId);
     if (this.seen.size > 5000) this.seen.delete(this.seen.values().next().value as string);
-    log.info({ user: maskUser(job.ownerId), to: maskPhone(job.phone), pending: q.length }, 'mensagem de campanha na fila');
-    void this.run(job.ownerId);
+    log.info({ user: maskUser(job.ownerId), slot: job.slot, to: maskPhone(job.phone), pending: q.length }, 'mensagem de campanha na fila');
+    void this.run(key);
     return true;
   }
 
-  pending(userId: string) {
-    return this.queues.get(userId)?.length ?? 0;
+  /** Mensagens na fila de um número (cada número tem a própria fila e o próprio ritmo). */
+  pending(userId: string, slot: string) {
+    return this.queues.get(qkey({ ownerId: userId, slot }))?.length ?? 0;
   }
 
   private gapMs() {
@@ -58,13 +63,13 @@ export class CampaignQueue {
     return (min + Math.random() * (max - min)) * 1000;
   }
 
-  private async run(userId: string) {
-    if (this.running.has(userId)) return;
-    this.running.add(userId);
+  private async run(key: string) {
+    if (this.running.has(key)) return;
+    this.running.add(key);
     try {
       let first = true;
       for (;;) {
-        const q = this.queues.get(userId);
+        const q = this.queues.get(key);
         const job = q?.shift();
         if (!job) break;
         if (!first) await this.sleep(this.gapMs());
@@ -72,22 +77,22 @@ export class CampaignQueue {
         await this.deliver(job);
       }
     } finally {
-      this.running.delete(userId);
-      this.queues.delete(userId);
+      this.running.delete(key);
+      this.queues.delete(key);
     }
   }
 
   private async deliver(job: CampaignJob) {
-    let r = await this.send(job.ownerId, job.phone, job.text);
+    let r = await this.send(job.ownerId, job.slot, job.phone, job.text);
     // Intervalo mínimo entre envios (uma resposta do BEELIE pode ter acabado de sair): espera e tenta de novo.
     for (let i = 0; i < 3 && !r.ok && /^Aguarde (\d+) s/.test(r.error); i++) {
       const s = Number(/^Aguarde (\d+) s/.exec(r.error)?.[1] ?? 10);
       await this.sleep((s + 1) * 1000);
-      r = await this.send(job.ownerId, job.phone, job.text);
+      r = await this.send(job.ownerId, job.slot, job.phone, job.text);
     }
     if (r.ok) {
       log.info({ user: maskUser(job.ownerId), to: maskPhone(job.phone) }, 'mensagem de campanha enviada');
-      await report({ action: 'campaign_sent', ownerId: job.ownerId, leadId: job.leadId, messageId: job.messageId, externalId: r.id, to: r.to });
+      await report({ action: 'campaign_sent', ownerId: job.ownerId, leadId: job.leadId, messageId: job.messageId, externalId: r.id, to: r.to, waSlot: job.slot });
     } else {
       log.warn({ user: maskUser(job.ownerId), to: maskPhone(job.phone), err: r.error }, 'mensagem de campanha não enviada');
       await report({ action: 'campaign_failed', ownerId: job.ownerId, leadId: job.leadId, messageId: job.messageId, error: r.error });

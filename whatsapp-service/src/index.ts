@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createClient } from '@supabase/supabase-js';
 import { config } from './config.js';
 import { log } from './log.js';
-import { SessionManager } from './sessionManager.js';
+import { MAIN_SLOT, SessionManager, SLOT_RE } from './sessionManager.js';
 import { CampaignQueue } from './campaignQueue.js';
 import { timingSafeEqual } from 'node:crypto';
 import { ttsAvailable, voicePreview } from './tts.js';
@@ -21,8 +21,8 @@ const db = createClient(config.supabaseUrl, config.supabaseServiceKey, {
 });
 const manager = new SessionManager(db);
 const campaigns = new CampaignQueue(
-  (u, phone, text) => manager.sendMessage(u, phone, text, { typing: true, own: true }),
-  (u) => manager.isConnected(u),
+  (u, slot, phone, text) => manager.sendMessage(u, slot, phone, text, { typing: true, own: true }),
+  (u, slot) => manager.isConnected(u, slot),
 );
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,8 +37,13 @@ async function campaignSend(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'POST') throw new HttpError(405, 'Método não permitido.');
   if (!secretOk(req)) throw new HttpError(401, 'Não autorizado.');
   const b = await readJson(req);
+  const ownerId = String(b.ownerId ?? '');
+  // Número escolhido pelo agendador (o do lead). Sem número (versão antiga das funções): o principal ou outro conectado.
+  const wanted = typeof b.slot === 'string' && SLOT_RE.test(b.slot) ? b.slot : null;
+  const slot = wanted ?? (UUID.test(ownerId) ? manager.pickSlot(ownerId) : null) ?? MAIN_SLOT;
   const job = {
-    ownerId: String(b.ownerId ?? ''),
+    ownerId,
+    slot,
     leadId: String(b.leadId ?? ''),
     messageId: String(b.messageId ?? ''),
     phone: typeof b.phone === 'string' ? b.phone.slice(0, 40) : '',
@@ -46,7 +51,7 @@ async function campaignSend(req: IncomingMessage, res: ServerResponse) {
   };
   if (!UUID.test(job.ownerId) || !UUID.test(job.leadId) || !UUID.test(job.messageId) || !job.phone || !job.text.trim()) throw new HttpError(400, 'Dados inválidos.');
   if (!campaigns.enqueue(job)) throw new HttpError(409, 'WhatsApp não conectado.');
-  send(res, 202, { queued: true, pending: campaigns.pending(job.ownerId) });
+  send(res, 202, { queued: true, slot, pending: campaigns.pending(job.ownerId, slot) });
 }
 
 /** Rota interna: aviso ou relatório para o WhatsApp pessoal do dono (o número vem das configurações dele, não do pedido). */
@@ -163,20 +168,83 @@ setInterval(() => {
   for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
 }, 5 * 60_000).unref();
 
+/** Número em que o lead já conversa (última mensagem enviada ou recebida com número). */
+async function leadSlot(userId: string, leadId: string): Promise<string | null> {
+  const [out, inb] = await Promise.all([
+    db.from('messages').select('wa_slot, created_at').eq('owner_id', userId).eq('lead_id', leadId).eq('channel', 'whatsapp').not('wa_slot', 'is', null).order('created_at', { ascending: false }).limit(1),
+    db.from('inbound_messages').select('wa_slot, received_at').eq('owner_id', userId).eq('lead_id', leadId).not('wa_slot', 'is', null).order('received_at', { ascending: false }).limit(1),
+  ]);
+  const o = (out.data ?? [])[0] as { wa_slot: string; created_at: string } | undefined;
+  const i = (inb.data ?? [])[0] as { wa_slot: string; received_at: string } | undefined;
+  const last = !o ? i?.wa_slot : !i ? o.wa_slot : i.received_at > o.created_at ? i.wa_slot : o.wa_slot;
+  return last && SLOT_RE.test(last) ? last : null;
+}
+
 // ---------- rotas ----------
 
-type Handler = (userId: string, body: Record<string, unknown>) => Promise<unknown>;
+type Handler = (userId: string, body: Record<string, unknown>, query: URLSearchParams) => Promise<unknown>;
+
+/** Número pedido pela tela (corpo ou ?slot=). Sem número: o principal. */
+function slotOf(body: Record<string, unknown>, query?: URLSearchParams): string {
+  const raw = typeof body.slot === 'string' ? body.slot : query?.get('slot') ?? '';
+  if (!raw) return MAIN_SLOT;
+  if (!SLOT_RE.test(raw)) throw new HttpError(400, 'Número inválido.');
+  return raw;
+}
+function optionalSlot(body: Record<string, unknown>, query?: URLSearchParams): string | undefined {
+  const has = typeof body.slot === 'string' || !!query?.get('slot');
+  return has ? slotOf(body, query) : undefined;
+}
 
 const routes: Record<string, { method: 'GET' | 'POST'; kind: string; handler: Handler }> = {
-  '/whatsapp/status': { method: 'GET', kind: 'status', handler: async (u) => ({ ...(await manager.status(u)), audio: ttsAvailable() }) },
-  '/whatsapp/connect': { method: 'POST', kind: 'connect', handler: (u) => manager.connect(u) },
-  '/whatsapp/test': { method: 'POST', kind: 'test', handler: (u) => manager.test(u) },
+  '/whatsapp/status': { method: 'GET', kind: 'status', handler: async (u, _b, q) => ({ ...(await manager.status(u, optionalSlot({}, q))), audio: ttsAvailable() }) },
+  '/whatsapp/connect': { method: 'POST', kind: 'connect', handler: (u, b) => manager.connect(u, slotOf(b)) },
+  '/whatsapp/test': { method: 'POST', kind: 'test', handler: (u, b) => manager.test(u, slotOf(b)) },
   '/whatsapp/disconnect': {
     method: 'POST',
     kind: 'disconnect',
-    handler: async (u) => {
-      await manager.disconnect(u);
-      return manager.view(u);
+    handler: async (u, b) => {
+      const slot = slotOf(b);
+      await manager.disconnect(u, slot);
+      return manager.view(u, slot);
+    },
+  },
+  // Vários números: lista, novo número (já com QR), nome/limite/ligado e remover.
+  '/whatsapp/numbers': { method: 'GET', kind: 'status', handler: async (u) => ({ numbers: await manager.list(u) }) },
+  '/whatsapp/numbers/add': {
+    method: 'POST',
+    kind: 'connect',
+    handler: async (u, b) => {
+      try {
+        return await manager.add(u, typeof b.label === 'string' ? b.label : null);
+      } catch (err) {
+        throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
+    },
+  },
+  '/whatsapp/numbers/update': {
+    method: 'POST',
+    kind: 'connect',
+    handler: async (u, b) => {
+      const slot = slotOf(b);
+      await manager.update(u, slot, {
+        label: b.label === undefined ? undefined : typeof b.label === 'string' ? b.label : null,
+        dailyLimit: b.dailyLimit === undefined ? undefined : Number(b.dailyLimit),
+        active: b.active === undefined ? undefined : b.active === true,
+      });
+      return { numbers: await manager.list(u) };
+    },
+  },
+  '/whatsapp/numbers/remove': {
+    method: 'POST',
+    kind: 'disconnect',
+    handler: async (u, b) => {
+      try {
+        await manager.remove(u, slotOf(b));
+      } catch (err) {
+        throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
+      return { numbers: await manager.list(u) };
     },
   },
   '/whatsapp/send': {
@@ -189,14 +257,22 @@ const routes: Record<string, { method: 'GET' | 'POST'; kind: string; handler: Ha
       const audio = body.audio === true;
       const voice = typeof body.voice === 'string' ? body.voice.slice(0, 20) : undefined;
       if (audio && message.length > 1500) throw new HttpError(400, 'Texto longo demais para áudio (máx. 1.500 caracteres).');
-      return manager.sendMessage(u, phone, message, { audio, voice });
+      // Envio pela tela: o número indicado; senão o número em que o lead já conversa; senão o principal / outro conectado.
+      const leadId = typeof body.leadId === 'string' && UUID.test(body.leadId) ? body.leadId : null;
+      const messageId = typeof body.messageId === 'string' && UUID.test(body.messageId) ? body.messageId : null;
+      const sticky = leadId ? await leadSlot(u, leadId) : null;
+      const slot = optionalSlot(body) ?? (sticky && manager.isConnected(u, sticky) ? sticky : null) ?? manager.pickSlot(u) ?? MAIN_SLOT;
+      const r = await manager.sendMessage(u, slot, phone, message, { audio, voice });
+      if (r.ok && messageId) await db.from('messages').update({ wa_slot: slot }).eq('id', messageId).eq('owner_id', u).then(() => undefined, () => undefined);
+      return r;
     },
   },
 };
 
 const server = createServer(async (req, res) => {
   cors(req, res);
-  const path = (req.url ?? '/').split('?')[0];
+  const [path, qs] = (req.url ?? '/').split('?');
+  const query = new URLSearchParams(qs ?? '');
   try {
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -225,7 +301,7 @@ const server = createServer(async (req, res) => {
     const userId = await authenticate(req);
     rateLimit(userId, route.kind);
     const body = route.method === 'POST' ? await readJson(req) : {};
-    const result = await route.handler(userId, body);
+    const result = await route.handler(userId, body, query);
     send(res, 200, result);
   } catch (err) {
     if (err instanceof HttpError) return send(res, err.status, { error: err.message });
