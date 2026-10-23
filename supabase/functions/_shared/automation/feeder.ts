@@ -29,10 +29,11 @@ const same = (a?: string | null, b?: string | null) => {
 };
 
 /** Todas as linhas (em páginas de 1000: o banco devolve no máximo isso por consulta). */
-async function all(q: () => Row, cols: string): Promise<Row[]> {
+/** Todas as linhas (de 1000 em 1000). O filtro vem depois do select: no supabase-js, .eq só existe após .select. */
+async function all(db: Db, table: string, cols: string, filter: (q: Row) => Row): Promise<Row[]> {
   const out: Row[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await q().select(cols).order('id').range(from, from + PAGE - 1);
+    const { data, error } = await filter(db.from(table).select(cols)).order('id').range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     out.push(...((data ?? []) as Row[]));
     if (!data || data.length < PAGE) break;
@@ -131,10 +132,10 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
     if (!quotas.size && !emailQuotas.size) continue;
 
     // Base do dono: leads, empresas, quem já passou por campanha, opt-out e listas.
-    const leads = await all(() => db.from('leads').eq('owner_id', owner), 'id, company_id, stage, current_score, tags, email');
-    const comps = await all(() => db.from('companies').eq('owner_id', owner), 'id, segment, city, whatsapp, phone, cnpj');
-    const enrolledEver = new Set((await all(() => db.from('enrollments').eq('owner_id', owner), 'id, lead_id')).map((e) => e.lead_id));
-    const supp = await all(() => db.from('suppression_list').eq('owner_id', owner), 'id, kind, value');
+    const leads = await all(db, 'leads', 'id, company_id, stage, current_score, tags, email', (q) => q.eq('owner_id', owner));
+    const comps = await all(db, 'companies', 'id, segment, city, whatsapp, phone, cnpj', (q) => q.eq('owner_id', owner));
+    const enrolledEver = new Set((await all(db, 'enrollments', 'id, lead_id', (q) => q.eq('owner_id', owner))).map((e) => e.lead_id));
+    const supp = await all(db, 'suppression_list', 'id, kind, value', (q) => q.eq('owner_id', owner));
     const compById = new Map(comps.map((c) => [c.id, c]));
     const suppressed = (c: Row, l: Row) =>
       supp.some(
@@ -153,7 +154,7 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
       let left = quotas.get(c.id) ?? 0;
       let leftEmail = emailQuotas.get(c.id) ?? 0;
       const listId = c.audience?.listId as string | undefined;
-      const inList = listId ? new Set((await all(() => db.from('lead_lists').eq('list_id', listId), 'list_id, lead_id')).map((x) => x.lead_id)) : null;
+      const inList = listId ? new Set((await all(db, 'lead_lists', 'list_id, lead_id', (q) => q.eq('list_id', listId))).map((x) => x.lead_id)) : null;
       const needWa = usesWa.get(c.cadence_id) ?? c.channel !== 'email';
       const picked: Row[] = [];
       for (const l of pool) {

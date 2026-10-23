@@ -182,10 +182,11 @@ async function defaultPool(db: Db, ownerId: string): Promise<number> {
   return count ?? 0;
 }
 
-async function allRows(q: () => Row, cols: string): Promise<Row[]> {
+/** Todas as linhas (de 1000 em 1000). O filtro vem depois do select: no supabase-js, .eq só existe após .select. */
+async function allRows(db: Db, table: string, cols: string, filter: (q: Row) => Row): Promise<Row[]> {
   const out: Row[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await q().select(cols).order('id').range(from, from + PAGE - 1);
+    const { data, error } = await filter(db.from(table).select(cols)).order('id').range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     out.push(...((data ?? []) as Row[]));
     if (!data || data.length < PAGE) break;
@@ -295,10 +296,10 @@ export async function runOne(db: Db, st: HunterState, target: { segment: string;
   }
 
   // O que já existe na sua base e quem pediu para não receber mensagens.
-  const existing = await allRows(() => db.from('companies').eq('owner_id', st.ownerId), 'id, legal_name, trade_name, city, phone, whatsapp, website');
+  const existing = await allRows(db, 'companies', 'id, legal_name, trade_name, city, phone, whatsapp, website', (q) => q.eq('owner_id', st.ownerId));
   const known = new Set<string>();
   for (const c of existing) for (const k of keysOf(c)) known.add(k);
-  const supp = await allRows(() => db.from('suppression_list').eq('owner_id', st.ownerId).eq('kind', 'phone'), 'id, value');
+  const supp = await allRows(db, 'suppression_list', 'id, value', (q) => q.eq('owner_id', st.ownerId).eq('kind', 'phone'));
   const blocked = new Set(supp.map((x) => phoneKey(x.value)).filter(Boolean));
   const { data: profile } = await db.from('profiles').select('icp_segments, icp_regions').eq('id', st.ownerId).maybeSingle();
 
