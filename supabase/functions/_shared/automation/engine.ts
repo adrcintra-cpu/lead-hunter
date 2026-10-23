@@ -12,7 +12,7 @@ import { inWindow, nextDayWindow, plan, startOfDayBRT, type Effect, type PlanCon
 import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, looksAutomated, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, cleanPersonName, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN } from './unknownInbound.ts';
-import { feedCampaigns } from './feeder.ts';
+import { EMAIL_CAMPAIGN_DAILY_CAP, feedCampaigns, QR_CAMPAIGN_DAILY_CAP } from './feeder.ts';
 import { huntLeads } from './hunter.ts';
 import { checkAiHealth } from './healthAlert.ts';
 import { addContacts, samePhone, sendDailyReports } from './ownerChat.ts';
@@ -419,6 +419,14 @@ export async function runDue(db: Db, limit = 50): Promise<RunSummary> {
   return sum;
 }
 
+/** Mensagens de prospecção (campanhas) criadas hoje no canal, sem contar as respostas a quem respondeu. */
+async function prospectingToday(db: Db, owner: string, channel: 'whatsapp' | 'email'): Promise<number> {
+  const since = startOfDayBRT(new Date()).toISOString();
+  const base = () => db.from('messages').select('id', { count: 'exact', head: true }).eq('owner_id', owner).eq('channel', channel).not('campaign_id', 'is', null).gte('created_at', since);
+  const [{ count: all }, { count: replies }] = await Promise.all([base(), base().like('template', 'IA — resposta sugerida%')]);
+  return (all ?? 0) - (replies ?? 0);
+}
+
 async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number; failed: number }> {
   const owner = e.owner_id as string;
   const [lead, cadRow, profile] = await Promise.all([
@@ -476,17 +484,10 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
     }
   }
 
-  // Limite total do número de WhatsApp (todas as campanhas juntas): o serviço aceita poucos envios por
-  // dia e as respostas do BEELIE também contam. Passou do limite, a etapa fica para amanhã.
+  // Limite diário de prospecção no WhatsApp (todas as campanhas juntas). As respostas do BEELIE a quem
+  // respondeu não contam: quem conversa sempre recebe resposta. Passou do limite, a etapa fica para amanhã.
   if (send && 'step' in send && send.step.channel === 'whatsapp') {
-    const { count: today } = await db
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('owner_id', owner)
-      .eq('channel', 'whatsapp')
-      .not('campaign_id', 'is', null)
-      .gte('created_at', startOfDayBRT(new Date()).toISOString());
-    if ((today ?? 0) >= QR_CAMPAIGN_DAILY_CAP()) {
+    if ((await prospectingToday(db, owner, 'whatsapp')) >= QR_CAMPAIGN_DAILY_CAP()) {
       await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
       return { sent: 0, failed: 0 };
     }
@@ -494,14 +495,7 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
 
   // Limite total de e-mails de campanha por dia: protege a reputação do domínio (e o plano do Resend).
   if (send && 'step' in send && send.step.channel === 'email') {
-    const { count: today } = await db
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('owner_id', owner)
-      .eq('channel', 'email')
-      .not('campaign_id', 'is', null)
-      .gte('created_at', startOfDayBRT(new Date()).toISOString());
-    if ((today ?? 0) >= EMAIL_CAMPAIGN_DAILY_CAP()) {
+    if ((await prospectingToday(db, owner, 'email')) >= EMAIL_CAMPAIGN_DAILY_CAP()) {
       await db.from('enrollments').update({ next_run_at: nextDayWindow(new Date(), ctx.window).toISOString() }).eq('id', e.id);
       return { sent: 0, failed: 0 };
     }
@@ -791,8 +785,7 @@ export async function rescueManualWhatsapp(db: Db, now = new Date()): Promise<nu
 
 export const QR_MAX_RETRIES = 3;
 /** Envios de campanha por dia no WhatsApp conectado (todas as campanhas). O serviço aceita 60 no total. */
-export const QR_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('QR_CAMPAIGN_DAILY_CAP') ?? 45);
-export const EMAIL_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('EMAIL_CAMPAIGN_DAILY_CAP') ?? 50);
+export { EMAIL_CAMPAIGN_DAILY_CAP, QR_CAMPAIGN_DAILY_CAP };
 /** O serviço recusou porque o número já mandou o máximo do dia: não é falha, espera o dia seguinte. */
 const DAILY_LIMIT = /Limite de \d+ envios por dia/i;
 /** Marca de mensagem já recuperada de uma tarefa (fica no template, que as novas tentativas não apagam). */

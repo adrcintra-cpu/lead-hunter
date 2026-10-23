@@ -65,6 +65,10 @@ export interface FeedSummary {
 /** Leads só com e-mail por dia em cada campanha WhatsApp + e-mail sem limite de e-mail definido. */
 export const EMAIL_ONLY_DAILY = 20;
 
+/** Limites diários de prospecção (todas as campanhas juntas). Respostas a quem respondeu não contam. */
+export const QR_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('QR_CAMPAIGN_DAILY_CAP') ?? 20);
+export const EMAIL_CAMPAIGN_DAILY_CAP = () => Number(Deno.env.get('EMAIL_CAMPAIGN_DAILY_CAP') ?? 40);
+
 export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSummary> {
   const sum: FeedSummary = { enrolled: 0, campaigns: 0 };
   const { data: camps } = await db
@@ -97,7 +101,8 @@ export async function feedCampaigns(db: Db, now = new Date()): Promise<FeedSumma
         const { data: cs } = cids.length ? await db.from('companies').select('id, whatsapp').in('id', cids) : { data: [] };
         emailOnlyToday.set(c.id, ((cs ?? []) as Row[]).filter((x) => !x.whatsapp).length);
       }
-      const limit = Number(c.channel === 'email' ? c.daily_limit_email : c.daily_limit_whatsapp) || 0;
+      // A campanha não puxa mais gente do que o limite geral do canal consegue mandar no dia.
+      const limit = Math.min(Number(c.channel === 'email' ? c.daily_limit_email : c.daily_limit_whatsapp) || 0, c.channel === 'email' ? EMAIL_CAMPAIGN_DAILY_CAP() : QR_CAMPAIGN_DAILY_CAP());
       const { count: enrolledToday } = await db.from('enrollments').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id).gte('created_at', dayStart);
       const ch = c.channel === 'email' ? 'email' : 'whatsapp';
       const { count: msgsToday } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('channel', ch).gte('created_at', dayStart);
