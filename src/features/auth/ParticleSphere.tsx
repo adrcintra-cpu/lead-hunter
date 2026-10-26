@@ -14,7 +14,7 @@ export function ParticleSphere({ className }: { className?: string }) {
     if (!canvas || !ctx) return;
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
-    const N = 4200;
+    const N = 6500;
     const pts: [number, number, number][] = [];
     const golden = Math.PI * (3 - Math.sqrt(5));
     for (let i = 0; i < N; i++) {
@@ -49,6 +49,12 @@ export function ParticleSphere({ className }: { className?: string }) {
       const cy = h / 2;
       const rotY = t * 0.12;
       const rotX = 0.35 + Math.sin(t * 0.07) * 0.08;
+      // Brilho suave atrás da esfera.
+      const glow = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R * 1.35);
+      glow.addColorStop(0, 'rgba(70, 110, 220, 0.16)');
+      glow.addColorStop(1, 'rgba(70, 110, 220, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
       const cY = Math.cos(rotY), sY = Math.sin(rotY), cX = Math.cos(rotX), sX = Math.sin(rotX);
       for (const [px, py, pz] of pts) {
         // Deformação: ondas que percorrem a superfície ("respiração" orgânica).
@@ -65,8 +71,8 @@ export function ParticleSphere({ className }: { className?: string }) {
         const sy = cy + y * R * persp * 1.5;
         // Borda da esfera mais brilhante (efeito de luz rasante), centro mais apagado.
         const rim = Math.min(1, Math.abs(Math.hypot(x, y)) ** 3 * 1.1);
-        const a = 0.12 + depth * 0.45 + rim * 0.4;
-        const size = 0.5 + depth * 1.1;
+        const a = 0.22 + depth * 0.5 + rim * 0.55;
+        const size = 0.8 + depth * 1.5;
         ctx.fillStyle = `rgba(${150 + rim * 90 | 0}, ${185 + rim * 60 | 0}, 255, ${Math.min(1, a)})`;
         ctx.fillRect(sx, sy, size, size);
       }
