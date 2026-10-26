@@ -12,7 +12,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#0a1020] text-white">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_30%_50%,#16244a_0%,#0a1020_60%)]" aria-hidden />
-      <ParticleSphere className="pointer-events-none absolute left-1/2 top-1/2 h-[min(110vh,1100px)] w-[min(110vh,1100px)] -translate-x-1/2 -translate-y-1/2 opacity-40 lg:left-[33%] lg:opacity-100" />
+      <ParticleSphere className="pointer-events-none absolute left-1/2 top-1/2 h-[min(110vh,1100px)] w-[min(110vh,1100px)] -translate-x-1/2 -translate-y-1/2 opacity-25 lg:left-[33%] lg:opacity-60" />
       <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-10 lg:justify-end lg:pr-[8vw]">
         <div className="w-full max-w-[440px] rounded-[28px] border border-white/10 bg-[#121a2e]/85 px-7 py-10 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)] backdrop-blur-md sm:px-10">
           <div className="mb-9 flex flex-col items-center gap-2">
