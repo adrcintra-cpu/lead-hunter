@@ -116,8 +116,41 @@ function serverOwned(table: TableName, row: Record<string, unknown>): boolean {
   return table === 'aiRuns' || (table === 'activities' && row.type === 'stage_changed');
 }
 
-/** Recarrega do servidor a cada minuto: os envios e respostas acontecem lá. */
+/** Confere o servidor a cada minuto: os envios e respostas acontecem lá. */
 export const REMOTE_REFRESH_MS = 60_000;
+
+/**
+ * Atualização incremental: a cada minuto só vem o que mudou (pela coluna de data abaixo), não a base inteira.
+ * Antes, a base toda era baixada a cada minuto com o app aberto, o que estourava a cota de tráfego do Supabase.
+ * - 'full': tabelas pequenas sem coluna de alteração confiável (vêm inteiras).
+ * - 'byParent': resultados de busca, só das buscas que mudaram.
+ * Uma recarga completa a cada 15 min pega o que foi apagado no servidor.
+ */
+const SYNC: Record<TableName, string | 'full' | 'byParent'> = {
+  companies: 'updated_at',
+  leadSources: 'fetched_at',
+  leads: 'updated_at',
+  leadScores: 'created_at',
+  analyses: 'created_at',
+  notes: 'updated_at',
+  activities: 'created_at',
+  lists: 'updated_at',
+  listMembers: 'added_at',
+  searches: 'updated_at',
+  savedSearches: 'updated_at',
+  searchResults: 'byParent',
+  messages: 'updated_at',
+  suppression: 'created_at',
+  aiRuns: 'created_at',
+  campaigns: 'updated_at',
+  cadences: 'updated_at',
+  enrollments: 'updated_at',
+  inbound: 'full',
+  tasks: 'full',
+};
+const FULL_RELOAD_MS = 15 * 60_000;
+/** Margem para relógio diferente e gravações que terminam durante a leitura. */
+const OVERLAP_MS = 5 * 60_000;
 
 export class SupabaseRepository implements Repository {
   private state: DbState = emptyDb();
@@ -162,13 +195,33 @@ export class SupabaseRepository implements Repository {
     this.touched = this.touched.filter((t) => t.seq > this.savedSeq);
   }
 
+  /** Início da última leitura (completa ou incremental) e da última completa. */
+  private syncedAt = 0;
+  private fullAt = 0;
+
   constructor(
     private client: SupabaseClient,
     private user: { id: string; email: string },
     private onError: (message: string) => void = () => {},
   ) {}
 
+  /** Todas as linhas de uma consulta, de 1000 em 1000. */
+  private async pages(t: TableName, build: (q: ReturnType<SupabaseClient['from']>) => unknown, extraCols = ''): Promise<Record<string, unknown>[]> {
+    const def = DEFS[t];
+    const rows: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += 1000) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const q: any = build(this.client.from(def.sql));
+      const { data, error } = await q.select(def.cols.join(',') + extraCols).order(def.order, { ascending: t === 'searchResults' }).range(from, from + 999);
+      if (error) throw new Error(`Falha ao carregar ${def.sql}: ${error.message}`);
+      rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
+      if (!data || data.length < 1000) break;
+    }
+    return rows;
+  }
+
   async load(): Promise<void> {
+    const startedAt = Date.now();
     const savedAtStart = this.savedSeq;
     const next = emptyDb();
     const tables = Object.keys(DEFS) as TableName[];
@@ -230,13 +283,69 @@ export class SupabaseRepository implements Repository {
     }
     this.keepLocal(next, savedAtStart);
     this.state = next;
+    this.syncedAt = startedAt;
+    this.fullAt = startedAt;
     this.emit();
   }
 
-  /** Recarrega do servidor depois de gravar o que está pendente. Falhas são silenciosas (tenta de novo depois). */
+  /**
+   * Atualiza do servidor depois de gravar o que está pendente: só o que mudou desde a última leitura
+   * (ver SYNC). Falhas são silenciosas (tenta de novo depois).
+   */
   async refresh(): Promise<void> {
     await this.flush();
-    await this.load();
+    if (!this.syncedAt || Date.now() - this.fullAt > FULL_RELOAD_MS) return this.load();
+    const startedAt = Date.now();
+    const savedAtStart = this.savedSeq;
+    const since = new Date(this.syncedAt - OVERLAP_MS).toISOString();
+    const tables = (Object.keys(DEFS) as TableName[]).filter((t) => SYNC[t] !== 'byParent');
+    const got = new Map<TableName, Record<string, unknown>[]>();
+    await Promise.all(
+      tables.map(async (t) => {
+        const mode = SYNC[t];
+        const extra = t === 'leads' && this.beelieCol ? ',beelie' : '';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        got.set(t, await this.pages(t, (q: any) => (mode === 'full' ? q : q.gte(mode, since)), extra));
+      }),
+    );
+    const changedSearches = (got.get('searches') ?? []).map((r) => String(r.id));
+    if (changedSearches.length) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      got.set('searchResults', await this.pages('searchResults', (q: any) => q.in('search_id', changedSearches.slice(0, 100))));
+    }
+
+    const next = { ...this.state } as DbState;
+    for (const [t, rows] of got) {
+      const fresh = rows.map((r) => {
+        const o = fromRow(t, r);
+        if (t === 'leads' && r.beelie) (o as Record<string, unknown>).beelie = r.beelie;
+        return o;
+      });
+      if (SYNC[t] === 'full') {
+        (next as unknown as Record<string, unknown[]>)[t] = fresh;
+        continue;
+      }
+      if (!fresh.length) continue;
+      const key = (r: unknown) => this.rowKey(r as Record<string, unknown>);
+      const byKey = new Map((this.state[t] as unknown[]).map((r) => [key(r), r]));
+      for (const r of fresh) {
+        const old = byKey.get(key(r)) as Record<string, unknown> | undefined;
+        // A memória do Beelie só vem quando a coluna existe: sem ela no pacote, mantém a que já estava.
+        byKey.set(key(r), t === 'leads' && old?.beelie && !(r as Record<string, unknown>).beelie ? { ...r, beelie: old.beelie } : r);
+      }
+      const order = toCamel(DEFS[t].order);
+      const asc = t === 'searchResults';
+      (next as unknown as Record<string, unknown[]>)[t] = [...byKey.values()].sort((a, b) => {
+        const x = (a as Record<string, unknown>)[order];
+        const y = (b as Record<string, unknown>)[order];
+        const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x ?? '').localeCompare(String(y ?? ''));
+        return asc ? c : -c;
+      });
+    }
+    this.keepLocal(next, savedAtStart);
+    this.state = next;
+    this.syncedAt = startedAt;
+    this.emit();
   }
 
   /** Espera todas as gravações pendentes (útil antes de sair). */

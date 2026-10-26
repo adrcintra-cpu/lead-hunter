@@ -97,6 +97,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!service) return;
     const repo = service.repo as { refresh?: () => Promise<void> };
     const run = () => {
+      // Aba em segundo plano: não consulta o servidor (economiza a cota de tráfego). Ao voltar, atualiza.
+      if (!service.automation.runsLocally && typeof document !== 'undefined' && document.hidden) return;
       if (service.automation.runsLocally) service.automation.tick().catch(() => {});
       else repo.refresh?.().then(() => service.rescoreAfterReplies()).catch(() => {});
     };
