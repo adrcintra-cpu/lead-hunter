@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 /**
  * Esfera de partículas que respira e gira devagar (fundo do login).
  * Pontos numa esfera (espiral de Fibonacci) deformados por ondas suaves, desenhados num canvas.
+ * O mouse (ou o dedo) "aperta" a esfera: a superfície afunda onde o ponteiro passa e volta devagar.
  * Com "reduzir movimento" ligado no sistema, fica parada.
  */
 export function ParticleSphere({ className }: { className?: string }) {
@@ -39,8 +40,32 @@ export function ParticleSphere({ className }: { className?: string }) {
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
+    // Ponteiro: posição suavizada e intensidade do "aperto" (0 = solto, 1 = apertando).
+    const mouse = { x: -1e4, y: -1e4, tx: -1e4, ty: -1e4, press: 0, target: 0 };
+    const onMove = (e: PointerEvent) => {
+      const box = canvas.getBoundingClientRect();
+      mouse.tx = e.clientX - box.left;
+      mouse.ty = e.clientY - box.top;
+      if (mouse.x < -1e3) {
+        mouse.x = mouse.tx;
+        mouse.y = mouse.ty;
+      }
+      const R = Math.min(w, h) * 0.38 * 1.5 * 0.55;
+      mouse.target = Math.hypot(mouse.tx - w / 2, mouse.ty - h / 2) < R * 1.15 ? 1 : 0;
+    };
+    const onLeave = () => {
+      mouse.target = 0;
+    };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    document.addEventListener('pointerleave', onLeave);
+    window.addEventListener('blur', onLeave);
+
     let raf = 0;
     const draw = (ms: number) => {
+      mouse.x += (mouse.tx - mouse.x) * 0.12;
+      mouse.y += (mouse.ty - mouse.y) * 0.12;
+      mouse.press += (mouse.target - mouse.press) * (mouse.target > mouse.press ? 0.08 : 0.04);
+      const dentR = Math.min(w, h) * 0.17;
       const t = ms / 1000;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
@@ -67,8 +92,20 @@ export function ParticleSphere({ className }: { className?: string }) {
         x = x1; y = y1; z = z2;
         const depth = (z + 1.2) / 2.4; // 0 = fundo, 1 = frente
         const persp = 1 / (1.9 - z * 0.45);
-        const sx = cx + x * R * persp * 1.5;
-        const sy = cy + y * R * persp * 1.5;
+        let sx = cx + x * R * persp * 1.5;
+        let sy = cy + y * R * persp * 1.5;
+        // Aperto: perto do ponteiro, a frente da esfera afunda em direção ao centro (borda do afundado sobe um pouco).
+        if (mouse.press > 0.01 && z > -0.2) {
+          const d = Math.hypot(sx - mouse.x, sy - mouse.y);
+          if (d < dentR * 1.6) {
+            const f = Math.max(0, 1 - d / dentR);
+            const ring = Math.max(0, 1 - Math.abs(d - dentR * 1.15) / (dentR * 0.45));
+            const k = mouse.press * Math.min(1, (z + 0.2) / 0.6);
+            const pull = (f * f * 0.22 - ring * 0.035) * k;
+            sx = cx + (sx - cx) * (1 - pull);
+            sy = cy + (sy - cy) * (1 - pull);
+          }
+        }
         // Borda da esfera mais brilhante (efeito de luz rasante), centro mais apagado.
         const rim = Math.min(1, Math.abs(Math.hypot(x, y)) ** 3 * 1.1);
         const a = 0.22 + depth * 0.5 + rim * 0.55;
@@ -82,6 +119,9 @@ export function ParticleSphere({ className }: { className?: string }) {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      window.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerleave', onLeave);
+      window.removeEventListener('blur', onLeave);
     };
   }, []);
 
