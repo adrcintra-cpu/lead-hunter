@@ -17,13 +17,13 @@ const WORD = [
   'M1012.9,55.8h11.7v85c7.4-16.2,23.6-25.2,45.4-25.2,30.8,0,50.2,17.5,50.2,48.6v42c0,32.4-21.2,48.9-53.6,48.9s-53.6-16.5-53.6-48.9V55.8ZM1066.5,244.9c25.5,0,42-12.7,42-38.2v-43c0-24.2-15.4-38-40.6-38s-43.3,14.3-43.3,39.8v41.2c0,25.5,16.7,38.2,42,38.2Z'
 ];
 
-export function OxyhubLogo({ className, title = 'Oxyhub' }: { className?: string; title?: string }) {
+export function OxyhubLogo({ className, title = 'Oxyhub', wordClassName = 'fill-[#272d39] dark:fill-white' }: { className?: string; title?: string; /** Cor do nome (ex.: sempre branco sobre fundo escuro). */ wordClassName?: string }) {
   return (
     <svg viewBox="58 44 1066 278" className={className} role="img" aria-label={title} xmlns="http://www.w3.org/2000/svg">
       <g className="fill-[#3E00FF]">
         {MARK.map((d) => <path key={d.slice(0, 12)} d={d} />)}
       </g>
-      <g className="fill-[#272d39] dark:fill-white">
+      <g className={wordClassName}>
         {WORD.map((d) => <path key={d.slice(0, 12)} d={d} />)}
       </g>
     </svg>

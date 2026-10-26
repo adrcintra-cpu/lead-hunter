@@ -41,7 +41,9 @@ Deno.serve(async (req) => {
       const c = body.criteria;
       if (!c?.segment?.trim()) return json({ error: 'Informe um segmento.' }, 400);
       // WhatsApp de cada empresa: confere no WhatsApp conectado (inclusive fixo) e no site.
-      const userId = auth.user.id;
+      // Quem é da equipe usa o WhatsApp conectado da conta do dono.
+      const { data: own } = await supabase.rpc('current_owner').then((r: { data: unknown }) => r, () => ({ data: null }));
+      const userId = typeof own === 'string' ? own : auth.user.id;
       const budget = newBudget();
       return json(await searchPlaces(key, c, fetch, { enrich: (list) => enrichWhatsapp(list, userId, fetch, budget) }));
     }

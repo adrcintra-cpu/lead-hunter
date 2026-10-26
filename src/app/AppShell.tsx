@@ -22,7 +22,7 @@ const NAV = [
 ];
 
 export function AppShell() {
-  const { session, signOut } = useApp();
+  const { session, signOut, team } = useApp();
   const [params] = useSearchParams();
   const leadId = params.get('lead');
   const openTasks = useDb().tasks.filter((t) => t.status === 'aberta').length;
@@ -68,7 +68,10 @@ export function AppShell() {
           )}
           <ThemeSwitcher compact />
           <div className="flex items-center justify-between gap-2 rounded-lg px-1">
-            <span className="truncate text-xs text-ink-faint" title={session?.email}>{session?.email}</span>
+            <span className="min-w-0 text-xs text-ink-faint" title={session?.email}>
+              <span className="block truncate">{session?.email}</span>
+              {team && team.role !== 'admin' && <span className="block text-[11px] font-semibold">{team.role === 'vendedor' ? 'Vendedor' : 'Só leitura'}</span>}
+            </span>
             <button type="button" onClick={signOut} className="btn-ghost min-h-[32px] px-2" aria-label="Sair" title="Sair">
               <LogOut className="h-4 w-4" />
             </button>
@@ -79,6 +82,11 @@ export function AppShell() {
         <div className="mb-4 flex justify-end md:hidden">
           <ThemeSwitcher compact />
         </div>
+        {team?.role === 'leitura' && (
+          <div role="status" className="mb-4 rounded-lg bg-warn-soft px-4 py-2.5 text-[13px] text-ink-soft">
+            Seu acesso é <b>só de leitura</b>: você vê tudo, mas alterações não são salvas.
+          </div>
+        )}
         <Outlet />
       </main>
       {leadId && <LeadDrawer leadId={leadId} />}

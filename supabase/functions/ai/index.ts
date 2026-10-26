@@ -27,6 +27,9 @@ Deno.serve(async (req) => {
   });
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) return json({ error: 'Não autenticado' }, 401);
+  // Registro do uso na conta em uso (a do dono, para quem é da equipe).
+  const { data: own } = await supabase.rpc('current_owner').then((r: { data: unknown }) => r, () => ({ data: null }));
+  const accountId = typeof own === 'string' ? own : userData.user.id;
 
   let body: { fn?: TaskName; input?: unknown };
   try {
@@ -41,10 +44,10 @@ Deno.serve(async (req) => {
   try {
     const run = await runTask(body.fn, body.input);
     usage = run.usage;
-    await logRun(supabase, userData.user.id, body.fn, started, 'ok', usage);
+    await logRun(supabase, accountId, body.fn, started, 'ok', usage);
     return json(run.output);
   } catch (err) {
-    await logRun(supabase, userData.user.id, body.fn, started, 'error', usage);
+    await logRun(supabase, accountId, body.fn, started, 'error', usage);
     return json({ error: err instanceof Error ? err.message : String(err) }, 502);
   }
 });

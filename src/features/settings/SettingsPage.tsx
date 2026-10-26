@@ -7,6 +7,7 @@ import { DEFAULT_SEND_WINDOW } from '@/core/types';
 import { ConfirmDialog, Modal, PageHeader, Spinner, ThemeSwitcher, cx } from '@/components/ui';
 import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
 import { AssistantCard } from './AssistantCard';
+import { ROLE_LABEL, TeamCard } from './TeamCard';
 import { useWhatsAppConnection } from '@/services/whatsapp/useWhatsAppConnection';
 import { whatsappQrAvailable } from '@/lib/whatsappClient';
 
@@ -15,7 +16,7 @@ const splitList = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolea
 export function SettingsPage() {
   const db = useDb();
   const service = useService();
-  const { toast } = useApp();
+  const { toast, team, session, signOut } = useApp();
   const p = db.profile!;
   const [form, setForm] = useState({
     fullName: p.fullName,
@@ -38,6 +39,32 @@ export function SettingsPage() {
     { name: 'whatsappProvider', impl: prov.whatsapp.label, mock: false, note: 'Só abre a conversa; nada é enviado automaticamente' },
   ];
   const aiOk = db.aiRuns.filter((r) => r.status === 'ok').length;
+
+  // Vendedor e só leitura: configurações da conta ficam com o administrador.
+  if (team && team.role !== 'admin') {
+    return (
+      <div className="mx-auto flex max-w-[900px] flex-col gap-5">
+        <PageHeader title="Configurações" />
+        <section className="card px-5 py-5">
+          <h2 className="text-[15px] font-extrabold">Sua conta</h2>
+          <dl className="mt-3 grid gap-2 text-[13.5px] sm:grid-cols-3">
+            <div className="rounded-lg border border-line px-3 py-2.5"><dt className="text-xs text-ink-faint">Nome</dt><dd className="font-semibold">{session?.name || '—'}</dd></div>
+            <div className="rounded-lg border border-line px-3 py-2.5"><dt className="text-xs text-ink-faint">E-mail</dt><dd className="truncate font-semibold">{session?.email}</dd></div>
+            <div className="rounded-lg border border-line px-3 py-2.5"><dt className="text-xs text-ink-faint">Acesso</dt><dd className="font-semibold">{ROLE_LABEL[team.role]}</dd></div>
+          </dl>
+          <p className="mt-3 text-[13px] text-ink-faint">
+            Você usa a conta {p.companyName ? `da ${p.companyName}` : 'da equipe'}. Perfil, WhatsApp, assistente e envio são ajustados pelo administrador.
+          </p>
+          <button type="button" className="btn-outline mt-4" onClick={signOut}>Sair</button>
+        </section>
+        <section className="card px-5 py-5">
+          <h2 className="text-[15px] font-extrabold">Aparência</h2>
+          <p className="mt-1 text-[13px] text-ink-faint">Claro, escuro ou seguir o sistema operacional.</p>
+          <div className="mt-3"><ThemeSwitcher /></div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex max-w-[900px] flex-col gap-5">
@@ -91,6 +118,8 @@ export function SettingsPage() {
           </div>
         </form>
       </section>
+
+      {dataMode === 'supabase' && <TeamCard />}
 
       <WhatsAppConnectionCard />
 

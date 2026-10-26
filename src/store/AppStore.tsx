@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { providers } from '@/core/providers/registry';
-import { auth, type Session } from '@/services/auth';
+import { auth, type Session, type TeamInfo } from '@/services/auth';
 import { LocalRepository } from '@/services/db/localRepository';
 import { REMOTE_REFRESH_MS, SupabaseRepository } from '@/services/db/supabaseRepository';
 import { dataMode, supabase } from '@/lib/supabase';
@@ -20,7 +20,9 @@ interface AppContextValue {
   /** Erro ao carregar os dados do usuário (modo Supabase). */
   loadError: string;
   service: LeadHunterService | null;
-  signIn: (email: string, password: string) => Promise<void>;
+  /** Conta em uso e papel (admin, vendedor, leitura). */
+  team: TeamInfo | null;
+  signIn: (email: string, password: string, remember?: boolean) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   toast: (text: string, tone?: ToastTone) => void;
@@ -35,6 +37,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [service, setService] = useState<LeadHunterService | null>(null);
+  const [team, setTeam] = useState<TeamInfo | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
   const toastRef = useRef<(text: string, tone?: ToastTone) => void>(() => {});
@@ -50,6 +53,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!session) {
       setService(null);
+      setTeam(null);
       return;
     }
     let cancelled = false;
@@ -58,8 +62,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         let repo;
+        // Quem é da equipe abre a conta do dono (mesmos leads, campanhas e configurações).
+        const t = await auth.team(session.userId);
+        if (!cancelled) setTeam(t);
         if (dataMode === 'supabase' && supabase) {
-          const remote = new SupabaseRepository(supabase, { id: session.userId, email: session.email }, (msg) =>
+          const remote = new SupabaseRepository(supabase, { id: t.ownerId, email: session.email }, (msg) =>
             toastRef.current(`Não foi possível salvar no servidor. ${msg}`, 'error'),
           );
           await remote.load();
@@ -68,8 +75,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           repo = new LocalRepository(`lh-db:${session.userId}`);
         }
         const svc = new LeadHunterService(repo, providers);
-        svc.ensureProfile({ id: session.userId, email: session.email, name: session.name }, { seedExamples: dataMode === 'mock' });
-        svc.ensureDefaultCadence();
+        if (t.ownerId === session.userId) {
+          svc.ensureProfile({ id: session.userId, email: session.email, name: session.name }, { seedExamples: dataMode === 'mock' });
+          svc.ensureDefaultCadence();
+        }
         if (!cancelled) setService(svc);
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Falha ao carregar seus dados.');
@@ -139,10 +148,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     loading,
     loadError,
     service,
+    team,
     toasts,
     toast,
     dismissToast,
-    signIn: async (email, password) => setSession(await auth.signIn(email, password)),
+    signIn: async (email, password, remember) => setSession(await auth.signIn(email, password, remember)),
     signUp: async (email, password, name) => {
       const s = await auth.signUp(email, password, name);
       if (s) setSession(s);

@@ -96,6 +96,8 @@ end $$;
 
 -- Configurações da conta: a equipe lê; só admin altera.
 create policy "equipe: ler" on profiles for select using (id = (select public.current_owner()));
+-- (o site salva o perfil com upsert: o insert também precisa passar)
+create policy "equipe: admin cria" on profiles for insert with check (id = (select public.current_owner()) and (select public.is_admin()));
 create policy "equipe: admin edita" on profiles for update using (id = (select public.current_owner()) and (select public.is_admin())) with check (id = (select public.current_owner()));
 create policy "equipe: ler" on assistant_settings for select using (owner_id = (select public.current_owner()));
 create policy "equipe: admin altera" on assistant_settings for update using (owner_id = (select public.current_owner()) and (select public.is_admin())) with check (owner_id = (select public.current_owner()));

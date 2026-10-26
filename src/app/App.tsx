@@ -3,6 +3,7 @@ import { useApp } from '@/store/AppStore';
 import { Spinner } from '@/components/ui';
 import { AppShell } from './AppShell';
 import { LoginPage } from '@/features/auth/LoginPage';
+import { SetPasswordPage } from '@/features/auth/SetPasswordPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { SearchPage } from '@/features/search/SearchPage';
 import { LeadsPage } from '@/features/leads/LeadsPage';
@@ -45,6 +46,7 @@ export function App() {
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/definir-senha" element={<SetPasswordPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -52,6 +54,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/definir-senha" element={<SetPasswordPage />} />
       <Route element={<AppShell />}>
         <Route index element={<DashboardPage />} />
         <Route path="buscar" element={<SearchPage />} />

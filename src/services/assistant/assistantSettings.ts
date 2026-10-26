@@ -1,4 +1,14 @@
 import { dataMode, supabase } from '@/lib/supabase';
+import { auth } from '@/services/auth';
+
+/** Conta em uso (a do dono, para quem é da equipe). */
+async function accountId(): Promise<string | null> {
+  if (!supabase) return null;
+  const cached = auth.ownerId();
+  if (cached) return cached;
+  const { data } = await supabase.auth.getUser();
+  return data.user?.id ?? null;
+}
 import { DEFAULT_ASSISTANT, withDefaults, type AssistantSettings } from '../../../supabase/functions/_shared/ai/assistantDefaults.ts';
 
 export type { AssistantSettings };
@@ -67,15 +77,15 @@ export async function loadAssistant(): Promise<AssistantState> {
       return { settings: DEFAULT_ASSISTANT, prefs: DEFAULT_PREFS, prefsAvailable: true, custom: false, available: true };
     }
   }
-  const { data, error } = await supabase.from('assistant_settings').select('name, persona, knowledge, playbooks').maybeSingle();
+  const { data, error } = await supabase.from('assistant_settings').select('name, persona, knowledge, playbooks').eq('owner_id', (await accountId()) ?? '').maybeSingle();
   if (error) return { settings: DEFAULT_ASSISTANT, prefs: DEFAULT_PREFS, prefsAvailable: false, custom: false, available: !missingTable(error.message) };
-  const pr = await supabase.from('assistant_settings').select('auto_reply, reply_format, voice').maybeSingle();
+  const pr = await supabase.from('assistant_settings').select('auto_reply, reply_format, voice').eq('owner_id', (await accountId()) ?? '').maybeSingle();
   const prefs: AssistantPrefs = pr.data
     ? { autoReply: pr.data.auto_reply !== false, replyFormat: pr.data.reply_format === 'audio' ? 'audio' : 'texto', voice: pr.data.voice || 'cedar' }
     : { ...DEFAULT_PREFS };
-  const un = await supabase.from('assistant_settings').select('answer_unknown').maybeSingle();
+  const un = await supabase.from('assistant_settings').select('answer_unknown').eq('owner_id', (await accountId()) ?? '').maybeSingle();
   if (!un.error) prefs.answerUnknown = un.data?.answer_unknown === true;
-  const ow = await supabase.from('assistant_settings').select('owner_whatsapp, owner_alerts, owner_report_hour').maybeSingle();
+  const ow = await supabase.from('assistant_settings').select('owner_whatsapp, owner_alerts, owner_report_hour').eq('owner_id', (await accountId()) ?? '').maybeSingle();
   if (!ow.error) {
     prefs.ownerWhatsapp = ow.data?.owner_whatsapp ?? '';
     prefs.ownerAlerts = ow.data ? ow.data.owner_alerts !== false : true;
@@ -112,7 +122,7 @@ export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs
   }
   const { data: u } = await supabase.auth.getUser();
   if (!u.user) throw new Error('Faça login de novo.');
-  const row: Record<string, unknown> = { owner_id: u.user.id, ...clean, updated_at: new Date().toISOString() };
+  const row: Record<string, unknown> = { owner_id: (await accountId()) ?? u.user.id, ...clean, updated_at: new Date().toISOString() };
   if (prefs) Object.assign(row, { auto_reply: prefs.autoReply, reply_format: 'texto', voice: prefs.voice }); // sempre digita; voz só a pedido do lead
   if (prefs?.answerUnknown !== undefined) row.answer_unknown = prefs.answerUnknown;
   if (prefs?.ownerWhatsapp !== undefined) {
@@ -159,7 +169,7 @@ export interface HunterPrefs {
 export async function loadHunter(): Promise<HunterPrefs> {
   const off: HunterPrefs = { enabled: false, excluded: [], today: 0, available: false };
   if (dataMode !== 'supabase' || !supabase) return off;
-  const { data, error } = await supabase.from('assistant_settings').select('hunter_enabled, hunter_excluded, hunter_day, hunter_today').maybeSingle();
+  const { data, error } = await supabase.from('assistant_settings').select('hunter_enabled, hunter_excluded, hunter_day, hunter_today').eq('owner_id', (await accountId()) ?? '').maybeSingle();
   if (error) return off;
   const todayBr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
   return {
@@ -175,10 +185,10 @@ export async function saveHunter(enabled: boolean, excluded: string[]): Promise<
   const { data: u } = await supabase.auth.getUser();
   if (!u.user) throw new Error('Faça login de novo.');
   const patch = { hunter_enabled: enabled, hunter_excluded: excluded, updated_at: new Date().toISOString() };
-  const upd = await supabase.from('assistant_settings').update(patch).eq('owner_id', u.user.id).select('owner_id');
+  const upd = await supabase.from('assistant_settings').update(patch).eq('owner_id', (await accountId()) ?? u.user.id).select('owner_id');
   if (upd.error) throw new Error(/hunter_/.test(upd.error.message) ? 'Falta aplicar a migration da busca automática (npx supabase db push).' : upd.error.message);
   if (!upd.data?.length) {
-    const ins = await supabase.from('assistant_settings').insert({ owner_id: u.user.id, ...patch });
+    const ins = await supabase.from('assistant_settings').insert({ owner_id: (await accountId()) ?? u.user.id, ...patch });
     if (ins.error) throw new Error(ins.error.message);
   }
 }

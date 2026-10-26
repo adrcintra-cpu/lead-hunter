@@ -149,6 +149,24 @@ async function authenticate(req: IncomingMessage): Promise<string> {
   return data.user.id;
 }
 
+/**
+ * Conta e papel de quem está logado: quem é da equipe usa os números de WhatsApp da conta do dono.
+ * Sem a tabela da equipe (migration não aplicada): a própria conta, como admin. Cache de 1 min.
+ */
+type Role = 'admin' | 'vendedor' | 'leitura';
+const accounts = new Map<string, { ownerId: string; role: Role; until: number }>();
+async function accountOf(userId: string): Promise<{ ownerId: string; role: Role }> {
+  const c = accounts.get(userId);
+  if (c && c.until > Date.now()) return c;
+  const { data, error } = await db.from('team_members').select('owner_id, role').eq('user_id', userId).maybeSingle();
+  const role = (data?.role === 'vendedor' || data?.role === 'leitura' ? data.role : 'admin') as Role;
+  const v = { ownerId: !error && data?.owner_id ? String(data.owner_id) : userId, role: !error && data ? role : 'admin' as Role, until: Date.now() + 60_000 };
+  accounts.set(userId, v);
+  return v;
+}
+/** Rotas que mexem nos números (conectar, desconectar, adicionar, remover, limite): só admin. Envio: admin e vendedor. */
+const ADMIN_ONLY = new Set(['/whatsapp/connect', '/whatsapp/disconnect', '/whatsapp/numbers/add', '/whatsapp/numbers/update', '/whatsapp/numbers/remove']);
+
 /** Limite simples por usuário e por tipo de rota (janela de 1 minuto). */
 const LIMITS: Record<string, number> = { status: 60, connect: 6, test: 10, disconnect: 6, send: 10, preview: 12 };
 const hits = new Map<string, { count: number; reset: number }>();
@@ -298,10 +316,13 @@ const server = createServer(async (req, res) => {
     const route = routes[path];
     if (!route) throw new HttpError(404, 'Rota não encontrada.');
     if (req.method !== route.method) throw new HttpError(405, 'Método não permitido.');
-    const userId = await authenticate(req);
-    rateLimit(userId, route.kind);
+    const loginId = await authenticate(req);
+    rateLimit(loginId, route.kind);
+    const acct = await accountOf(loginId);
+    if (ADMIN_ONLY.has(path) && acct.role !== 'admin') throw new HttpError(403, 'Só o administrador da conta pode alterar os números de WhatsApp.');
+    if (path === '/whatsapp/send' && acct.role === 'leitura') throw new HttpError(403, 'Seu acesso é só de leitura.');
     const body = route.method === 'POST' ? await readJson(req) : {};
-    const result = await route.handler(userId, body, query);
+    const result = await route.handler(acct.ownerId, body, query);
     send(res, 200, result);
   } catch (err) {
     if (err instanceof HttpError) return send(res, err.status, { error: err.message });
