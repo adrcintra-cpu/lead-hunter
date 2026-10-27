@@ -9,7 +9,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { logRun, runTask } from '../_shared/ai/claude.ts';
 import { openToken } from '../_shared/instagram/crypto.ts';
 import { metaConfig } from '../_shared/instagram/graph.ts';
-import { ingest, parseEvents, suggest, verifyMetaSignature, type Deps, type ReplyAnalysis } from '../_shared/instagram/inbox.ts';
+import { ingest, parseEvents, suggest, verifyAnySignature, type Deps, type ReplyAnalysis } from '../_shared/instagram/inbox.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -28,7 +28,9 @@ Deno.serve(async (req) => {
 
   const cfg = metaConfig();
   const raw = await req.text();
-  if (!cfg || !(await verifyMetaSignature(raw, req.headers.get('x-hub-signature-256'), cfg.appSecret))) {
+  // META_APP_SECRET (app) ou INSTAGRAM_APP_SECRET ("Chave secreta do app do Instagram", no caso de uso do Instagram).
+  if (!cfg || !(await verifyAnySignature(raw, req.headers.get('x-hub-signature-256'), [cfg.appSecret, Deno.env.get('INSTAGRAM_APP_SECRET')]))) {
+    console.warn('instagram-webhook: assinatura não confere com nenhum segredo configurado');
     return new Response('Assinatura inválida', { status: 401 });
   }
   let body: unknown;
@@ -38,6 +40,8 @@ Deno.serve(async (req) => {
     return new Response('ok', { status: 200 });
   }
   const events = parseEvents(body);
+  const b = body as { object?: string; entry?: { id?: string; messaging?: unknown[]; changes?: { field?: string }[] }[] };
+  console.log('instagram-webhook: recebido', JSON.stringify({ object: b?.object, entries: (b?.entry ?? []).map((e) => ({ id: e.id, messaging: e.messaging?.length ?? 0, changes: (e.changes ?? []).map((c) => c.field) })), mensagens: events.length }));
   if (!events.length) return new Response('ok', { status: 200 });
 
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });

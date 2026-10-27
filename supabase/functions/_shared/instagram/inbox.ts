@@ -51,6 +51,15 @@ export interface Deps {
 
 // ---------- webhook ----------
 
+/**
+ * Confere o X-Hub-Signature-256 (HMAC-SHA256 do corpo). Aceita mais de um segredo: o do app
+ * (login do Facebook) e o do app do Instagram (o webhook configurado no "login do Instagram" assina com ele).
+ */
+export async function verifyAnySignature(raw: string, header: string | null, secrets: (string | undefined)[]): Promise<boolean> {
+  for (const s of secrets) if (s && (await verifyMetaSignature(raw, header, s))) return true;
+  return false;
+}
+
 /** Confere o X-Hub-Signature-256 (HMAC-SHA256 do corpo com o App Secret). */
 export async function verifyMetaSignature(raw: string, header: string | null, secret: string): Promise<boolean> {
   const sig = (header ?? '').replace(/^sha256=/, '');
@@ -69,7 +78,9 @@ export function parseEvents(body: unknown): IgEvent[] {
   if (!b || b.object !== 'instagram' || !Array.isArray(b.entry)) return [];
   const out: IgEvent[] = [];
   for (const e of b.entry as Row[]) {
-    for (const m of (Array.isArray(e.messaging) ? e.messaging : []) as Row[]) {
+    // Dois formatos: "messaging" (Messenger Platform) e "changes" com field = messages (API do Instagram).
+    const fromChanges = (Array.isArray(e.changes) ? e.changes : []).filter((c: Row) => c?.field === 'messages' && c.value).map((c: Row) => c.value);
+    for (const m of [...(Array.isArray(e.messaging) ? e.messaging : []), ...fromChanges] as Row[]) {
       const msg = m.message as Row | undefined;
       if (!msg?.mid || !m.sender?.id || !m.recipient?.id) continue;
       if (msg.is_unsupported) continue;

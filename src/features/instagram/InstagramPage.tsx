@@ -257,6 +257,25 @@ function Accounts({ status, accounts, isAdmin, reload }: { status: IgStatus | nu
                         {busy === `sub:${a.id}` ? <Spinner /> : <RefreshCw className="h-4 w-4" />} Reativar mensagens
                       </button>
                     )}
+                    {isAdmin && st === 'conectado' && (
+                      <button
+                        type="button"
+                        className="btn-ghost min-h-[32px] px-2 text-xs"
+                        title="Registra o que a Meta responde sobre o recebimento de mensagens (para suporte)"
+                        disabled={!!busy}
+                        onClick={() => {
+                          setBusy(`diag:${a.id}`);
+                          setError('');
+                          void instagramApi
+                            .diagnose()
+                            .then(() => toast('Diagnóstico registrado.', 'success'))
+                            .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                            .finally(() => setBusy(''));
+                        }}
+                      >
+                        {busy === `diag:${a.id}` ? <Spinner /> : null} Diagnóstico
+                      </button>
+                    )}
                     {isAdmin && (
                       <button type="button" className="btn-ghost min-h-[32px] px-2 text-xs text-bad" onClick={() => setRemoving(a)} disabled={!!busy}>
                         <Unplug className="h-4 w-4" /> Desconectar

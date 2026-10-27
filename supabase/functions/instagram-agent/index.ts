@@ -10,7 +10,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { logRun, runTask } from '../_shared/ai/claude.ts';
 import { openToken } from '../_shared/instagram/crypto.ts';
-import { metaConfig } from '../_shared/instagram/graph.ts';
+import { graph, metaConfig } from '../_shared/instagram/graph.ts';
 import { sendText, setHuman, subscribePage, suggest, toLead, type Deps, type ReplyAnalysis } from '../_shared/instagram/inbox.ts';
 import { logOp } from '../_shared/instagram/accounts.ts';
 
@@ -56,6 +56,33 @@ Deno.serve(async (req) => {
   };
   const action = String(b.action ?? '');
   const conversationId = String(b.conversationId ?? '');
+
+  // Diagnóstico (admin): o que a Página tem inscrito e o que a Meta responde ao tentar inscrever.
+  if (action === 'diagnose') {
+    if (isAdmin !== true) return json({ error: 'Só o administrador.' }, 403);
+    const { data: accs } = await db.from('instagram_accounts').select('id, page_id, ig_user_id, username').eq('owner_id', owner).eq('status', 'conectado');
+    const out: Record<string, unknown>[] = [];
+    for (const a of accs ?? []) {
+      const { data: t } = await db.from('instagram_tokens').select('token_enc').eq('account_id', a.id).maybeSingle();
+      if (!t?.token_enc || !a.page_id) continue;
+      const token = await openToken(t.token_enc);
+      const r: Record<string, unknown> = { conta: a.username };
+      const g = async (path: string, params: Record<string, string>, method: 'GET' | 'POST' = 'GET') => {
+        try {
+          return await graph(cfg, path, { ...params, access_token: token }, { method });
+        } catch (e) {
+          return { erro: (e as Error).message };
+        }
+      };
+      r.antes = await g(`${a.page_id}/subscribed_apps`, {});
+      r.messages = await g(`${a.page_id}/subscribed_apps`, { subscribed_fields: 'messages' }, 'POST');
+      r.depois = await g(`${a.page_id}/subscribed_apps`, {});
+      r.conta_ig = await g(a.ig_user_id, { fields: 'id,username' });
+      out.push(r);
+    }
+    await logOp(db, owner, me.user.id, 'diagnostico', 'ok', { resultado: out });
+    return json({ ok: true, resultado: out });
+  }
 
   if (action === 'subscribe') {
     if (isAdmin !== true) return json({ error: 'Só o administrador.' }, 403);

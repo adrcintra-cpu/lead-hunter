@@ -206,6 +206,7 @@ export const instagramApi = {
   human: (conversationId: string, on: boolean) => agent<{ ok: true }>({ action: 'human', conversationId, on }),
   toLead: (conversationId: string) => agent<{ leadId: string; created: boolean }>({ action: 'lead', conversationId }),
   subscribe: () => agent<{ ok: boolean; accounts: { username: string | null; ok: boolean }[] }>({ action: 'subscribe' }),
+  diagnose: () => agent<{ ok: boolean }>({ action: 'diagnose' }),
 
   /** Indicadores reais (contagens nas tabelas do módulo). Sem integração, ficam em zero. */
   async metrics(minScore: number) {
