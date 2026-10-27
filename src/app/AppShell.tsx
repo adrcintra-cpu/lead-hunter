@@ -1,11 +1,12 @@
 import { NavLink, Outlet, useSearchParams } from 'react-router-dom';
-import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow, Send } from 'lucide-react';
+import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow, Send, AtSign } from 'lucide-react';
 import { SimClock } from './SimClock';
 import { useApp, useDb } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { cx, ThemeSwitcher, Toasts } from '@/components/ui';
 import { LeadDrawer } from '@/features/leads/LeadDrawer';
 import { OxyhubLogo } from '@/components/OxyhubLogo';
+import { useInstagramMenu } from '@/features/instagram/useInstagramMenu';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -16,6 +17,7 @@ const NAV = [
   { to: '/cadencias', label: 'Cadências', icon: Workflow },
   { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
   { to: '/envios', label: 'Envios', icon: Send },
+  { to: '/instagram', label: 'Instagram Agent', icon: AtSign },
   { to: '/listas', label: 'Listas', icon: List },
   { to: '/buscas', label: 'Buscas', icon: Bookmark },
   { to: '/configuracoes', label: 'Configurações', icon: Settings },
@@ -26,6 +28,7 @@ export function AppShell() {
   const [params] = useSearchParams();
   const leadId = params.get('lead');
   const openTasks = useDb().tasks.filter((t) => t.status === 'aberta').length;
+  const showInstagram = useInstagramMenu(!team || team.role === 'admin');
 
   return (
     <div className="min-h-screen md:grid md:grid-cols-[236px_minmax(0,1fr)]">
@@ -35,7 +38,7 @@ export function AppShell() {
           <div className="mt-1.5 hidden text-[11.5px] text-ink-faint md:block">Lead Hunter</div>
         </div>
         <nav aria-label="Navegação principal" className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible md:pb-0 md:pt-3">
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {NAV.filter((n) => n.to !== '/instagram' || showInstagram).map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}

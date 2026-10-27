@@ -17,6 +17,8 @@ import { CampaignDetailPage, CampaignsPage } from '@/features/campaigns/Campaign
 import { CadenceEditorPage, CadencesPage } from '@/features/cadences/CadencesPage';
 import { TasksPage } from '@/features/tasks/TasksPage';
 import { MessagesPage } from '@/features/messages/MessagesPage';
+import { InstagramPage } from '@/features/instagram/InstagramPage';
+import { InstagramCallbackPage } from '@/features/instagram/InstagramCallbackPage';
 
 export function App() {
   const { session, loading, loadError, service, signOut } = useApp();
@@ -70,6 +72,8 @@ export function App() {
         <Route path="cadencias/:cadenceId" element={<CadenceEditorPage />} />
         <Route path="tarefas" element={<TasksPage />} />
         <Route path="envios" element={<MessagesPage />} />
+        <Route path="instagram" element={<InstagramPage />} />
+        <Route path="instagram/conectado" element={<InstagramCallbackPage />} />
         <Route path="configuracoes" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
