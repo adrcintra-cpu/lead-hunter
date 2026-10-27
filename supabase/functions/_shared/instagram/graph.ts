@@ -130,8 +130,10 @@ export async function exchangeCode(cfg: MetaConfig, code: string, redirectUri: s
   const accounts = (pages.data ?? [])
     .filter((p) => p.instagram_business_account?.id && p.access_token)
     .map((p) => ({ igUserId: p.instagram_business_account!.id, username: p.instagram_business_account!.username ?? null, pageId: p.id, pageName: p.name ?? null, pageToken: p.access_token! }));
-  // Vale o que vencer primeiro: o token (0 = não expira) ou o acesso aos dados (90 dias).
-  const ends = [dbg.data?.expires_at, dbg.data?.data_access_expires_at].filter((x): x is number => !!x && x > 0);
-  const expiresAt = ends.length ? new Date(Math.min(...ends) * 1000).toISOString() : null;
+  // O token de página (vindo do token de usuário de longa duração) não expira; o que vence é o
+  // acesso aos dados (90 dias sem uso). Sem essa data, vale a do token de usuário.
+  const da = dbg.data?.data_access_expires_at;
+  const ue = dbg.data?.expires_at;
+  const expiresAt = da && da > 0 ? new Date(da * 1000).toISOString() : ue && ue > 0 ? new Date(ue * 1000).toISOString() : null;
   return { accounts, scopes, declined, expiresAt };
 }
