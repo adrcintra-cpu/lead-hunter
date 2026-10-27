@@ -29,8 +29,22 @@ Deno.serve(async (req) => {
   const cfg = metaConfig();
   const raw = await req.text();
   // META_APP_SECRET (app) ou INSTAGRAM_APP_SECRET ("Chave secreta do app do Instagram", no caso de uso do Instagram).
-  if (!cfg || !(await verifyAnySignature(raw, req.headers.get('x-hub-signature-256'), [cfg.appSecret, Deno.env.get('INSTAGRAM_APP_SECRET')]))) {
-    console.warn('instagram-webhook: assinatura não confere com nenhum segredo configurado');
+  const secrets = [cfg?.appSecret, Deno.env.get('INSTAGRAM_APP_SECRET')].map((x) => x?.trim().replace(/^["']|["']$/g, ''));
+  const header = req.headers.get('x-hub-signature-256');
+  if (!cfg || !(await verifyAnySignature(raw, header, secrets))) {
+    // Diagnóstico sem expor segredos: tamanho de cada chave e o começo das assinaturas.
+    const peek = async (k?: string) => {
+      if (!k) return null;
+      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(k), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw)));
+      return Array.from(mac.slice(0, 4), (x) => x.toString(16).padStart(2, '0')).join('');
+    };
+    console.warn('instagram-webhook: assinatura não confere', JSON.stringify({
+      recebida: (header ?? '').slice(0, 15),
+      tamanhos: secrets.map((k) => k?.length ?? 0),
+      calculadas: await Promise.all(secrets.map(peek)),
+      corpo: raw.length,
+    }));
     return new Response('Assinatura inválida', { status: 401 });
   }
   let body: unknown;
