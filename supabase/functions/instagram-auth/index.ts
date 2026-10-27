@@ -10,6 +10,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { signState, verifyState } from '../_shared/instagram/crypto.ts';
 import { exchangeCode, loginUrl, metaConfig, MetaError } from '../_shared/instagram/graph.ts';
 import { disconnect, logOp, noAccountReason, saveConnection } from '../_shared/instagram/accounts.ts';
+import { subscribePage } from '../_shared/instagram/inbox.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +81,11 @@ Deno.serve(async (req) => {
         return json({ error: noAccountReason(r) }, 422);
       }
       const saved = await saveConnection(db, owner, me.user.id, r);
+      // Inscreve a Página para a Meta mandar as mensagens do Direct (sem isso o Inbox não recebe nada).
+      for (const acc of r.accounts) {
+        const fields = await subscribePage(cfg, acc.pageId, acc.pageToken);
+        await logOp(db, owner, me.user.id, 'pagina_inscrita', fields ? 'ok' : 'erro', { conta: acc.username, campos: fields });
+      }
       return json({ ok: true, accounts: saved, declined: r.declined });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

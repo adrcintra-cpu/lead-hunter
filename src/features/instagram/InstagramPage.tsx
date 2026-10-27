@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, Circle, Link2, Unplug } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, Link2, RefreshCw, Unplug } from 'lucide-react';
+import { InboxTab } from './InboxTab';
 import { useApp } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { formatDate } from '@/core/utils';
@@ -19,6 +20,7 @@ import {
 
 const TABS = [
   { id: 'visao', label: 'Visão geral' },
+  { id: 'inbox', label: 'Inbox' },
   { id: 'contas', label: 'Contas conectadas' },
   { id: 'config', label: 'Configurações' },
 ] as const;
@@ -34,6 +36,7 @@ const MODE_INFO: Record<IgMode, { label: string; hint: string }> = {
 export function InstagramPage() {
   const { team, session } = useApp();
   const isAdmin = !team || team.role === 'admin';
+  const canWrite = !team || team.role !== 'leitura';
   const ownerId = team?.ownerId ?? session?.userId ?? '';
   const [params, setParams] = useSearchParams();
   const tab = (TABS.some((t) => t.id === params.get('aba')) ? params.get('aba') : 'visao') as Tab;
@@ -87,6 +90,9 @@ export function InstagramPage() {
       {error && <ErrorBox>{error}</ErrorBox>}
 
       {tab === 'visao' && <Overview status={status} accounts={accounts} settings={settings} goTo={(t) => setParams({ aba: t }, { replace: true })} />}
+      {tab === 'inbox' && settings && accounts && (
+        <InboxTab settings={settings} canWrite={canWrite} connected={accounts.some((a) => effectiveStatus(a) === 'conectado')} />
+      )}
       {tab === 'contas' && <Accounts status={status} accounts={accounts} isAdmin={isAdmin} reload={load} />}
       {tab === 'config' && settings && accounts && (
         <GeneralSettings settings={settings} accounts={accounts} isAdmin={isAdmin} ownerId={ownerId} onSaved={setSettings} />
@@ -148,7 +154,7 @@ function Overview({ status, accounts, settings, goTo }: { status: IgStatus | nul
           </div>
         ))}
       </section>
-      <p className="-mt-2 text-xs text-ink-faint">Números reais do módulo. Ficam em zero até a conta estar conectada e o Inbox e o Radar entrarem em funcionamento.</p>
+      <p className="-mt-2 text-xs text-ink-faint">Números reais do módulo. As mensagens contam a partir do momento em que o módulo é ligado; perfis e oportunidades começam com o Radar.</p>
     </>
   );
 }
@@ -232,6 +238,25 @@ function Accounts({ status, accounts, isAdmin, reload }: { status: IgStatus | nu
                     >
                       {st === 'conectado' ? 'Conectada' : st === 'expirado' ? 'Autorização vencida' : 'Com erro'}
                     </span>
+                    {isAdmin && st === 'conectado' && (
+                      <button
+                        type="button"
+                        className="btn-ghost min-h-[32px] px-2 text-xs"
+                        title="Pede de novo à Meta para mandar as mensagens do Direct para o OxyHub"
+                        disabled={!!busy}
+                        onClick={() => {
+                          setBusy(`sub:${a.id}`);
+                          setError('');
+                          void instagramApi
+                            .subscribe()
+                            .then((r) => toast(r.ok ? 'Recebimento de mensagens ativo.' : 'A Meta não confirmou o recebimento. Confira as permissões.', r.ok ? 'success' : undefined))
+                            .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                            .finally(() => setBusy(''));
+                        }}
+                      >
+                        {busy === `sub:${a.id}` ? <Spinner /> : <RefreshCw className="h-4 w-4" />} Reativar mensagens
+                      </button>
+                    )}
                     {isAdmin && (
                       <button type="button" className="btn-ghost min-h-[32px] px-2 text-xs text-bad" onClick={() => setRemoving(a)} disabled={!!busy}>
                         <Unplug className="h-4 w-4" /> Desconectar
@@ -358,6 +383,37 @@ function GeneralSettings({ settings, accounts, isAdmin, ownerId, onSaved }: { se
           ))}
         </div>
       </fieldset>
+
+      <label className={cx('mt-3 flex items-start gap-2.5', s.mode !== 'automatico' && 'opacity-60')}>
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-[rgb(var(--accent))]"
+          checked={s.autoReply}
+          disabled={lock || s.mode !== 'automatico'}
+          onChange={(e) => setS({ ...s, autoReply: e.target.checked })}
+        />
+        <span>
+          <span className="block text-sm font-bold">Responder sozinho no Direct</span>
+          <span className="block text-xs text-ink-faint">
+            Só no modo Automático. O BEELIE envia a resposta sem aprovação, dentro da janela de 24 h. Quando precisar de humano (preço, reclamação, pedido de pessoa), ele não envia: deixa a sugestão e cria uma tarefa.
+          </span>
+        </span>
+      </label>
+
+      <div className="mt-4">
+        <label htmlFor="ig-handoff" className="label">Quando passar para um humano (além do padrão)</label>
+        <textarea
+          id="ig-handoff"
+          rows={3}
+          maxLength={2000}
+          className="input py-2.5 text-[13px] leading-relaxed"
+          placeholder="Ex.: pedido de orçamento acima de R$ 10 mil; clientes atuais; qualquer menção a contrato."
+          value={s.handoffRules}
+          disabled={lock}
+          onChange={(e) => setS({ ...s, handoffRules: e.target.value })}
+        />
+        <p className="mt-1 text-xs text-ink-faint">O BEELIE já passa para humano quando pedem preço ou proposta, em reclamações, suporte de cliente e quando a pessoa pede para falar com alguém.</p>
+      </div>
 
       <div className="mt-4">
         <label htmlFor="ig-persona" className="label">Ajustes da personalidade só para o Instagram</label>

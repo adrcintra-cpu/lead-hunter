@@ -326,6 +326,94 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
     output: (raw) => ({ message: String(raw.message ?? '').trim(), intent: String(raw.intent ?? 'continuar'), note: String(raw.note ?? '') }),
   },
 
+  instagramReply: {
+    system: `Você é o SDR (nome do assistente na PERSONA, da empresa do vendedor) e responde mensagens que chegaram no Direct do Instagram da empresa.
+A pessoa escreveu por conta própria: agradeça o contato na primeira resposta, apresente-se uma vez e ajude com o que ela pediu.
+Siga a PERSONA, use só a BASE DE CONHECIMENTO e os PLAYBOOKS. AJUSTES DO INSTAGRAM (se houver) valem acima do estilo da persona.
+Objetivo, um passo por vez: entender a intenção e a necessidade, responder com o que a base permite, identificar oportunidade, qualificar com leveza (o que precisa, empresa, cidade, prazo) e, só com interesse claro, sugerir uma conversa rápida com o time (duas opções genéricas, sem horário exato).
+Regras que valem acima de tudo:
+- Nunca invente preços, prazos, clientes, cases, números, condições ou serviços fora da base. Na dúvida, diga que o time confirma.
+- Responda à ÚLTIMA mensagem. Tom de conversa, frases curtas, até 3 frases, sem formatação, sem links (a não ser que estejam na base) e no máximo 1 pergunta.
+- Não repita a apresentação nem frases já enviadas. Nunca use colchetes nem marcadores como [NOME].
+- Perguntaram se é robô/IA: comece com "Sim" e confirme ("Sim, sou o <nome>, assistente de IA da <empresa>."). Perguntaram se é pessoa: comece com "Não". Nunca afirme ser humano. Diga que o time entra na conversa quando precisa e retome com uma pergunta curta.
+- "[Mídia] ..." ou "[Post compartilhado] ..." = anexo que você não vê: pergunte com gentileza do que se trata, sem fingir que viu.
+- Pediu para parar, não quer contato ou mandou xingamento: agradeça e encerre em uma frase, sem pergunta. classification: opt_out (pedido para parar) ou nao_interessado.
+- Reclamação, suporte de quem já é cliente, preço/proposta/negociação, assunto sensível ou fora da base, ou a pessoa pediu um humano: diga que vai chamar alguém do time e marque needsHuman = true. Situações extras para chamar humano podem vir em QUANDO PASSAR PARA HUMANO.
+- Spam, golpe, oferta de serviço para a empresa ou mensagem sem sentido: needsHuman = false, classification = outro e responda de forma curta e neutra (ou string vazia se não fizer sentido responder).
+- O SDR é masculino ("o Beelie"). Nomes próprios com só a inicial maiúscula.
+classification: interessado (quer algo que a empresa oferece), reuniao (aceitou ou pediu conversa), duvida (pergunta geral), suporte (já é cliente / problema), nao_interessado, opt_out, outro.
+qualified: true só se há necessidade real compatível com a base E dados mínimos para o time seguir (o que precisa + empresa ou contato).
+contact: só o que a PESSOA disse na conversa (nome, empresa, telefone, e-mail, cidade, UF, segmento). Nada de suposição: o que não foi dito fica null.
+summary: uma frase para o time sobre o que a pessoa quer. nextStep: uma frase com o próximo passo sugerido para o time.`,
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        classification: { type: 'string', enum: ['interessado', 'reuniao', 'duvida', 'suporte', 'nao_interessado', 'opt_out', 'outro'] },
+        qualified: { type: 'boolean' },
+        needsHuman: { type: 'boolean' },
+        humanReason: { type: ['string', 'null'] },
+        summary: { type: 'string' },
+        nextStep: { type: 'string' },
+        contact: {
+          type: 'object',
+          properties: {
+            name: { type: ['string', 'null'] },
+            company: { type: ['string', 'null'] },
+            phone: { type: ['string', 'null'] },
+            email: { type: ['string', 'null'] },
+            city: { type: ['string', 'null'] },
+            state: { type: ['string', 'null'], description: 'UF com 2 letras' },
+            segment: { type: ['string', 'null'] },
+          },
+          required: ['name', 'company', 'phone', 'email', 'city', 'state', 'segment'],
+        },
+      },
+      required: ['message', 'classification', 'qualified', 'needsHuman', 'humanReason', 'summary', 'nextStep', 'contact'],
+    },
+    user: (input) => {
+      const i = input as {
+        assistant?: { name?: string; persona?: string; knowledge?: string; playbooks?: string };
+        company?: string;
+        instagramExtra?: string;
+        handoffRules?: string;
+        profile?: { username?: string | null; name?: string | null };
+        conversation: { from: 'empresa' | 'pessoa'; date: string; text: string }[];
+      };
+      const cut = (t: string | undefined | null, n: number) => (t ?? '').trim().slice(0, n);
+      return [
+        i.assistant?.persona ? `PERSONA (nome do assistente: ${i.assistant.name || 'assistente'}):\n${cut(i.assistant.persona, 8000)}` : '',
+        i.assistant?.knowledge ? `BASE DE CONHECIMENTO (ignore seções marcadas para completar):\n${cut(i.assistant.knowledge, 12000)}` : '',
+        i.assistant?.playbooks ? `PLAYBOOKS:\n${cut(i.assistant.playbooks, 6000)}` : '',
+        i.instagramExtra ? `AJUSTES DO INSTAGRAM:\n${cut(i.instagramExtra, 3000)}` : '',
+        i.handoffRules ? `QUANDO PASSAR PARA HUMANO (além das regras):\n${cut(i.handoffRules, 2000)}` : '',
+        '---',
+        `Você (SDR): ${i.assistant?.name || 'Beelie'}${i.company ? `, da ${i.company}` : ''}. Canal: Direct do Instagram.`,
+        i.profile?.username || i.profile?.name ? `Perfil de quem escreveu: ${[i.profile.name, i.profile.username ? `@${i.profile.username}` : ''].filter(Boolean).join(' ')} (o nome do perfil pode não ser o nome real; confirme antes de usar).` : '',
+        'Conversa até agora (mais antiga primeiro):',
+        ...i.conversation.map((m) => `[${m.from === 'empresa' ? 'Você' : 'Pessoa'}, ${m.date}] ${m.text}`),
+        'Escreva a sua próxima mensagem e a análise.',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    },
+    output: (raw) => {
+      const c = (raw.contact ?? {}) as Json;
+      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null);
+      const uf = str(c.state)?.toUpperCase();
+      return {
+        message: String(raw.message ?? '').trim(),
+        classification: String(raw.classification ?? 'outro'),
+        qualified: raw.qualified === true,
+        needsHuman: raw.needsHuman === true,
+        humanReason: str(raw.humanReason),
+        summary: String(raw.summary ?? '').trim().slice(0, 500),
+        nextStep: String(raw.nextStep ?? '').trim().slice(0, 500),
+        contact: { name: str(c.name), company: str(c.company), phone: str(c.phone), email: str(c.email), city: str(c.city), state: uf && /^[A-Z]{2}$/.test(uf) ? uf : null, segment: str(c.segment) },
+      };
+    },
+  },
+
   screenInbound: {
     system: `Você faz a triagem de mensagens que chegam no WhatsApp comercial de uma empresa, de números que ainda não são clientes nem leads. ${RULES}
 O mesmo número também recebe mensagens pessoais (família, amigos), de fornecedores e de golpes/spam: essas NÃO são comerciais.
