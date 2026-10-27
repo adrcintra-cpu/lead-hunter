@@ -149,23 +149,31 @@ export class InboundRelay {
   ) {}
 
   private unknownCfg = new Map<string, { on: boolean; at: number }>();
-  private ownerCfg = new Map<string, { phone: string | null; at: number }>();
+  private ownerCfg = new Map<string, { phones: string[]; at: number }>();
 
-  /** Seu WhatsApp pessoal (Configurações → Assistente). Cache de 1 min; sem a coluna, nenhum. */
-  private async ownerPhone(userId: string): Promise<string | null> {
+  /**
+   * Números que falam com o BEELIE como você (Configurações → Assistente), separados por vírgula.
+   * O primeiro é o principal: recebe avisos e o resumo. Cache de 1 min; sem a coluna, nenhum.
+   */
+  private async ownerPhones(userId: string): Promise<string[]> {
     const c = this.ownerCfg.get(userId);
-    if (c && Date.now() - c.at < 60_000) return c.phone;
+    if (c && Date.now() - c.at < 60_000) return c.phones;
     const { data, error } = await this.db.from('assistant_settings').select('owner_whatsapp').eq('owner_id', userId).maybeSingle();
     const raw = !error && typeof data?.owner_whatsapp === 'string' ? data.owner_whatsapp : '';
-    const phone = toDigits(raw) ? raw : null;
-    this.ownerCfg.set(userId, { phone, at: Date.now() });
-    return phone;
+    const phones = raw.split(/[,;\n]+/).map((x: string) => x.trim()).filter((x: string) => !!toDigits(x)).slice(0, 10);
+    this.ownerCfg.set(userId, { phones, at: Date.now() });
+    return phones;
+  }
+
+  private async ownerPhone(userId: string): Promise<string | null> {
+    return (await this.ownerPhones(userId))[0] ?? null;
   }
 
   private async isOwner(userId: string, phone: string): Promise<boolean> {
-    const owner = await this.ownerPhone(userId);
-    const d = owner ? toDigits(owner) : null;
-    return !!d && phoneKey(d) === phoneKey(phone);
+    return (await this.ownerPhones(userId)).some((p) => {
+      const d = toDigits(p);
+      return !!d && phoneKey(d) === phoneKey(phone);
+    });
   }
 
   /** Envia (com nova tentativa se outra mensagem acabou de sair) e marca como do BEELIE. */
@@ -198,15 +206,16 @@ export class InboundRelay {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleOwner(userId: string, slot: string, m: IncomingMessage, raw: any): Promise<'forwarded' | 'error'> {
     const body = (await this.audioText(userId, slot, raw)) ?? m.text;
-    const history = this.ownerHistory(userId);
+    const chat = `${userId}:${phoneKey(m.phone)}`;
+    const history = this.ownerHistory(chat);
     const res = await this.post({ action: 'owner', ownerId: userId, from: m.phone, body, history: history || undefined });
     if (!res.ok) throw new Error(`função respondeu ${res.status}`);
     const data = (await res.json().catch(() => ({}))) as { reply?: string | null };
     log.info({ user: maskUser(userId) }, 'pedido do dono recebido');
-    this.rememberOwner(userId, `Você: ${body}`);
+    this.rememberOwner(chat, `Você: ${body}`);
     if (data.reply) {
       await this.sendOwn(userId, slot, m.phone, data.reply);
-      this.rememberOwner(userId, `BEELIE: ${data.reply}`);
+      this.rememberOwner(chat, `BEELIE: ${data.reply}`);
     }
     return 'forwarded';
   }

@@ -104,8 +104,8 @@ Deno.serve(async (req) => {
     const body = typeof b.body === 'string' ? b.body.slice(0, 4000) : '';
     const from = String(b.from ?? '').replace(/\D/g, '').slice(0, 20);
     const s = await ownerSettings(db, ownerId);
-    // Confere de novo aqui: só o número salvo em Configurações fala com o BEELIE como dono.
-    if (!s.phone || !samePhone(s.phone, from)) return new Response('Não autorizado', { status: 403 });
+    // Confere de novo aqui: só os números salvos em Configurações falam com o BEELIE como dono.
+    if (!s.phones.some((p) => samePhone(p, from))) return new Response('Não autorizado', { status: 403 });
     if (!body.trim()) return Response.json({ ok: true, reply: null });
     try {
       const history = typeof b.history === 'string' ? b.history.slice(0, 3000) : undefined;

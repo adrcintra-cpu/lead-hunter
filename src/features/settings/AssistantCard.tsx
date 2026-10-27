@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Play, Square } from 'lucide-react';
+import { Bot, Play, Plus, Square, X } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { ConfirmDialog, ErrorBox, Spinner, cx } from '@/components/ui';
 import { DEFAULT_ASSISTANT, DEFAULT_PREFS, VOICES, loadAssistant, resetAssistant, saveAssistant, savePrefs, type AssistantPrefs, type AssistantSettings } from '@/services/assistant/assistantSettings';
@@ -288,6 +288,8 @@ const phoneKey = (v: string) => {
   return d.length === 10 || d.length === 11 ? `${d.slice(0, 2)}${d.slice(-8)}` : null;
 };
 
+const splitPhones = (raw: string | undefined) => (raw ?? '').split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+
 /** Seu WhatsApp pessoal conversando com o BEELIE: avisos, resumo diário e contatos para prospectar. */
 function OwnerChannel({
   prefs,
@@ -307,28 +309,51 @@ function OwnerChannel({
   onSave: (next: Partial<AssistantPrefs>) => void;
 }) {
   const missing = prefs.ownerWhatsapp === undefined;
-  const value = draft ?? prefs.ownerWhatsapp ?? '';
+  // Vários números separados por vírgula; o primeiro é o seu (recebe avisos e o resumo).
+  const saved = splitPhones(prefs.ownerWhatsapp);
+  const principal = saved[0] ?? '';
+  const extras = saved.slice(1);
+  const value = draft ?? principal;
   const key = phoneKey(value);
-  const sameAsBot = !!key && !!botPhone && key === phoneKey(botPhone);
+  const botKey = botPhone ? phoneKey(botPhone) : null;
+  const sameAsBot = !!key && key === botKey;
   const invalid = value.trim() !== '' && !key;
+  const [extra, setExtra] = useState('');
+  const extraKey = phoneKey(extra);
+  const extraError =
+    extra.trim() === '' ? '' :
+    !extraKey ? 'Número com DDD, ex.: (19) 99999-0000.' :
+    extraKey === botKey ? `Este é o número do ${name}.` :
+    [principal, ...extras].some((p) => phoneKey(p) === extraKey) ? 'Este número já está na lista.' :
+    extras.length >= 9 ? 'Máximo de 10 números.' : '';
+  const save = (list: string[]) => {
+    const next = list.map((x) => x.trim()).filter(Boolean).join(', ');
+    // Primeira vez: já liga os avisos e o resumo às 18h (dá para mudar ao lado).
+    if (next !== (prefs.ownerWhatsapp ?? '')) onSave({ ownerWhatsapp: next, ...(!prefs.ownerWhatsapp ? { ownerAlerts: true, ownerReportHour: prefs.ownerReportHour ?? 18 } : {}) });
+  };
   const commit = () => {
     if (draft === null) return;
     if (invalid || sameAsBot) return;
-    // Primeira vez: já liga os avisos e o resumo às 18h (dá para mudar ao lado).
-    if (draft.trim() !== (prefs.ownerWhatsapp ?? '')) onSave({ ownerWhatsapp: draft.trim(), ...(!prefs.ownerWhatsapp ? { ownerAlerts: true, ownerReportHour: prefs.ownerReportHour ?? 18 } : {}) });
+    // Sem o principal, o primeiro extra assume o lugar dele.
+    save([draft, ...extras]);
     setDraft(null);
   };
-  const on = !!prefs.ownerWhatsapp && !!phoneKey(prefs.ownerWhatsapp);
+  const addExtra = () => {
+    if (!extraKey || extraError || !key) return;
+    save([principal, ...extras, extra]);
+    setExtra('');
+  };
+  const on = !!phoneKey(principal);
   return (
     <div className="mt-4 border-t border-line pt-4">
       <div className="text-sm font-bold">Falar com o {name} pelo seu WhatsApp</div>
       <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
         Do seu número pessoal você recebe avisos de lead em potencial e o resumo do dia, pede “relatório” quando quiser e passa contatos para ele cadastrar e prospectar
-        (cartão do contato, print de cartão de visita ou “nome, empresa, telefone”). Só este número é tratado como você.
+        (cartão do contato, print de cartão de visita ou “nome, empresa, telefone”). Só os números abaixo são tratados como você; os avisos e o resumo vão para o principal.
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <div className="sm:col-span-1">
-          <label htmlFor="owner-wa" className="label">Seu WhatsApp (com DDD)</label>
+          <label htmlFor="owner-wa" className="label">Seu WhatsApp principal (com DDD)</label>
           <input
             id="owner-wa"
             className="input"
@@ -371,6 +396,52 @@ function OwnerChannel({
           Avisar lead em potencial
         </label>
       </div>
+      {on && (
+        <div className="mt-3">
+          <div className="label">Outros números liberados</div>
+          <p className="text-xs text-ink-faint">Pessoas de confiança que também podem conversar com o {name}, pedir relatório e passar contatos. Cada número tem a própria conversa.</p>
+          {extras.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {extras.map((p) => (
+                <li key={p} className="flex items-center gap-1 rounded-lg border border-line bg-subtle py-1 pl-2.5 pr-1 text-[13px]">
+                  {p}
+                  <button
+                    type="button"
+                    className="btn-ghost min-h-[26px] px-1.5"
+                    aria-label={`Remover ${p}`}
+                    disabled={!available}
+                    onClick={() => save([principal, ...extras.filter((x) => x !== p)])}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-2 flex max-w-md gap-2">
+            <label htmlFor="owner-wa-extra" className="sr-only">Adicionar número</label>
+            <input
+              id="owner-wa-extra"
+              className="input"
+              inputMode="tel"
+              placeholder="Ex.: (19) 98888-0000"
+              value={extra}
+              disabled={!available}
+              onChange={(e) => setExtra(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addExtra();
+                }
+              }}
+            />
+            <button type="button" className="btn-outline shrink-0" disabled={!available || !extraKey || !!extraError} onClick={addExtra}>
+              <Plus className="h-4 w-4" /> Adicionar
+            </button>
+          </div>
+          {extraError && <p className="mt-1 text-xs text-warn">{extraError}</p>}
+        </div>
+      )}
       {missing && available && <p className="mt-2 text-xs text-warn">Falta aplicar a migration desta opção (npx supabase db push).</p>}
       {on && <p className="mt-2 text-xs text-good">Ligado. Mande um “oi” do seu WhatsApp para o número do {name} para testar.</p>}
     </div>

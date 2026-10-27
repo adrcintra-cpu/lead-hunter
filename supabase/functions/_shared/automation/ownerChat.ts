@@ -20,8 +20,16 @@ type Row = Record<string, any>;
 export const OWNER_ORIGIN = 'Indicado por você (WhatsApp)';
 const PAGE = 1000;
 
+/** Números que falam com o BEELIE como você: o primeiro é o principal (recebe avisos e o resumo). */
+export function ownerPhones(raw: unknown): string[] {
+  return typeof raw === 'string' ? raw.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).slice(0, 10) : [];
+}
+
 export interface OwnerSettings {
+  /** Número principal: recebe avisos e o resumo do dia. */
   phone: string | null;
+  /** Todos os números autorizados a conversar com o BEELIE como dono (o principal + os adicionais). */
+  phones: string[];
   alerts: boolean;
   reportHour: number | null;
   reportSentOn: string | null;
@@ -29,7 +37,7 @@ export interface OwnerSettings {
 
 /** Configuração do canal do dono. Sem as colunas (migration não aplicada), fica desligado. */
 export async function ownerSettings(db: Db, ownerId: string): Promise<OwnerSettings> {
-  const off: OwnerSettings = { phone: null, alerts: false, reportHour: null, reportSentOn: null };
+  const off: OwnerSettings = { phone: null, phones: [], alerts: false, reportHour: null, reportSentOn: null };
   const { data, error } = await db
     .from('assistant_settings')
     .select('owner_whatsapp, owner_alerts, owner_report_hour, owner_report_sent_on')
@@ -40,8 +48,10 @@ export async function ownerSettings(db: Db, ownerId: string): Promise<OwnerSetti
       (e: unknown) => ({ data: null, error: e }),
     );
   if (error || !data) return off;
+  const phones = ownerPhones(data.owner_whatsapp);
   return {
-    phone: typeof data.owner_whatsapp === 'string' && data.owner_whatsapp.trim() ? data.owner_whatsapp.trim() : null,
+    phone: phones[0] ?? null,
+    phones,
     alerts: data.owner_alerts !== false,
     reportHour: typeof data.owner_report_hour === 'number' ? data.owner_report_hour : null,
     reportSentOn: data.owner_report_sent_on ?? null,
