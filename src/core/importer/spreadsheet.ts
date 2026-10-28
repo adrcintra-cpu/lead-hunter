@@ -210,21 +210,34 @@ function numText(v: string): string {
   return Number.isFinite(n) && Number.isInteger(n) ? BigInt(Math.round(n)).toString() : v;
 }
 
-export async function readXlsx(buf: ArrayBuffer): Promise<string[][]> {
-  const files = await unzip(buf, (n) => n === 'xl/workbook.xml' || n === 'xl/_rels/workbook.xml.rels' || n === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
-  // Primeira aba do arquivo (pela ordem do workbook).
-  let sheetPath = 'xl/worksheets/sheet1.xml';
-  const wb = files.get('xl/workbook.xml');
-  const rels = files.get('xl/_rels/workbook.xml.rels');
-  const rid = wb && /<sheet\b[^>]*\br:id="([^"]+)"/.exec(wb)?.[1];
-  if (rid && rels) {
-    const target = new RegExp(`<Relationship\\b[^>]*Id="${rid}"[^>]*Target="([^"]+)"`).exec(rels)?.[1] ?? new RegExp(`<Relationship\\b[^>]*Target="([^"]+)"[^>]*Id="${rid}"`).exec(rels)?.[1];
-    if (target) sheetPath = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`;
-  }
-  const sheet = files.get(sheetPath) ?? [...files.entries()].find(([n]) => n.startsWith('xl/worksheets/'))?.[1];
-  if (!sheet) throw new Error('Não encontrei nenhuma aba na planilha.');
-  const shared = [...(files.get('xl/sharedStrings.xml') ?? '').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => textOf(m[1]));
+/** Tira prefixos de namespace do XML (<x:row> → <row>): planilhas exportadas por outros sistemas usam. */
+const noPrefix = (xml: string) => xml.replace(/<(\/?)[A-Za-z_][\w.-]*:/g, '<$1');
 
+export async function readXlsx(buf: ArrayBuffer): Promise<string[][]> {
+  const raw = await unzip(buf, (n) => /^xl\/(workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|worksheets\/[^/]+\.xml)$/i.test(n));
+  const files = new Map([...raw.entries()].map(([n, x]) => [n.toLowerCase(), noPrefix(x)]));
+  // Abas na ordem do workbook; a primeira com dados vale (às vezes a 1ª aba é capa ou está vazia).
+  const wb = files.get('xl/workbook.xml') ?? '';
+  const rels = files.get('xl/_rels/workbook.xml.rels') ?? '';
+  const paths: string[] = [];
+  for (const m of wb.matchAll(/<sheet\b[^>]*\br:id="([^"]+)"/g)) {
+    const rid = m[1];
+    const target = new RegExp(`<Relationship\\b[^>]*Id="${rid}"[^>]*Target="([^"]+)"`).exec(rels)?.[1] ?? new RegExp(`<Relationship\\b[^>]*Target="([^"]+)"[^>]*Id="${rid}"`).exec(rels)?.[1];
+    if (target) paths.push((target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`).toLowerCase());
+  }
+  for (const n of files.keys()) if (n.startsWith('xl/worksheets/') && !paths.includes(n)) paths.push(n);
+  if (!paths.some((p) => files.has(p))) throw new Error('Não encontrei nenhuma aba na planilha. Se ela veio do Numbers ou do Google Planilhas, exporte como .xlsx ou .csv.');
+  const shared = [...(files.get('xl/sharedstrings.xml') ?? '').matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map((m) => textOf(m[1]));
+  for (const p of paths) {
+    const sheet = files.get(p);
+    if (!sheet) continue;
+    const rows = sheetRows(sheet, shared);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+function sheetRows(sheet: string, shared: string[]): string[][] {
   const rows: string[][] = [];
   for (const rm of sheet.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
     const row: string[] = [];
@@ -236,7 +249,7 @@ export async function readXlsx(buf: ArrayBuffer): Promise<string[][]> {
       const idx = ref ? colIndex(ref) : next;
       next = idx + 1;
       const t = /\bt="([^"]+)"/.exec(attrs)?.[1];
-      const v = /<v>([\s\S]*?)<\/v>/.exec(inner)?.[1];
+      const v = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(inner)?.[1];
       let val = '';
       if (t === 's') val = shared[Number(v)] ?? '';
       else if (t === 'inlineStr') val = textOf(inner);
@@ -287,12 +300,26 @@ export function looksLikeData(headers: string[]): boolean {
   return headers.some((h) => /\d{4,}|@|^\d{2}$/.test(h.trim()));
 }
 
+/** Texto do CSV: UTF-8 (padrão), UTF-16 ("Unicode" do Excel) ou Windows-1252 (CSV antigo do Excel). */
+export function decodeText(buf: ArrayBuffer): string {
+  const b = new Uint8Array(buf);
+  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder('utf-16le').decode(b);
+  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder('utf-16be').decode(b);
+  // UTF-16 sem marca: muitos zeros nas posições ímpares.
+  const sample = b.subarray(0, 400);
+  let zeros = 0;
+  for (let i = 1; i < sample.length; i += 2) if (sample[i] === 0) zeros++;
+  if (sample.length > 20 && zeros > sample.length / 4) return new TextDecoder('utf-16le').decode(b);
+  const utf8 = new TextDecoder('utf-8').decode(b);
+  return utf8.includes('\uFFFD') ? new TextDecoder('windows-1252').decode(b) : utf8;
+}
+
 export async function readSpreadsheet(file: { name: string; arrayBuffer: () => Promise<ArrayBuffer> }): Promise<{ headers: string[]; rows: string[][] }> {
   const buf = await file.arrayBuffer();
   const isXlsx = /\.xlsx$/i.test(file.name) || new Uint8Array(buf.slice(0, 2))[0] === 0x50;
   if (/\.xls$/i.test(file.name)) throw new Error('Formato .xls antigo não é aceito: no Excel, use "Salvar como" → .xlsx ou .csv.');
-  const all = isXlsx ? await readXlsx(buf) : parseCsv(new TextDecoder('utf-8').decode(buf));
-  if (!all.length) throw new Error('A planilha está vazia.');
+  const all = isXlsx ? await readXlsx(buf) : parseCsv(decodeText(buf));
+  if (!all.length) throw new Error('Não encontrei nenhuma linha com dados na planilha. Confira se os contatos estão preenchidos (a partir da linha 1 ou 2) e se o arquivo foi salvo como .xlsx ou .csv.');
   const [headers, ...rows] = all;
   return { headers: headers.map((h) => h.trim()), rows };
 }
