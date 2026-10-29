@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Check, Copy, ExternalLink, Mail, MessageCircle, Pencil, RefreshCw, ShieldOff, Sparkles, Trash2, X } from 'lucide-react';
+import { SiteFavicon } from '@/components/SiteFavicon';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRow, type LeadRow } from '@/store/selectors';
 import { ANALYSIS_SECTIONS, STAGES, type Channel, type CompanyField, type LeadStage, type Message } from '@/core/types';
@@ -72,7 +73,7 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
       )}
       <header className={cx('z-10 flex items-start justify-between gap-3 border-b border-line bg-surface px-6 py-4', !standalone && 'sticky top-0')}>
         <div className="min-w-0">
-          <h2 className="text-xl font-extrabold tracking-tight">{name}</h2>
+          <h2 className="flex items-center gap-2.5 text-xl font-extrabold tracking-tight"><SiteFavicon website={c.website} size={24} />{name}</h2>
           <p className="mt-0.5 text-[13px] text-ink-faint">
             {c.segment} · {c.city}/{c.state}
             {lead.contactName && ` · ${lead.contactName}${lead.contactRole ? ` (${lead.contactRole})` : ''}`}

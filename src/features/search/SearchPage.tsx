@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Check, RotateCcw, Save, Sparkles } from 'lucide-react';
+import { SiteFavicon } from '@/components/SiteFavicon';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { buildLeadRows } from '@/store/selectors';
 import type { CriteriaField, SearchCriteria } from '@/core/types';
@@ -490,7 +491,7 @@ function SearchResults({ searchId, onNew }: { searchId: string; onNew: () => voi
                 className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 text-left sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]"
               >
                 <span className="min-w-0">
-                  <span className="block truncate text-[14.5px] font-bold">{row!.company.tradeName ?? row!.company.legalName}</span>
+                  <span className="flex items-center gap-2 text-[14.5px] font-bold"><SiteFavicon website={row!.company.website} /><span className="truncate">{row!.company.tradeName ?? row!.company.legalName}</span></span>
                   <span className="block truncate text-[12.5px] text-ink-faint">
                     {row!.company.segment} · {row!.company.city}/{row!.company.state} · {row!.company.website ?? 'sem site'}
                   </span>

@@ -12,6 +12,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { GripVertical } from 'lucide-react';
+import { SiteFavicon } from '@/components/SiteFavicon';
 import { useApp, useService } from '@/store/AppStore';
 import { useLeadRows, type LeadRow } from '@/store/selectors';
 import { STAGES, stageLabel, type LeadStage } from '@/core/types';
@@ -106,8 +107,9 @@ function Card({ row, overlay, handleProps }: { row: LeadRow; overlay?: boolean; 
           <GripVertical className="h-4 w-4" />
         </button>
         <div className="min-w-0 flex-1">
-          <button type="button" onClick={() => drawer.open(lead.id)} className="block w-full truncate text-left text-[13.5px] font-bold hover:text-accent">
-            {c.tradeName ?? c.legalName}
+          <button type="button" onClick={() => drawer.open(lead.id)} className="flex w-full items-center gap-1.5 text-left text-[13.5px] font-bold hover:text-accent">
+            <SiteFavicon website={c.website} size={14} />
+            <span className="truncate">{c.tradeName ?? c.legalName}</span>
           </button>
           <div className="truncate text-xs text-ink-faint">{c.city}/{c.state} · {c.segment}</div>
         </div>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowDown, ArrowUp, ListPlus, Plus, Search as SearchIcon, Trash2, X } from 'lucide-react';
+import { SiteFavicon } from '@/components/SiteFavicon';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRows, type LeadRow } from '@/store/selectors';
 import { STAGES, stageLabel, type LeadStage } from '@/core/types';
@@ -282,9 +283,12 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
                   />
                 </td>
                 <td className="px-3 py-2.5">
-                  <button type="button" onClick={() => drawer.open(lead.id)} className="text-left font-bold underline decoration-line-strong underline-offset-[3px] hover:text-accent">
-                    {c.tradeName ?? c.legalName}
-                  </button>
+                  <span className="flex items-center gap-2">
+                    <SiteFavicon website={c.website} />
+                    <button type="button" onClick={() => drawer.open(lead.id)} className="text-left font-bold underline decoration-line-strong underline-offset-[3px] hover:text-accent">
+                      {c.tradeName ?? c.legalName}
+                    </button>
+                  </span>
                   {(lead.contactName || lead.tags?.length) && (
                     <div className="mt-0.5 flex flex-wrap gap-1 text-[11px] text-ink-faint">
                       {lead.contactName && <span>{lead.contactName}{lead.contactRole ? ` · ${lead.contactRole}` : ''}</span>}
@@ -295,7 +299,7 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
                 <td className="whitespace-nowrap px-3">{c.segment}</td>
                 <td className="px-3">{c.city}</td>
                 <td className="px-3">{c.state}</td>
-                <td className={cx('max-w-[180px] truncate px-3', !c.website && 'text-ink-faint')}>{c.website ?? '—'}</td>
+                <td className={cx('max-w-[180px] truncate px-3', !c.website && 'text-ink-faint')}>{c.website ? <a href={/^https?:\/\//i.test(c.website) ? c.website : `https://${c.website}`} target="_blank" rel="noopener noreferrer" className="hover:text-accent hover:underline">{c.website}</a> : '—'}</td>
                 <td className="whitespace-nowrap px-3 font-mono text-[12.5px]">{c.phone ?? '—'}</td>
                 <td className="px-3"><WhatsappBadge status={c.whatsappStatus} hasNumber={!!c.whatsapp} /></td>
                 <td className="px-3"><ScoreBadge score={lead.currentScore} tier={lead.scoreTier} /></td>
