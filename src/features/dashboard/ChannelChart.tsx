@@ -167,7 +167,7 @@ export function ChannelChart() {
           ))}
           {days.map((d, i) =>
             (days.length - 1 - i) % labelEvery === 0 ? (
-              <text key={d} x={x(i)} y={H - 6} textAnchor="middle" className="fill-ink-faint text-[10.5px]">
+              <text key={d} x={x(i)} y={H - 6} textAnchor={i === days.length - 1 ? 'end' : i === 0 ? 'start' : 'middle'} className="fill-ink-faint text-[10.5px]">
                 {dayLabel(d)}
               </text>
             ) : null,
