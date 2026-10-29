@@ -29,3 +29,14 @@ export function OxyhubLogo({ className, title = 'Oxyhub', wordClassName = 'fill-
     </svg>
   );
 }
+
+/** Só o símbolo (sem o nome), para espaços pequenos como o topo no celular. */
+export function OxyhubMark({ className, title = 'Oxyhub' }: { className?: string; title?: string }) {
+  return (
+    <svg viewBox="58 40 276 280" className={className} role="img" aria-label={title} xmlns="http://www.w3.org/2000/svg">
+      <g className="fill-[#3E00FF]">
+        {MARK.map((d) => <path key={d.slice(0, 12)} d={d} />)}
+      </g>
+    </svg>
+  );
+}
