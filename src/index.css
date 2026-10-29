@@ -4,15 +4,15 @@
 
 /* Tokens de cor (RGB sem vírgula) — light e dark. */
 :root {
-  --bg: 246 246 243;
+  --bg: 243 245 249;
   --surface: 255 255 255;
-  --subtle: 251 251 249;
-  --muted: 239 239 234;
-  --line: 228 227 222;
-  --line-strong: 207 206 199;
-  --ink: 23 25 28;
-  --ink-soft: 74 78 84;
-  --ink-faint: 95 99 104;
+  --subtle: 249 250 252;
+  --muted: 235 238 244;
+  --line: 224 228 236;
+  --line-strong: 202 208 220;
+  --ink: 22 26 36;
+  --ink-soft: 72 79 94;
+  --ink-faint: 92 99 114;
   --accent: 62 0 255;
   --accent-ink: 255 255 255;
   --accent-soft: 236 231 255;
@@ -28,21 +28,21 @@
   --bad-soft: 251 234 234;
   --ai: 75 46 158;
   --ai-soft: 238 234 251;
-  --inverse: 23 25 28;
+  --inverse: 22 26 36;
   --inverse-ink: 255 255 255;
   color-scheme: light;
 }
 
 .dark {
-  --bg: 16 17 19;
-  --surface: 24 26 29;
-  --subtle: 20 22 24;
-  --muted: 34 37 41;
-  --line: 44 47 52;
-  --line-strong: 64 68 74;
-  --ink: 236 237 233;
-  --ink-soft: 190 193 196;
-  --ink-faint: 154 158 163;
+  --bg: 12 17 29;
+  --surface: 17 23 40;
+  --subtle: 14 20 34;
+  --muted: 27 35 56;
+  --line: 37 47 66;
+  --line-strong: 56 68 92;
+  --ink: 232 236 245;
+  --ink-soft: 186 194 210;
+  --ink-faint: 148 158 180;
   --accent: 62 0 255;
   --accent-ink: 255 255 255;
   --accent-soft: 30 14 82;
@@ -57,8 +57,8 @@
   --bad-soft: 66 26 26;
   --ai: 190 172 250;
   --ai-soft: 40 32 70;
-  --inverse: 236 237 233;
-  --inverse-ink: 16 17 19;
+  --inverse: 232 236 245;
+  --inverse-ink: 12 17 29;
   color-scheme: dark;
 }
 
