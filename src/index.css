@@ -113,3 +113,15 @@
     @apply text-[28px] font-extrabold tracking-tight;
   }
 }
+
+/* Cores dos canais nos gráficos (validadas para daltonismo, claro e escuro). */
+:root {
+  --ch-whatsapp: #13a35a;
+  --ch-email: #3e00ff;
+  --ch-instagram: #e1306c;
+}
+.dark {
+  --ch-whatsapp: #1fa660;
+  --ch-email: #8f74ff;
+  --ch-instagram: #f2508a;
+}

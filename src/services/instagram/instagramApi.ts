@@ -208,6 +208,18 @@ export const instagramApi = {
   subscribe: () => agent<{ ok: boolean; accounts: { username: string | null; ok: boolean }[] }>({ action: 'subscribe' }),
   diagnose: () => agent<{ ok: boolean }>({ action: 'diagnose' }),
 
+  /** Mensagens do Direct desde uma data (para o gráfico por canal). Sem o módulo, volta vazio. */
+  async activity(sinceIso: string): Promise<{ direction: 'entrada' | 'saida'; status: IgMessage['status']; createdAt: string }[]> {
+    const { data, error } = await need()
+      .from('instagram_messages')
+      .select('direction, status, created_at')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: true })
+      .limit(5000);
+    if (error) return [];
+    return (data ?? []).map((r) => ({ direction: r.direction, status: r.status, createdAt: r.created_at }));
+  },
+
   /** Indicadores reais (contagens nas tabelas do módulo). Sem integração, ficam em zero. */
   async metrics(minScore: number) {
     const db = need();
