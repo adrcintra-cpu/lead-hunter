@@ -53,7 +53,7 @@ export function PipelinePage() {
     <div className="flex flex-col gap-4">
       <PageHeader title="Pipeline" subtitle="Arraste os cards entre as etapas. Toda mudança fica registrada no histórico do lead." />
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
-        <div className="-mx-4 overflow-x-auto px-4 pb-4 md:-mx-10 md:px-10">
+        <div className="relative -mx-4 overflow-x-auto px-4 pb-4 md:-mx-10 md:px-10">
           <div className="grid auto-cols-[248px] grid-flow-col gap-3">
             {columns.map((col) => (
               <Column key={col.id} id={col.id} label={col.label} rows={col.rows} />

@@ -168,12 +168,12 @@ export function AssistantCard() {
               </span>
             </label>
             <div className="mt-3 flex flex-wrap items-end gap-3">
-              <div>
+              <div className="w-full min-w-0 sm:w-auto">
                 <label htmlFor="as-voice" className="label">Voz (quando o lead pede áudio)</label>
                 <div className="flex items-center gap-2">
                   <select
                     id="as-voice"
-                    className="input w-auto"
+                    className="input w-auto min-w-0 flex-1 sm:flex-none"
                     value={prefs.voice}
                     disabled={!prefsAvailable}
                     onChange={(e) => {

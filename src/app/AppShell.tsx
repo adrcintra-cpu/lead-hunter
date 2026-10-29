@@ -85,7 +85,7 @@ export function AppShell() {
   );
 
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[236px_minmax(0,1fr)]">
+    <div className="min-h-screen overflow-x-clip md:grid md:grid-cols-[236px_minmax(0,1fr)] md:overflow-x-visible">
       {/* Celular: topo fixo com o símbolo e o menu */}
       <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-subtle/80 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl md:hidden" style={{ boxSizing: 'content-box' }}>
         <NavLink to="/" aria-label="Ir para o Dashboard" className="-ml-1 rounded-lg p-1">
