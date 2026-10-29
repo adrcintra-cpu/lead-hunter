@@ -121,7 +121,7 @@ export function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
 export function Toasts() {
   const { toasts, dismissToast } = useApp();
   return (
-    <div className="pointer-events-none fixed bottom-[calc(96px+env(safe-area-inset-bottom))] md:bottom-5 left-1/2 z-[60] flex w-[min(92vw,460px)] -translate-x-1/2 flex-col gap-2" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-[calc(106px+env(safe-area-inset-bottom))] md:bottom-5 left-1/2 z-[60] flex w-[min(92vw,460px)] -translate-x-1/2 flex-col gap-2" aria-live="polite">
       {toasts.map((t) => (
         <div
           key={t.id}

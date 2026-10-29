@@ -126,7 +126,7 @@ export function AppShell() {
 
       {/* Celular: palco suspenso com os atalhos principais */}
       <nav aria-label="Atalhos" className="fixed inset-x-3 bottom-[calc(12px+env(safe-area-inset-bottom))] z-30 md:hidden">
-        <div className="mx-auto flex max-w-[440px] items-stretch justify-around gap-1 rounded-2xl border border-line/70 bg-surface/70 p-1.5 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="flex w-full items-stretch justify-around gap-1 rounded-[18px] border border-line/70 bg-surface/70 p-[7px] shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)] backdrop-blur-xl backdrop-saturate-150">
           {nav.filter((n) => DOCK.includes(n.to)).map(({ to, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -134,12 +134,12 @@ export function AppShell() {
               end={end}
               className={({ isActive }) =>
                 cx(
-                  'flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] transition-colors',
+                  'flex min-h-[60px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] transition-colors',
                   isActive ? 'bg-muted font-bold text-[#3E00FF] dark:text-ink' : 'font-medium text-ink-soft',
                 )
               }
             >
-              <Icon className="h-5 w-5" aria-hidden />
+              <Icon className="h-[22px] w-[22px]" aria-hidden />
               {DOCK_LABEL[to]}
             </NavLink>
           ))}
@@ -167,7 +167,7 @@ export function AppShell() {
           {account}
         </div>
       </aside>
-      <main className="min-w-0 px-4 pb-[calc(112px+env(safe-area-inset-bottom))] pt-[calc(80px+env(safe-area-inset-top))] md:px-10 md:pb-20 md:pt-8">
+      <main className="min-w-0 px-4 pb-[calc(124px+env(safe-area-inset-bottom))] pt-[calc(80px+env(safe-area-inset-top))] md:px-10 md:pb-20 md:pt-8">
         {team?.role === 'leitura' && (
           <div role="status" className="mb-4 rounded-lg bg-warn-soft px-4 py-2.5 text-[13px] text-ink-soft">
             Seu acesso é <b>só de leitura</b>: você vê tudo, mas alterações não são salvas.

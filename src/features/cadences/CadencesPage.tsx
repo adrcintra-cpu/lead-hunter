@@ -198,7 +198,7 @@ export function CadenceEditorPage() {
         <button type="button" className="btn-outline" onClick={() => add('stage')}><Workflow className="h-4 w-4" /> Mudar etapa</button>
       </div>
 
-      <div className="fixed inset-x-0 bottom-[calc(88px+env(safe-area-inset-bottom))] z-20 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur md:bottom-0 md:left-[236px]">
+      <div className="fixed inset-x-0 bottom-[calc(98px+env(safe-area-inset-bottom))] z-20 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur md:bottom-0 md:left-[236px]">
         <div className="mx-auto flex max-w-[860px] flex-wrap items-center justify-between gap-2">
           <span className="text-sm text-ink-faint">{dirty ? 'Alterações não salvas' : 'Tudo salvo'}</span>
           <div className="flex gap-2">
