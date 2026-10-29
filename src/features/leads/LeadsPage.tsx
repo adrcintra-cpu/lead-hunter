@@ -282,14 +282,14 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
                     className="h-4 w-4 accent-[rgb(var(--accent))]"
                   />
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="min-w-[220px] px-3 py-2.5">
                   <span className="flex items-center gap-2">
                     <SiteFavicon website={c.website} />
                     <button type="button" onClick={() => drawer.open(lead.id)} className="text-left font-bold underline decoration-line-strong underline-offset-[3px] hover:text-accent">
                       {c.tradeName ?? c.legalName}
                     </button>
                   </span>
-                  {(lead.contactName || lead.tags?.length) && (
+                  {!!(lead.contactName || lead.tags?.length) && (
                     <div className="mt-0.5 flex flex-wrap gap-1 text-[11px] text-ink-faint">
                       {lead.contactName && <span>{lead.contactName}{lead.contactRole ? ` · ${lead.contactRole}` : ''}</span>}
                       {(lead.tags ?? []).map((t) => <span key={t} className="rounded bg-muted px-1 font-semibold">#{t}</span>)}
