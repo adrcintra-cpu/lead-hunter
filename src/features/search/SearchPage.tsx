@@ -432,7 +432,7 @@ function SearchResults({ searchId, onNew }: { searchId: string; onNew: () => voi
         const perDay = auto.reduce((n, c) => n + (c.dailyLimitWhatsapp ?? 0), 0);
         return (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3">
-            <div className="min-w-0 flex-1 text-[13px]">
+            <div className="min-w-0 grow basis-[280px] text-[13px]">
               {byCamp.size > 0 ? (
                 <>
                   <div className="font-bold text-ink">
