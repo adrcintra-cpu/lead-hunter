@@ -170,14 +170,14 @@ export function DashboardPage() {
             <div className="card px-4 py-4">
               <div className="text-[12.5px] font-semibold text-ink-faint">Temperatura dos leads</div>
               <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-                <div className="bg-good" style={{ width: `${(temp.hot / total) * 100}%` }} />
-                <div className="bg-warn" style={{ width: `${(temp.warm / total) * 100}%` }} />
-                <div className="bg-ink-faint/50" style={{ width: `${(temp.cold / total) * 100}%` }} />
+                <div className="bg-gradient-to-r from-red-600 to-orange-500" style={{ width: `${(temp.hot / total) * 100}%` }} />
+                <div className="bg-gradient-to-r from-orange-400 to-amber-400" style={{ width: `${(temp.warm / total) * 100}%` }} />
+                <div className="bg-gradient-to-r from-sky-400 to-blue-600" style={{ width: `${(temp.cold / total) * 100}%` }} />
               </div>
               <div className="mt-2 flex justify-between text-xs">
-                <Link to="/leads?ver=quentes" className="font-semibold text-good hover:underline">{temp.hot} quentes</Link>
-                <Link to="/leads?ver=mornos" className="font-semibold text-warn hover:underline">{temp.warm} mornos</Link>
-                <Link to="/leads?ver=frios" className="text-ink-faint hover:underline">{temp.cold} frios</Link>
+                <Link to="/leads?ver=quentes" className="font-semibold text-red-600 hover:underline dark:text-red-400">{temp.hot} quentes</Link>
+                <Link to="/leads?ver=mornos" className="font-semibold text-amber-700 hover:underline dark:text-amber-400">{temp.warm} mornos</Link>
+                <Link to="/leads?ver=frios" className="font-semibold text-blue-600 hover:underline dark:text-sky-400">{temp.cold} frios</Link>
               </div>
             </div>
           </div>
