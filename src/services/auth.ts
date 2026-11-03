@@ -19,6 +19,8 @@ const KEY = 'lh-session';
 /** "Manter conectado" desmarcado: a sessão vale só enquanto o navegador estiver aberto. Só marcadores, nenhum dado de login. */
 const EPHEMERAL = 'lh-ephemeral';
 const TAB_ALIVE = 'lh-tab-alive';
+/** Mensagem quando o link de convite/senha perdeu a validade neste navegador. */
+export const SESSION_LOST = 'O link perdeu a validade neste navegador. Toque em “Enviar link novo” e abra o e-mail que vai chegar.';
 
 let teamCache: TeamInfo | null = null;
 
@@ -113,8 +115,11 @@ export const auth = {
   async setPassword(password: string, name?: string) {
     if (password.length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
     if (!(dataMode === 'supabase' && supabase)) throw new Error('Disponível só no modo real.');
+    // A sessão do link precisa estar ativa neste navegador; sem ela, explica e oferece um link novo.
+    const { data: cur } = await supabase.auth.getSession();
+    if (!cur.session) throw new Error(SESSION_LOST);
     const { error } = await supabase.auth.updateUser({ password, ...(name ? { data: { full_name: name } } : {}) });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(/session missing|not authenticated|jwt/i.test(error.message) ? SESSION_LOST : error.message);
     store(() => sessionStorage.setItem(TAB_ALIVE, '1'));
   },
 

@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/store/AppStore';
-import { auth } from '@/services/auth';
+import { auth, SESSION_LOST } from '@/services/auth';
 import { Spinner } from '@/components/ui';
 import { AuthLayout } from './LoginPage';
 
@@ -20,6 +20,7 @@ export function SetPasswordPage() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resent, setResent] = useState(false);
 
   if (!session) {
     return (
@@ -72,6 +73,29 @@ export function SetPasswordPage() {
         <label htmlFor="sp-confirm" className="mb-1.5 mt-5 text-[13px] text-white/60">Repita a senha</label>
         <input id="sp-confirm" type={show ? 'text' : 'password'} className={field} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
         {error && <div role="alert" className="mt-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-[14px] text-red-200">{error}</div>}
+        {error === SESSION_LOST && (
+          <button
+            type="button"
+            disabled={busy || resent}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await auth.resetPassword(session.email);
+                setResent(true);
+                setError('');
+                toast(`Link novo enviado para ${session.email}.`, 'success');
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Não foi possível enviar o link.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+            className="mt-3 h-11 rounded-full border border-white/25 text-[13px] font-bold uppercase tracking-[0.14em] text-white/85 hover:bg-white/10 disabled:opacity-60"
+          >
+            Enviar link novo
+          </button>
+        )}
+        {resent && <div role="status" className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-[14px] text-emerald-100">Link novo enviado para {session.email}. Abra o e-mail e toque no link para criar a senha.</div>}
         <button type="submit" disabled={busy} className="mt-8 flex h-12 items-center justify-center gap-2 rounded-full bg-[#1d3a8a] text-[14px] font-bold uppercase tracking-[0.18em] text-[#c9d6ff] transition-colors hover:bg-[#2546a6] disabled:opacity-60">
           {busy && <Spinner />} Salvar senha
         </button>
