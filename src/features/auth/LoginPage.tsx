@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Eye, EyeOff, Lock } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
@@ -6,6 +6,7 @@ import { auth } from '@/services/auth';
 import { Spinner, Toasts } from '@/components/ui';
 import { OxyhubLogo } from '@/components/OxyhubLogo';
 import { ParticleSphere } from './ParticleSphere';
+import { goToHubLogin, HUB_URL } from '@/lib/oxyhub';
 
 /** Fundo escuro com a esfera de partículas e o cartão à direita (login, definir senha). */
 export function AuthLayout({ children }: { children: ReactNode }) {
@@ -40,6 +41,11 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
+  // Login único: com Supabase, o login acontece no Oxyhub, que devolve a pessoa aqui já logada
+  const [toHub, setToHub] = useState(dataMode === 'supabase');
+  useEffect(() => {
+    if (dataMode === 'supabase') setToHub(goToHubLogin());
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -57,6 +63,17 @@ export function LoginPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (toHub) {
+    return (
+      <AuthLayout>
+        <div className="flex flex-col items-center gap-3 py-6 text-center text-[14px] text-white/70">
+          <Spinner />
+          Abrindo o login do Oxyhub…
+        </div>
+      </AuthLayout>
+    );
   }
 
   return (
@@ -125,6 +142,11 @@ export function LoginPage() {
           {dataMode === 'mock'
             ? 'Modo de teste: qualquer e-mail e senha com 6+ caracteres. Os dados ficam só neste navegador.'
             : 'Acesso restrito à equipe. Para entrar, peça um convite ao administrador da conta.'}
+        </p>
+        <p className="mt-3 text-center text-[13px]">
+          <a href={`${HUB_URL}/abrir/lead`} className="text-[#7c95ff] hover:underline">
+            Entrar pelo Oxyhub (acesso único)
+          </a>
         </p>
       </form>
     </AuthLayout>

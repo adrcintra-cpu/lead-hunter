@@ -4,6 +4,7 @@ import { auth, type Session, type TeamInfo } from '@/services/auth';
 import { LocalRepository } from '@/services/db/localRepository';
 import { REMOTE_REFRESH_MS, SupabaseRepository } from '@/services/db/supabaseRepository';
 import { dataMode, supabase } from '@/lib/supabase';
+import { clearHubLoginAttempt, HUB_SIGN_OUT } from '@/lib/oxyhub';
 import type { DbState } from '@/services/db/schema';
 import { LeadHunterService } from '@/services/leadHunterService';
 
@@ -162,7 +163,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     signOut: async () => {
       await auth.signOut();
-      setSession(null);
+      // Login único: sai também do Oxyhub (senão o hub logaria a pessoa de volta)
+      if (dataMode === 'supabase') window.location.assign(HUB_SIGN_OUT);
+      else setSession(null);
     },
   };
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

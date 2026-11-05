@@ -6,7 +6,7 @@ import { cx } from '@/components/ui';
  * Menu "Oxyhub": volta ao painel único e troca de sistema sem novo login.
  * Os links passam pelo hub (/abrir/…), que abre cada sistema já logado.
  */
-const HUB = (((import.meta.env.VITE_HUB_URL as string | undefined) || 'https://hub.oxyhub.com.br')).replace(/\/+$/, '');
+import { HUB_URL as HUB } from '@/lib/oxyhub';
 
 type SystemId = 'aprovacao' | 'lead' | 'coody';
 const SYSTEMS: { id: SystemId; name: string; description: string; icon: LucideIcon }[] = [

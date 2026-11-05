@@ -9,6 +9,7 @@ import { LeadDrawer } from '@/features/leads/LeadDrawer';
 import { OxyhubLogo, OxyhubMark } from '@/components/OxyhubLogo';
 import { useInstagramMenu } from '@/features/instagram/useInstagramMenu';
 import { OxyhubSwitcher, OxyhubSystemsList } from '@/components/OxyhubSwitcher';
+import { clearHubLoginAttempt } from '@/lib/oxyhub';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -31,6 +32,9 @@ const DOCK_LABEL: Record<string, string> = { '/': 'Dashboard', '/buscar': 'Busca
 
 export function AppShell() {
   const { session, signOut, team } = useApp();
+  useEffect(() => {
+    if (session) clearHubLoginAttempt();
+  }, [session]);
   const [params] = useSearchParams();
   const leadId = params.get('lead');
   const openTasks = useDb().tasks.filter((t) => t.status === 'aberta').length;
