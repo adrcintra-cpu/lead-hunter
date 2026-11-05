@@ -8,6 +8,7 @@ import { cx, ThemeSwitcher, Toasts } from '@/components/ui';
 import { LeadDrawer } from '@/features/leads/LeadDrawer';
 import { OxyhubLogo, OxyhubMark } from '@/components/OxyhubLogo';
 import { useInstagramMenu } from '@/features/instagram/useInstagramMenu';
+import { OxyhubSwitcher, OxyhubSystemsList } from '@/components/OxyhubSwitcher';
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -114,6 +115,9 @@ export function AppShell() {
             </button>
           </div>
           <nav aria-label="Navegação" className="flex flex-col gap-1 px-3 pt-2">{navLinks(() => setMenuOpen(false))}</nav>
+          <div className="mx-3 mt-5 border-t border-ink/10 pt-3">
+            <OxyhubSystemsList />
+          </div>
           <div className="mt-auto flex flex-col gap-3 p-3 pt-6">
             <div className="flex items-center justify-between gap-2 px-1">
               <span className="text-xs font-semibold text-ink-faint">Tema</span>
@@ -153,6 +157,7 @@ export function AppShell() {
         </div>
         <nav aria-label="Navegação principal" className="flex flex-col gap-1 px-3 pt-3">{navLinks()}</nav>
         <div className="mt-auto flex flex-col gap-3 p-3">
+          <OxyhubSwitcher />
           <SimClock />
           {dataMode === 'mock' && (
             <div className="glass-chip rounded-[10px] p-3">
