@@ -1117,7 +1117,9 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
       await log(db, i.ownerId, lead.id, verb, `Cadência ${d.enrollments === 'stop' ? 'encerrada' : 'pausada'}: ${d.reason}`, { enrollmentId: e.id });
     }
   }
-  if (d.stage && lead.stage !== d.stage.to && (d.stage.force || !ADVANCED_STAGES.includes(lead.stage))) await setStage(db, lead.id, d.stage.to);
+  // Quem já pediu para parar ou disse que não tem interesse não volta para "respondeu" com uma mensagem neutra.
+  const keepClosed = lead.stage === 'nao_interessado' && !d.stage?.force && d.stage?.to === 'respondeu';
+  if (d.stage && !keepClosed && lead.stage !== d.stage.to && (d.stage.force || !ADVANCED_STAGES.includes(lead.stage))) await setStage(db, lead.id, d.stage.to);
   const suggestion = d.suppress ? null : await suggestReplyDraft(db, i.ownerId, lead, company, i.channel, cls.category, camp?.id);
   if (suggestion) await log(db, i.ownerId, lead.id, 'message_generated', 'IA sugeriu uma resposta', { kind: 'reply_suggestion', messageId: suggestion.id, note: suggestion.note, intent: suggestion.intent });
   let task: { title: string; description: string; campaignId: string | null; ownerName: string | null; dueAt: string } | null = null;

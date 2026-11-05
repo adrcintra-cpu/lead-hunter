@@ -25,6 +25,28 @@ type Row = Record<string, any>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Máximo de respostas automáticas por lead em 24 h (evita conversa sem fim, inclusive com robôs). */
 const MAX_AUTO_PER_DAY = 15;
+/** Intervalo mínimo entre duas respostas automáticas para o mesmo lead. */
+const AUTO_GAP_MS = 45_000;
+
+/**
+ * Conversa encerrada: o lead pediu para não receber mensagens (ou está na lista de bloqueio),
+ * foi marcado como sem interesse, ou o BEELIE já mandou a mensagem de despedida.
+ */
+export async function conversationClosed(db: Row, leadId: string): Promise<boolean> {
+  const { data: lead } = await db.from('leads').select('owner_id, stage, companies(whatsapp, phone)').eq('id', leadId).maybeSingle();
+  if (!lead) return false;
+  if (lead.stage === 'nao_interessado') return true;
+  const since = new Date(Date.now() - 90 * 864e5).toISOString();
+  const { count: optOut } = await db.from('inbound_messages').select('id', { count: 'exact', head: true }).eq('lead_id', leadId).eq('classification', 'opt_out').gte('received_at', since);
+  if ((optOut ?? 0) > 0) return true;
+  const week = new Date(Date.now() - 7 * 864e5).toISOString();
+  const { count: bye } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('lead_id', leadId).like('template', 'IA — resposta sugerida (encerrar)%').not('sent_at', 'is', null).gte('sent_at', week);
+  if ((bye ?? 0) > 0) return true;
+  const phones = [lead.companies?.whatsapp, lead.companies?.phone].map((p: unknown) => String(p ?? '').replace(/\D/g, '').slice(-10)).filter((p: string) => p.length >= 8);
+  if (!phones.length) return false;
+  const { data: sup } = await db.from('suppression_list').select('value').eq('owner_id', lead.owner_id).eq('kind', 'phone');
+  return ((sup ?? []) as Row[]).some((r) => phones.includes(String(r.value ?? '').replace(/\D/g, '').slice(-10)));
+}
 /** Intenções em que você precisa entrar: o BEELIE responde, e a tarefa continua aberta para você. */
 const NEEDS_HUMAN = new Set(['confirmar_conversa', 'passar_para_vendedor']);
 /** Lead pediu para falar por áudio (ex.: "manda um áudio", "prefiro áudio", "fala por áudio"). */
@@ -205,7 +227,7 @@ async function tagSlot(db: Row, ownerId: string, b: Row, autoMessageId?: string)
 }
 
 type AutoReply = { messageId: string; body: string; intent: string; format: 'texto' | 'audio'; voice: string; delaySec: number };
-type Skip = 'off' | 'horario' | 'limite' | 'robo';
+type Skip = 'off' | 'horario' | 'limite' | 'robo' | 'encerrada' | 'seguida';
 
 async function companyName(db: Row, leadId: string): Promise<string> {
   const { data } = await db.from('leads').select('companies(legal_name, trade_name)').eq('id', leadId).maybeSingle();
@@ -226,7 +248,7 @@ export async function decideAndTask(db: Row, ownerId: string, leadId: string, re
   const task = result.task as { title: string; description: string; campaignId: string | null; ownerName: string | null; dueAt: string } | null;
 
   // Robô do outro lado: o BEELIE para e fica só no histórico do lead (sem tarefa: quase nunca vale a pena).
-  if (decision === 'robo') return null;
+  if (decision === 'robo' || decision === 'encerrada' || decision === 'seguida') return null;
   if (!task) return auto;
   // Mensagem de robô (boas-vindas, horário de atendimento): o BEELIE tenta chegar numa pessoa; sem tarefa.
   if (looksAutomated(String(result.body ?? ''))) return auto;
@@ -246,6 +268,25 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     () => ({ data: null }),
   );
   if (cfg && cfg.auto_reply === false) return 'off';
+
+  // Pediu para parar, não tem interesse ou o BEELIE já se despediu: não responde mais sozinho (opt-out/LGPD).
+  if (await conversationClosed(db, leadId)) {
+    const day = new Date(Date.now() - 864e5).toISOString();
+    const { count: noted } = await db.from('lead_activities').select('id', { count: 'exact', head: true }).eq('lead_id', leadId).eq('payload->>reason', 'encerrada').gte('created_at', day);
+    if (!noted) await log(db, ownerId, leadId, 'lead_updated', 'O lead pediu para parar ou não tem interesse: o BEELIE não responde mais sozinho. Se quiser retomar, responda você mesmo.', { kind: 'auto_reply_skipped', reason: 'encerrada' });
+    return 'encerrada';
+  }
+  // Várias mensagens seguidas do lead: uma resposta só (evita o BEELIE mandar duas respostas em sequência).
+  const { data: lastAuto } = await db
+    .from('messages')
+    .select('sent_at')
+    .eq('lead_id', leadId)
+    .eq('provider', 'whatsapp_qr')
+    .like('template', 'IA — resposta sugerida%')
+    .not('sent_at', 'is', null)
+    .order('sent_at', { ascending: false })
+    .limit(1);
+  if (lastAuto?.[0]?.sent_at && Date.now() - new Date(lastAuto[0].sent_at).getTime() < AUTO_GAP_MS) return 'seguida';
 
   // Quem puxou a conversa foi o lead: a janela de resposta é mais ampla que a das campanhas
   // (começa mais cedo e vai até 21h, todos os dias), mas nunca de madrugada.
