@@ -4,32 +4,39 @@
 
 /* Tokens de cor (RGB sem vírgula) — light e dark. */
 :root {
-  --bg: 243 245 249;
+  /* Linha visual Oxyhub Liquid Glass (Oxycom Content Approval). */
+  --bg: 246 246 243;
   --surface: 255 255 255;
-  --subtle: 249 250 252;
-  --muted: 235 238 244;
-  --line: 224 228 236;
-  --line-strong: 202 208 220;
-  --ink: 22 26 36;
-  --ink-soft: 72 79 94;
-  --ink-faint: 92 99 114;
-  --accent: 62 0 255;
+  --subtle: 250 250 247;
+  --muted: 239 239 234;
+  --line: 232 233 237;
+  --line-strong: 220 221 226;
+  --ink: 38 43 54;
+  --ink-soft: 74 80 92;
+  --ink-faint: 115 121 133;
+  --accent: 71 0 255;
   --accent-ink: 255 255 255;
-  --accent-soft: 236 231 255;
-  --accent-strong: 46 0 190;
+  --accent-soft: 241 235 255;
+  --accent-strong: 50 0 184;
   /* Séries de gráfico (validadas para daltonismo e contraste). */
-  --viz-1: 62 0 255;
+  --viz-1: 71 0 255;
   --viz-2: 235 104 52;
-  --good: 11 90 74;
-  --good-soft: 227 241 236;
-  --warn: 122 72 0;
-  --warn-soft: 251 240 220;
-  --bad: 138 31 31;
-  --bad-soft: 251 234 234;
+  --good: 11 122 75;
+  --good-soft: 227 245 236;
+  --warn: 138 90 0;
+  --warn-soft: 255 243 220;
+  --bad: 180 35 90;
+  --bad-soft: 253 231 239;
   --ai: 75 46 158;
   --ai-soft: 238 234 251;
-  --inverse: 22 26 36;
+  --inverse: 38 43 54;
   --inverse-ink: 255 255 255;
+  /* Fundo: quadriculado e luzes */
+  --grid-line: rgb(38 43 54 / 0.055);
+  --glow-violet: rgb(71 0 255 / 0.16);
+  --glow-magenta: rgb(242 61 126 / 0.11);
+  --glow-cyan: rgb(0 170 255 / 0.10);
+  --glow-violet-2: rgb(71 0 255 / 0.07);
   color-scheme: light;
 }
 
@@ -59,6 +66,11 @@
   --ai-soft: 40 32 70;
   --inverse: 232 236 245;
   --inverse-ink: 12 17 29;
+  --grid-line: rgb(255 255 255 / 0.045);
+  --glow-violet: rgb(91 40 255 / 0.30);
+  --glow-magenta: rgb(242 61 126 / 0.14);
+  --glow-cyan: rgb(0 170 255 / 0.14);
+  --glow-violet-2: rgb(71 0 255 / 0.14);
   color-scheme: dark;
 }
 
@@ -75,8 +87,36 @@
   #root {
     min-height: 100%;
   }
+  html {
+    background: rgb(var(--bg));
+  }
   body {
-    @apply bg-bg text-ink font-sans antialiased;
+    @apply text-ink font-sans antialiased;
+    position: relative;
+    background: transparent;
+  }
+  /* Fundo: quadriculado de 72px que se apaga nas bordas + luzes suaves (dão profundidade ao vidro). */
+  body::before,
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+  body::before {
+    background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 72px 72px, 72px 72px;
+    -webkit-mask-image: radial-gradient(ellipse 85% 70% at 50% 30%, #000 30%, transparent 85%);
+    mask-image: radial-gradient(ellipse 85% 70% at 50% 30%, #000 30%, transparent 85%);
+  }
+  body::after {
+    z-index: -2;
+    background:
+      radial-gradient(38rem 30rem at 8% -6%, var(--glow-violet), transparent 70%),
+      radial-gradient(34rem 28rem at 96% 8%, var(--glow-magenta), transparent 70%),
+      radial-gradient(40rem 32rem at 70% 105%, var(--glow-cyan), transparent 70%),
+      radial-gradient(30rem 26rem at 18% 92%, var(--glow-violet-2), transparent 70%);
   }
   :focus-visible {
     outline: 2px solid rgb(var(--accent));
@@ -85,33 +125,217 @@
 }
 
 @layer components {
-  .card {
-    @apply rounded-xl border border-line bg-surface;
+  /* ---------- Vidro líquido (Oxyhub Liquid Glass) ---------- */
+  .card,
+  .glass,
+  .glass-strong,
+  .glass-bar,
+  .glass-side,
+  .glass-chip {
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(180%);
   }
+  /* Cards e painéis: vidro translúcido, reflexo diagonal no topo e borda de luz */
+  .card,
+  .glass {
+    position: relative;
+    isolation: isolate;
+    border-radius: 22px;
+    background:
+      linear-gradient(164deg, rgb(255 255 255 / 0.85) 0%, rgb(255 255 255 / 0.45) 30%, rgb(255 255 255 / 0) 30.4%),
+      linear-gradient(180deg, rgb(236 236 242 / 0.42), rgb(244 244 248 / 0.3));
+    border: 1px solid transparent;
+    box-shadow:
+      0 0 0 1px rgb(38 43 54 / 0.13),
+      inset 0 0 0 1px rgb(255 255 255 / 0.55),
+      inset 0 2px 0 rgb(255 255 255 / 1),
+      inset 0 -2px 3px rgb(38 43 54 / 0.06),
+      0 18px 40px -22px rgb(38 43 54 / 0.28),
+      0 2px 6px -3px rgb(38 43 54 / 0.08);
+  }
+  .card::before,
+  .glass::before,
+  .glass-btn::before,
+  .btn-outline::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    padding: 2px;
+    background: linear-gradient(160deg, #fff 0%, rgb(255 255 255 / 0.5) 25%, rgb(190 192 205 / 0.35) 55%, #fff 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    pointer-events: none;
+  }
+  /* Menus, gavetas e barras flutuantes: quase opacos */
+  .glass-strong {
+    background: linear-gradient(150deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.78));
+    border: 1px solid rgb(255 255 255 / 0.85);
+    box-shadow: 0 0 0 0.5px rgb(38 43 54 / 0.08), inset 0 1px 0 rgb(255 255 255 / 1), 0 24px 48px -20px rgb(38 43 54 / 0.32);
+  }
+  /* Barra superior (celular) e menu lateral (computador) */
+  .glass-bar,
+  .glass-side {
+    background: rgb(250 250 247 / 0.62);
+  }
+  .glass-bar {
+    border-bottom: 1px solid rgb(255 255 255 / 0.7);
+    box-shadow: 0 1px 0 rgb(38 43 54 / 0.06);
+  }
+  .glass-side {
+    border-right: 1px solid rgb(255 255 255 / 0.7);
+    box-shadow: 1px 0 0 rgb(38 43 54 / 0.06);
+  }
+  .glass-chip {
+    background: rgb(255 255 255 / 0.72);
+    border: 1px solid rgb(255 255 255 / 0.9);
+    box-shadow: 0 0 0 0.5px rgb(38 43 54 / 0.08), 0 4px 10px -6px rgb(38 43 54 / 0.18);
+  }
+  /* Botão secundário em vidro */
+  .glass-btn,
+  .btn-outline {
+    position: relative;
+    isolation: isolate;
+    background: linear-gradient(170deg, rgb(255 255 255 / 0.75) 0%, rgb(255 255 255 / 0.3) 48%, rgb(255 255 255 / 0.18) 48.5%, rgb(255 255 255 / 0.4) 100%);
+    border: 1px solid transparent;
+    box-shadow: 0 0 0 1px rgb(38 43 54 / 0.11), inset 0 1px 0 #fff, 0 6px 14px -9px rgb(38 43 54 / 0.35);
+    -webkit-backdrop-filter: blur(16px) saturate(170%);
+    backdrop-filter: blur(16px) saturate(170%);
+  }
+  .glass-btn:hover,
+  .btn-outline:hover {
+    background: rgb(255 255 255 / 0.8);
+  }
+  /* Botões coloridos em vidro: a cor vem do próprio botão */
+  .glass-tint,
+  .btn-primary,
+  .btn-dark {
+    position: relative;
+    isolation: isolate;
+    background-image:
+      linear-gradient(168deg, rgb(255 255 255 / 0.42) 0%, rgb(255 255 255 / 0.12) 46%, rgb(255 255 255 / 0) 46.5%),
+      linear-gradient(180deg, rgb(255 255 255 / 0) 60%, rgb(0 0 0 / 0.12) 100%);
+    border: 1px solid transparent;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.55), inset 0 -1px 2px rgb(0 0 0 / 0.18), 0 10px 22px -12px var(--tint-shadow, rgb(38 43 54 / 0.55));
+  }
+  .glass-tint::before,
+  .btn-primary::before,
+  .btn-dark::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1.5px;
+    background: linear-gradient(160deg, rgb(255 255 255 / 0.95) 0%, rgb(255 255 255 / 0.25) 30%, rgb(255 255 255 / 0.08) 60%, rgb(255 255 255 / 0.6) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    pointer-events: none;
+  }
+
+  /* ---------- Controles ---------- */
   .btn {
-    @apply inline-flex min-h-[40px] items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-[40px] items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-accent text-accent-ink hover:opacity-90;
+    @apply btn bg-accent text-accent-ink hover:bg-[#3a00d6];
+    --tint-shadow: rgb(71 0 255 / 0.75);
   }
   .btn-dark {
     @apply btn bg-inverse text-inverse-ink hover:opacity-90;
   }
   .btn-outline {
-    @apply btn border border-line-strong bg-surface text-ink hover:bg-muted;
+    @apply btn text-ink;
   }
   .btn-ghost {
-    @apply btn text-ink-soft hover:bg-muted hover:text-ink;
+    @apply btn text-ink-soft hover:bg-ink/5 hover:text-ink;
   }
   .input {
-    @apply min-h-[42px] w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none;
+    @apply min-h-[42px] w-full rounded-xl border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none;
   }
   .label {
     @apply mb-1.5 block text-xs font-bold text-ink-soft;
   }
+  /* Título de página: Saira Light, grande e apertado */
   .h1 {
-    @apply text-[28px] font-extrabold tracking-tight;
+    @apply text-[30px] font-light leading-[1.08] md:text-[40px];
+    letter-spacing: -0.015em;
+    text-wrap: balance;
   }
+  /* Sobretítulo com quadradinho roxo */
+  .eyebrow {
+    @apply inline-flex items-center gap-2 text-xs font-semibold uppercase text-ink-faint;
+    letter-spacing: 0.08em;
+  }
+  .eyebrow::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: rgb(var(--accent));
+  }
+}
+
+/* ---------- Vidro no tema escuro: vidro fumê azulado, mesma estrutura ---------- */
+.dark .card,
+.dark .glass {
+  background:
+    linear-gradient(164deg, rgb(255 255 255 / 0.1) 0%, rgb(255 255 255 / 0.035) 30%, rgb(255 255 255 / 0) 30.4%),
+    linear-gradient(180deg, rgb(24 32 56 / 0.62), rgb(17 23 40 / 0.5));
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.07),
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    inset 0 -2px 3px rgb(0 0 0 / 0.2),
+    0 18px 40px -22px rgb(0 0 0 / 0.65);
+}
+.dark .card::before,
+.dark .glass::before,
+.dark .glass-btn::before,
+.dark .btn-outline::before {
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.28) 0%, rgb(255 255 255 / 0.06) 30%, rgb(255 255 255 / 0.03) 60%, rgb(255 255 255 / 0.16) 100%);
+}
+.dark .glass-strong {
+  background: linear-gradient(150deg, rgb(26 34 58 / 0.92), rgb(17 23 40 / 0.86));
+  border-color: rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 24px 48px -20px rgb(0 0 0 / 0.7);
+}
+.dark .glass-bar,
+.dark .glass-side {
+  background: rgb(14 20 34 / 0.6);
+  border-color: rgb(255 255 255 / 0.06);
+  box-shadow: none;
+}
+.dark .glass-chip {
+  background: rgb(26 34 58 / 0.72);
+  border-color: rgb(255 255 255 / 0.08);
+}
+.dark .glass-btn,
+.dark .btn-outline {
+  background: linear-gradient(170deg, rgb(255 255 255 / 0.12) 0%, rgb(255 255 255 / 0.05) 48%, rgb(255 255 255 / 0.02) 48.5%, rgb(255 255 255 / 0.06) 100%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), inset 0 1px 0 rgb(255 255 255 / 0.12), 0 6px 14px -9px rgb(0 0 0 / 0.6);
+}
+.dark .glass-btn:hover,
+.dark .btn-outline:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+
+/* Navegadores sem desfoque ou quem pede menos transparência: superfícies sólidas */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card, .glass, .glass-strong, .glass-bar, .glass-side, .glass-chip, .glass-btn, .btn-outline { background: rgb(var(--surface)); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .card, .glass, .glass-strong, .glass-bar, .glass-side, .glass-chip, .glass-btn {
+    background: rgb(var(--surface));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media print {
+  body::before, body::after { display: none; }
+  .card, .glass, .glass-strong, .glass-chip { background: #fff !important; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 
 /* Cores dos canais nos gráficos (validadas para daltonismo, claro e escuro). */
@@ -124,4 +348,10 @@
   --ch-whatsapp: #1fa660;
   --ch-email: #8f74ff;
   --ch-instagram: #f2508a;
+}
+
+/* Card com campo aberto (lista de sugestões) fica por cima dos cards seguintes. */
+.card:focus-within,
+.glass:focus-within {
+  z-index: 20;
 }

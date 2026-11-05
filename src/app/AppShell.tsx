@@ -59,8 +59,8 @@ export function AppShell() {
         onClick={onPick}
         className={({ isActive }) =>
           cx(
-            'flex min-h-[38px] shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 text-sm transition-colors',
-            isActive ? 'bg-muted font-bold text-ink' : 'font-medium text-ink-soft hover:bg-muted hover:text-ink',
+            'flex min-h-[38px] shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-3.5 text-sm transition-colors',
+            isActive ? 'glass-chip font-bold text-ink' : 'font-medium text-ink-soft hover:bg-ink/5 hover:text-ink',
           )
         }
       >
@@ -87,7 +87,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen overflow-x-clip md:grid md:grid-cols-[236px_minmax(0,1fr)] md:overflow-x-visible">
       {/* Celular: topo fixo com o símbolo e o menu */}
-      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-subtle/80 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl md:hidden" style={{ boxSizing: 'content-box' }}>
+      <header className="fixed inset-x-0 top-0 z-30 glass-bar flex h-14 items-center justify-between px-4 pt-[env(safe-area-inset-top)] md:hidden" style={{ boxSizing: 'content-box' }}>
         <NavLink to="/" aria-label="Ir para o Dashboard" className="-ml-1 rounded-lg p-1">
           <OxyhubMark className="h-8 w-8" />
         </NavLink>
@@ -103,7 +103,7 @@ export function AppShell() {
           id="menu-celular"
           aria-label="Menu"
           className={cx(
-            'absolute inset-y-0 right-0 flex w-[min(84vw,320px)] flex-col overflow-y-auto border-l border-line bg-subtle pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl transition-transform duration-200',
+            'absolute inset-y-0 right-0 glass-strong flex w-[min(84vw,320px)] flex-col overflow-y-auto rounded-l-[24px] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl transition-transform duration-200',
             menuOpen ? 'translate-x-0' : 'translate-x-full',
           )}
         >
@@ -126,7 +126,7 @@ export function AppShell() {
 
       {/* Celular: palco suspenso com os atalhos principais */}
       <nav aria-label="Atalhos" className="fixed inset-x-3 bottom-[calc(12px+env(safe-area-inset-bottom))] z-30 md:hidden">
-        <div className="flex w-full items-stretch justify-around gap-1 rounded-[18px] border border-line/70 bg-surface/70 p-[7px] shadow-[0_12px_40px_-12px_rgba(0,0,0,0.35)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="glass-strong flex w-full items-stretch justify-around gap-1 rounded-[24px] p-[7px]">
           {nav.filter((n) => DOCK.includes(n.to)).map(({ to, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -134,8 +134,8 @@ export function AppShell() {
               end={end}
               className={({ isActive }) =>
                 cx(
-                  'flex min-h-[60px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] transition-colors',
-                  isActive ? 'bg-muted font-bold text-[#3E00FF] dark:text-ink' : 'font-medium text-ink-soft',
+                  'flex min-h-[60px] flex-1 flex-col items-center justify-center gap-0.5 rounded-[18px] text-[11px] transition-colors',
+                  isActive ? 'glass-chip font-bold text-accent' : 'font-medium text-ink-soft',
                 )
               }
             >
@@ -146,7 +146,7 @@ export function AppShell() {
         </div>
       </nav>
 
-      <aside className="hidden border-line bg-subtle md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-r">
+      <aside className="glass-side hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-r">
         <div className="px-5 pb-3 pt-5">
           <OxyhubLogo className="h-7 w-auto" />
           <div className="mt-1.5 text-[11.5px] text-ink-faint">Lead Hunter</div>
@@ -155,7 +155,7 @@ export function AppShell() {
         <div className="mt-auto flex flex-col gap-3 p-3">
           <SimClock />
           {dataMode === 'mock' && (
-            <div className="rounded-lg border border-line bg-surface p-3">
+            <div className="glass-chip rounded-[10px] p-3">
               <div className="flex items-center gap-2 text-xs font-bold">
                 <span className="h-2 w-2 rounded-full bg-warn" />
                 Modo mock
