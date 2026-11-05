@@ -49,3 +49,5 @@ jobs:
         run: supabase functions deploy whatsapp-qr-inbound --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
       - name: email-webhook
         run: supabase functions deploy email-webhook --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+      - name: hub
+        run: supabase functions deploy hub --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
