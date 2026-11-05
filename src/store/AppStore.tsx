@@ -4,7 +4,7 @@ import { auth, type Session, type TeamInfo } from '@/services/auth';
 import { LocalRepository } from '@/services/db/localRepository';
 import { REMOTE_REFRESH_MS, SupabaseRepository } from '@/services/db/supabaseRepository';
 import { dataMode, supabase } from '@/lib/supabase';
-import { clearHubLoginAttempt, HUB_SIGN_OUT } from '@/lib/oxyhub';
+import { HUB_SIGN_OUT } from '@/lib/oxyhub';
 import type { DbState } from '@/services/db/schema';
 import { LeadHunterService } from '@/services/leadHunterService';
 
