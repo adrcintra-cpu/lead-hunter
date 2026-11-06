@@ -332,6 +332,9 @@ const BOT_PATTERNS = [
   /\bpara agilizar (o |seu |sua )?atendimento\b/,
   /\bconfira (nossas|as nossas) (ofertas|promo)/,
   /\b(digite|responda|envie) (apenas )?o n[uú]mero\b/,
+  /\bencaminhando (a |sua |seu |o seu |a sua )?(conversa|atendimento|mensagem|contato|voc[eê])\b/,
+  /\bum de nossos (atendentes|consultores|especialistas)\b/,
+  /\bbem[- ]?vind[oa](\([ao]\))? (ao|à|a) (nosso )?atendimento\b/,
 ];
 
 /** Linhas de menu numerado: "1- Comercial", "2) Financeiro", "3. Suporte", "1️⃣ Vendas". */
