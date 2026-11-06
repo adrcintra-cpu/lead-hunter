@@ -13,7 +13,7 @@
 import { describeImageClaude, logRun } from '../_shared/ai/claude.ts';
 import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent, upsertReplyTask } from '../_shared/automation/engine.ts';
 import { inWindow } from '../_shared/automation/planner.ts';
-import { looksAutomated } from '../_shared/automation/replies.ts';
+import { looksAutomated, pickMenuOption } from '../_shared/automation/replies.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from '../_shared/automation/types.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
 import { handleOwnerMessage, leadAlert, ownerSettings, samePhone } from '../_shared/automation/ownerChat.ts';
@@ -24,7 +24,11 @@ type Row = Record<string, any>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Máximo de respostas automáticas por lead em 24 h (evita conversa sem fim, inclusive com robôs). */
-const MAX_AUTO_PER_DAY = 15;
+const MAX_AUTO_PER_DAY = 10;
+/** Limite de respostas automáticas por lead em 1 hora. */
+const MAX_AUTO_PER_HOUR = 5;
+/** Quantas vezes o BEELIE escolhe opção num menu de robô (idioma, depois setor). */
+const MAX_MENU_STEPS = 2;
 /** Intervalo mínimo entre duas respostas automáticas para o mesmo lead. */
 const AUTO_GAP_MS = 45_000;
 
@@ -85,6 +89,27 @@ export function botDecision(recent: string[], lastIntent?: string): 'ok' | 'text
   if (!latestBot) return 'ok';
   const earlier = recent.slice(1).filter((b) => looksAutomated(b)).length;
   return earlier >= 1 ? 'stop' : 'text';
+}
+
+const normText = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+
+/** A última mensagem do lead é igual a uma das anteriores (robô repetindo). Mensagens curtas ("ok", "sim") não contam. */
+export function repeatsItself(recent: string[]): boolean {
+  const last = normText(recent[0] ?? '');
+  if (last.length < 25) return false;
+  return recent.slice(1, 4).some((b) => normText(b) === last);
+}
+
+/** O lead respondeu em até 8 segundos depois do BEELIE duas vezes seguidas: é máquina. */
+export function answersInstantly(inbound: { received_at?: unknown }[], sent: { sent_at?: unknown }[]): boolean {
+  const outs = sent.map((r) => new Date(String(r.sent_at)).getTime()).filter((t) => !Number.isNaN(t));
+  let fast = 0;
+  for (const r of inbound.slice(0, 4)) {
+    const at = new Date(String(r.received_at)).getTime();
+    const prev = outs.filter((t) => t <= at).sort((a, b) => b - a)[0];
+    if (prev !== undefined && at - prev <= 8000) fast++;
+  }
+  return fast >= 2;
 }
 
 /** Horário em que o BEELIE responde quem escreveu (hora de Brasília), todos os dias. */
@@ -286,7 +311,11 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     .not('sent_at', 'is', null)
     .order('sent_at', { ascending: false })
     .limit(1);
-  if (lastAuto?.[0]?.sent_at && Date.now() - new Date(lastAuto[0].sent_at).getTime() < AUTO_GAP_MS) return 'seguida';
+  if (lastAuto?.[0]?.sent_at && Date.now() - new Date(lastAuto[0].sent_at).getTime() < AUTO_GAP_MS) {
+    // Exceção: menu de robô logo depois da saudação dele (a escolha da opção sai na hora).
+    const { data: latest } = await db.from('inbound_messages').select('body').eq('lead_id', leadId).eq('channel', 'whatsapp').order('received_at', { ascending: false }).limit(1);
+    if (!pickMenuOption(String(latest?.[0]?.body ?? ''))) return 'seguida';
+  }
 
   // Quem puxou a conversa foi o lead: a janela de resposta é mais ampla que a das campanhas
   // (começa mais cedo e vai até 21h, todos os dias), mas nunca de madrugada.
@@ -309,16 +338,56 @@ async function autoDecision(db: Row, ownerId: string, leadId: string, s: { id: s
     await log(db, ownerId, leadId, 'lead_updated', `Limite de ${MAX_AUTO_PER_DAY} respostas automáticas em 24 h atingido: assuma a conversa.`, { kind: 'auto_reply_skipped', reason: 'limite' });
     return 'limite';
   }
+  const hourAgo = new Date(Date.now() - 3600e3).toISOString();
+  const { data: lastHour } = await db
+    .from('messages')
+    .select('sent_at, template')
+    .eq('lead_id', leadId)
+    .eq('provider', 'whatsapp_qr')
+    .like('template', 'IA — resposta sugerida%')
+    .gte('sent_at', hourAgo)
+    .order('sent_at', { ascending: false });
+  const hourRows = (lastHour ?? []) as Row[];
+  if (hourRows.length >= MAX_AUTO_PER_HOUR) {
+    await log(db, ownerId, leadId, 'lead_updated', `Limite de ${MAX_AUTO_PER_HOUR} respostas automáticas em 1 hora atingido: assuma a conversa.`, { kind: 'auto_reply_skipped', reason: 'limite' });
+    return 'limite';
+  }
   // Últimas mensagens do lead (mais recente primeiro): pedidos de áudio/texto valem para a conversa.
   const { data: recent } = await db
     .from('inbound_messages')
-    .select('body')
+    .select('body, received_at')
     .eq('lead_id', leadId)
     .eq('channel', 'whatsapp')
     .gte('received_at', since)
     .order('received_at', { ascending: false })
     .limit(6);
-  const bodies = ((recent ?? []) as Row[]).map((r) => String(r.body ?? ''));
+  const recentRows = (recent ?? []) as Row[];
+  const bodies = recentRows.map((r) => String(r.body ?? ''));
+
+  // Menu de robô ("1- Comercial / 2- Financeiro"): escolhe a opção que leva ao comercial, no máximo 2 vezes.
+  const option = pickMenuOption(bodies[0] ?? '');
+  if (option) {
+    const { count: steps } = await db
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('lead_id', leadId)
+      .like('template', 'IA — resposta sugerida (menu)%')
+      .not('sent_at', 'is', null)
+      .gte('sent_at', since);
+    if ((steps ?? 0) < MAX_MENU_STEPS) {
+      await db.from('messages').update({ final_content: option.n, generated_content: option.n, template: 'IA — resposta sugerida (menu)' }).eq('id', s.id).eq('owner_id', ownerId);
+      await log(db, ownerId, leadId, 'lead_updated', `Atendimento automático: o BEELIE escolheu a opção ${option.n} (${option.label.slice(0, 60)}) para chegar numa pessoa.`, { kind: 'menu_option', option: option.n });
+      return { messageId: s.id, body: option.n, intent: 'menu', format: 'texto', voice: 'cedar', delaySec: 4 + Math.floor(Math.random() * 5) };
+    }
+  }
+
+  // Robô repetindo a mesma mensagem, ou respondendo em segundos duas vezes seguidas: para.
+  if (repeatsItself(bodies) || answersInstantly(recentRows, hourRows)) {
+    const { count: noted } = await db.from('lead_activities').select('id', { count: 'exact', head: true }).eq('lead_id', leadId).eq('payload->>reason', 'robo').gte('created_at', since);
+    if (!noted) await log(db, ownerId, leadId, 'lead_updated', 'Do outro lado é um atendimento automático (robô): o BEELIE parou de responder sozinho. Fale com a empresa por outro caminho ou responda o menu você mesmo.', { kind: 'auto_reply_skipped', reason: 'robo' });
+    return 'robo';
+  }
+
   // Atendimento automático (robô) do outro lado: o Beelie não fica conversando com outra máquina.
   const bot = botDecision(bodies, lastIntent);
   if (bot === 'stop') {

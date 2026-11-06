@@ -14,7 +14,7 @@ const RULES: { cat: ReplyCategory; re: RegExp; confidence: number }[] = [
   { cat: 'ausente', re: /(ferias|fora do escritorio|ausente ate|estou ausente|out of office|retorno (no dia|em)|resposta automatica)/, confidence: 0.85 },
   { cat: 'posteriormente', re: /(mais (pra|para) frente|outro momento|proximo (mes|ano|semestre)|depois d[oa]s? |me (procure|chame|procura|chama) (em|no|na|daqui|depois|mais)|retorne (em|no|na|daqui|depois)|daqui a? ?(uns|alguns)? ?\d* ?(dias|semanas|meses)|agora nao|nao e (o )?momento|no momento nao|fim do ano|ano que vem)/, confidence: 0.75 },
   { cat: 'nao_interessado', re: /(nao (tenho|temos) interesse|sem interesse|nao (preciso|precisamos)|nao (me|nos|lhe|te) interessa|nao interessa|agradeco,? mas|obrigad[oa],? mas nao|dispenso|nao quero\b)/, confidence: 0.85 },
-  { cat: 'reuniao', re: /(reuniao|agendar|marcar (uma )?(conversa|call|horario)|ligacao|me liga|pode (me )?ligar|\bcall\b|horario|disponivel (amanha|segunda|terca|quarta|quinta|sexta)|semana que vem)/, confidence: 0.8 },
+  { cat: 'reuniao', re: /(reuniao|agendar|marcar (uma )?(conversa|call|horario)|ligacao|me liga|pode (me )?ligar|\bcall\b|(qual|que|melhor|um|algum|seu) horario|horario (bom|livre|disponivel|pra|para (conversar|falar|uma))|disponivel (amanha|segunda|terca|quarta|quinta|sexta)|semana que vem)/, confidence: 0.8 },
   { cat: 'orcamento', re: /(orcamento|cotacao|quanto custa|qual (o )?(valor|preco)|valores|precos?\b|tabela de preco|proposta comercial|manda (uma )?proposta)/, confidence: 0.8 },
   { cat: 'objecao', re: /(muito caro|caro demais|ja (temos|possuimos|usamos|trabalhamos com)|sem (verba|budget|orcamento)|nao temos (verba|budget)|fornecedor|contrato (vigente|com))/, confidence: 0.7 },
   { cat: 'informacoes', re: /(mais informac|como funciona|me (envie|manda|mande|passa) (mais )?(detalhes|material|informac|apresentacao|catalogo)|pode (me )?(enviar|mandar|explicar)|quero saber|gostaria de saber|catalogo|portfolio)/, confidence: 0.75 },
@@ -320,9 +320,52 @@ const BOT_PATTERNS = [
   /\bseja bem[- ]vind[oa] (a|à|ao)\b/,
   /\bdevido (a|à) alta demanda\b/,
   /\bagradece (o |seu |pelo )?contato\b/,
+  /\bagradecemos (a |sua |pela )?(sua )?mensagem\b/,
+  /\bhor[aá]rio de funcionamento\b/,
+  /\b(retorno|entro|entraremos|entramos|retornamos) (em contato )?(o )?mais (breve|r[aá]pido) poss[ií]vel\b/,
+  /\b(consultor|atendente|especialista|vendedor)[a-z]* j[aá] foi notificad/,
+  /\baguarde (s[oó] )?(mais )?(um|uns|alguns) (momento|instante|minuto)/,
+  /\bdeixe (sua|seu|a sua|o seu) (mensagem|recado|nome)/,
+  /\b(selecione|escolha|informe) o idioma\b/,
+  /\bplease select\b/,
+  /\bbem[- ]?vind[oa][, ]+welcome\b/,
+  /\bpara agilizar (o |seu |sua )?atendimento\b/,
+  /\bconfira (nossas|as nossas) (ofertas|promo)/,
+  /\b(digite|responda|envie) (apenas )?o n[uú]mero\b/,
 ];
+
+/** Linhas de menu numerado: "1- Comercial", "2) Financeiro", "3. Suporte", "1️⃣ Vendas". */
+const MENU_LINE = /^\s*\*?\s*(\d{1,2})\s*(?:\ufe0f?\u20e3|[-–—).:]|\s+-)\s*(.{2,60})$/;
+
+/** Opções de um menu numerado (ao menos 2 linhas seguidas no formato "número + texto"). */
+export function menuOptions(text: string): { n: string; label: string }[] {
+  const out: { n: string; label: string }[] = [];
+  for (const line of text.replace(/^\[Áudio transcrito\]\s*/i, '').split(/\r?\n/)) {
+    const m = MENU_LINE.exec(line);
+    if (m) out.push({ n: m[1], label: m[2].trim() });
+  }
+  return out.length >= 2 ? out : [];
+}
+
+const MENU_WANT = [/portugu/, /comercial/, /vend(a|e)/, /marketing/, /novos? (clientes?|neg[oó]cios)/, /or[cç]amento/, /falar com (um |uma )?(atendente|consultor|vendedor|pessoa)/, /atendimento/];
+const MENU_SKIP = /financeir|cobran|boleto|segunda via|rh\b|recursos humanos|curr[ií]culo|vagas?|trabalhe|suporte t[eé]cnico|ouvidoria|sair|voltar|encerrar/;
+
+/**
+ * Qual opção escolher num menu de robô para chegar numa pessoa do comercial:
+ * Português, depois Comercial/Vendas/Marketing (ou "falar com atendente"). Sem opção boa: null.
+ */
+export function pickMenuOption(text: string): { n: string; label: string } | null {
+  const opts = menuOptions(text);
+  if (!opts.length) return null;
+  const low = opts.map((o) => ({ ...o, l: o.label.toLowerCase() }));
+  for (const want of MENU_WANT) {
+    const hit = low.find((o) => want.test(o.l) && !MENU_SKIP.test(o.l));
+    if (hit) return { n: hit.n, label: hit.label };
+  }
+  return null;
+}
 
 export function looksAutomated(text: string): boolean {
   const t = text.replace(/^\[Áudio transcrito\]\s*/i, '').toLowerCase();
-  return BOT_PATTERNS.some((re) => re.test(t));
+  return BOT_PATTERNS.some((re) => re.test(t)) || menuOptions(text).length >= 3;
 }
