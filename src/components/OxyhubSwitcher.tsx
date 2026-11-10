@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronUp, Clapperboard, LayoutGrid, Radar, Workflow, type LucideIcon } from 'lucide-react';
+import { ChevronUp, Clapperboard, FileText, LayoutGrid, Radar, Workflow, type LucideIcon } from 'lucide-react';
 import { cx } from '@/components/ui';
 
 /**
@@ -8,11 +8,12 @@ import { cx } from '@/components/ui';
  */
 import { HUB_URL as HUB } from '@/lib/oxyhub';
 
-type SystemId = 'aprovacao' | 'lead' | 'coody';
+type SystemId = 'aprovacao' | 'lead' | 'coody' | 'proposals';
 const SYSTEMS: { id: SystemId; name: string; description: string; icon: LucideIcon }[] = [
   { id: 'aprovacao', name: 'Aprovação de conteúdo', description: 'Planejamento e aprovação', icon: Workflow },
   { id: 'lead', name: 'Lead Hunter', description: 'Prospecção e pipeline', icon: Radar },
   { id: 'coody', name: 'Coody', description: 'Workspace criativo', icon: Clapperboard },
+  { id: 'proposals', name: 'Oxycom Proposals', description: 'Propostas comerciais', icon: FileText },
 ];
 const CURRENT: SystemId = 'lead';
 
