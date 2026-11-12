@@ -267,14 +267,17 @@ export function withSiteInvite(body: string, intent: string, site: string | null
     const text = t.toLowerCase();
     return (/instagram\.com\//i.test(u) ? text : text.replace(/instagram\.com\/\S*/g, '')).includes(hostOf(u));
   };
-  const fresh = (u: string | null) => !!u && !said(body, u) && !alreadySent.some((t) => said(t, u));
-  const s = fresh(site) ? site : null;
-  const ig = fresh(instagram) ? instagram : null;
+  // Despedida (encerrar): o convite vai SEMPRE, a menos que a própria mensagem já tenha o site.
+  // Conversa confirmada: só se o site ainda não foi enviado nesta conversa.
+  const closing = intent === 'encerrar';
+  const fresh = (u: string | null) => !!u && !said(body, u) && (closing || !alreadySent.some((t) => said(t, u)));
+  const s = fresh(site) ? hostOf(site!) : null;
+  const ig = fresh(instagram) && !alreadySent.some((t) => said(t, instagram!)) ? instagram : null;
   if (!s && !ig) return body;
   const invite = s && ig
-    ? `Se quiser saber mais sobre a gente, é só acessar ${s} ou seguir no Instagram: ${ig}`
+    ? `Se quiser conhecer mais sobre nós, acesse ${s} ou siga no Instagram: ${ig}`
     : s
-      ? `Se quiser saber mais sobre a gente, é só acessar ${s}`
+      ? `Se quiser conhecer mais sobre nós, acesse ${s}`
       : `Se quiser acompanhar a gente, estamos no Instagram: ${ig}`;
   return `${body.trim()}\n\n${invite}`;
 }
