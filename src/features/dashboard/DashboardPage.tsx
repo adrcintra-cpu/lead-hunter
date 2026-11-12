@@ -11,6 +11,7 @@ import { useLeadDrawer } from '@/app/useLeadDrawer';
 import { TaskItem } from '@/features/tasks/TasksPage';
 import { StatusChip } from '@/features/campaigns/CampaignsPage';
 import { ChannelChart } from './ChannelChart';
+import { MenuNavStats } from './MenuNavStats';
 
 /** Cartão de número; com `to`, abre a lista correspondente. */
 function Kpi({ label, value, note, accent, to }: { label: string; value: string | number; note?: string; accent?: boolean; to?: string }) {
@@ -184,6 +185,7 @@ export function DashboardPage() {
           </div>
 
           <ChannelChart />
+          <MenuNavStats />
 
           <section className="card px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2">

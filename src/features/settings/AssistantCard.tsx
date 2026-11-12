@@ -220,6 +220,42 @@ export function AssistantCard() {
                 )}
               </span>
             </label>
+            {prefs.menuMode !== undefined && (
+              <div className="mt-4 border-t border-line pt-4">
+                <span className="block text-sm font-bold">Menus de atendimento automático</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">
+                  Quando a empresa responde com um robô (“1 - Vendas, 2 - Compras…”), o {s.name || 'assistente'} escolhe a opção que leva ao marketing ou comercial, responde só o que o menu pede e, ao chegar numa pessoa, se apresenta como assistente virtual e pergunta pelo responsável. Nunca informa CPF/CNPJ nem se passa por cliente; sem rota, para e cria uma tarefa.
+                </span>
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <div className="min-w-0">
+                    <label htmlFor="as-menu-mode" className="label">Modo</label>
+                    <select
+                      id="as-menu-mode"
+                      className="input w-auto min-w-0"
+                      value={prefs.menuMode}
+                      disabled={!prefsAvailable}
+                      onChange={(e) => void updatePrefs({ ...prefs, menuMode: e.target.value as AssistantPrefs['menuMode'] })}
+                    >
+                      <option value="automatico">Automático — navega sozinho</option>
+                      <option value="supervisionado">Supervisionado — sugere e espera você</option>
+                      <option value="desligado">Desligado — só avisa você</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="as-menu-steps" className="label">Máximo de etapas</label>
+                    <select
+                      id="as-menu-steps"
+                      className="input w-auto"
+                      value={prefs.menuMaxSteps ?? 5}
+                      disabled={!prefsAvailable || prefs.menuMode === 'desligado'}
+                      onChange={(e) => void updatePrefs({ ...prefs, menuMaxSteps: Number(e.target.value) })}
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
             <OwnerChannel
               prefs={prefs}
               draft={ownerDraft}

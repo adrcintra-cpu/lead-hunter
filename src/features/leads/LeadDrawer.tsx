@@ -16,6 +16,7 @@ import { SendConnectedButton } from './SendConnectedButton';
 import { Fold, PanelTitle, since } from './Fold';
 import { readIntel, stageLabel as beelieStageLabel, TEMPERATURE_LABEL } from '../../../supabase/functions/_shared/automation/beelie.ts';
 import { BeeliePanel } from './BeeliePanel';
+import { MenuNavFold } from './MenuNavFold';
 
 export function LeadDrawer({ leadId }: { leadId: string }) {
   const { close } = useLeadDrawer();
@@ -121,6 +122,7 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
           <Fold leadId={lead.id} id="beelie" title="Inteligência comercial · Beelie" positive={ev.beelie.pos} summary={ev.beelie.summary}>
             <BeeliePanel lead={lead} />
           </Fold>
+          <MenuNavFold leadId={lead.id} />
           <Fold leadId={lead.id} id="campanha" title="Campanha e cadência" positive={ev.campanha.pos} negative={ev.campanha.neg} summary={ev.campanha.summary}>
             <CadencePanel leadId={lead.id} />
           </Fold>

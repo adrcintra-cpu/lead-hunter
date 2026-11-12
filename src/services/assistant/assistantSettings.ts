@@ -35,6 +35,10 @@ export interface AssistantPrefs {
   ownerAlerts?: boolean;
   /** Hora do resumo diário (dias úteis); null = sem resumo. */
   ownerReportHour?: number | null;
+  /** Menus de atendimento automático: o BEELIE navega sozinho, sugere a opção ou não navega. */
+  menuMode?: 'automatico' | 'supervisionado' | 'desligado';
+  /** Máximo de etapas por tentativa de navegação (1 a 10). */
+  menuMaxSteps?: number;
 }
 
 export const DEFAULT_PREFS: AssistantPrefs = { autoReply: true, replyFormat: 'texto', voice: 'cedar' };
@@ -91,6 +95,11 @@ export async function loadAssistant(): Promise<AssistantState> {
     prefs.ownerAlerts = ow.data ? ow.data.owner_alerts !== false : true;
     prefs.ownerReportHour = ow.data ? (typeof ow.data.owner_report_hour === 'number' ? ow.data.owner_report_hour : null) : 18;
   }
+  const mn = await supabase.from('assistant_settings').select('menu_mode, menu_max_steps').eq('owner_id', (await accountId()) ?? '').maybeSingle();
+  if (!mn.error) {
+    prefs.menuMode = mn.data?.menu_mode === 'supervisionado' || mn.data?.menu_mode === 'desligado' ? mn.data.menu_mode : 'automatico';
+    prefs.menuMaxSteps = typeof mn.data?.menu_max_steps === 'number' ? mn.data.menu_max_steps : 5;
+  }
   return { settings: withDefaults(data), prefs, prefsAvailable: !pr.error, custom: !!data?.persona, available: true };
 }
 
@@ -129,6 +138,10 @@ export async function saveAssistant(s: AssistantSettings, prefs?: AssistantPrefs
     row.owner_whatsapp = prefs.ownerWhatsapp.trim() || null;
     row.owner_alerts = prefs.ownerAlerts !== false;
     row.owner_report_hour = prefs.ownerReportHour ?? null;
+  }
+  if (prefs?.menuMode !== undefined) {
+    row.menu_mode = prefs.menuMode;
+    row.menu_max_steps = Math.min(10, Math.max(1, Math.round(prefs.menuMaxSteps ?? 5)));
   }
   const { error } = await supabase.from('assistant_settings').upsert(row);
   if (error) throw new Error(missingTable(error.message) ? 'Falta aplicar a migration do assistente (npx supabase db push).' : error.message);
