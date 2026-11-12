@@ -13,8 +13,9 @@
 import { describeImageClaude, logRun } from '../_shared/ai/claude.ts';
 import { adminClient, handleInbound, log, qrCampaignFallback, qrCampaignSent, upsertReplyTask } from '../_shared/automation/engine.ts';
 import { inWindow } from '../_shared/automation/planner.ts';
-import { looksAutomated } from '../_shared/automation/replies.ts';
+import { looksAutomated, menuOptions } from '../_shared/automation/replies.ts';
 import { navigate, type NavMode } from '../_shared/automation/menuNavDb.ts';
+import { robotRedirect } from '../_shared/automation/robotContacts.ts';
 import { DEFAULT_SEND_WINDOW, type SendWindow } from '../_shared/automation/types.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
 import { handleOwnerMessage, leadAlert, ownerSettings, samePhone } from '../_shared/automation/ownerChat.ts';
@@ -266,6 +267,10 @@ async function companyName(db: Row, leadId: string): Promise<string> {
  */
 export async function decideAndTask(db: Row, ownerId: string, leadId: string, result: Row | null): Promise<AutoReply | null> {
   if (!result) return null;
+  // Robô que indica outro canal ("para reuniões, use direcao@..."): o BEELIE manda e-mail para lá,
+  // não insiste no WhatsApp e não cria tarefa (vale mesmo fora do horário ou com a resposta automática desligada).
+  const text = String(result.body ?? '');
+  if (looksAutomated(text) && menuOptions(text).length < 2 && (await robotRedirect(db, ownerId, leadId, text).catch(() => false))) return null;
   const s = result.suggestion as { id: string; body: string; intent: string } | null;
   const decision: AutoReply | Skip | null = s ? await autoDecision(db, ownerId, leadId, s, result) : null;
   const auto = decision && typeof decision === 'object' ? decision : null;
