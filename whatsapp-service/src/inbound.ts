@@ -57,6 +57,8 @@ export function textOf(message: any): string | null {
     m.listResponseMessage?.title ??
     m.templateButtonReplyMessage?.selectedDisplayText;
   if (typeof text === 'string' && text.trim()) return text.trim().slice(0, 4000);
+  const menu = interactiveText(m);
+  if (menu) return menu;
   if (m.audioMessage) return '[Áudio recebido — ouça no WhatsApp]';
   if (m.imageMessage) return '[Imagem recebida — veja no WhatsApp]';
   if (m.videoMessage) return '[Vídeo recebido — veja no WhatsApp]';
@@ -70,6 +72,49 @@ export function textOf(message: any): string | null {
   }
   if (m.contactMessage || m.contactsArrayMessage || m.locationMessage) return '[Contato ou localização recebidos — veja no WhatsApp]';
   return null;
+}
+
+/**
+ * Menus com botões ou lista (robôs de atendimento): vira texto com as opções numeradas,
+ * marcado com "[Botões]" para o BEELIE responder com o texto da opção (botão não aceita número).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function interactiveText(m: any): string | null {
+  const s = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  let intro = '';
+  let opts: string[] = [];
+  if (m.buttonsMessage) {
+    intro = s(m.buttonsMessage.contentText) || s(m.buttonsMessage.text);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    opts = (m.buttonsMessage.buttons ?? []).map((b: any) => s(b?.buttonText?.displayText));
+  } else if (m.listMessage) {
+    intro = [s(m.listMessage.title), s(m.listMessage.description)].filter(Boolean).join('\n');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    opts = (m.listMessage.sections ?? []).flatMap((sec: any) => (sec?.rows ?? []).map((r: any) => s(r?.title)));
+  } else if (m.templateMessage?.hydratedTemplate || m.templateMessage?.hydratedFourRowTemplate) {
+    const t = m.templateMessage.hydratedTemplate ?? m.templateMessage.hydratedFourRowTemplate;
+    intro = s(t.hydratedContentText);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    opts = (t.hydratedButtons ?? []).map((b: any) => s(b?.quickReplyButton?.displayText));
+  } else if (m.interactiveMessage) {
+    const im = m.interactiveMessage;
+    intro = [s(im.header?.title), s(im.body?.text)].filter(Boolean).join('\n');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    opts = (im.nativeFlowMessage?.buttons ?? []).flatMap((b: any) => {
+      try {
+        const p = JSON.parse(String(b?.buttonParamsJson ?? '{}'));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rows = (p.sections ?? []).flatMap((sec: any) => (sec?.rows ?? []).map((r: any) => s(r?.title)));
+        return rows.length ? rows : [s(p.display_text)];
+      } catch {
+        return [];
+      }
+    });
+  }
+  opts = opts.filter(Boolean).slice(0, 20);
+  if (!intro && !opts.length) return null;
+  const lines = opts.map((o, i) => `${i + 1} - ${o.slice(0, 60)}`);
+  return [`[Botões] ${intro}`.trim(), ...lines].join('\n').slice(0, 4000);
 }
 
 /** "Nome — telefone(s) — e-mail" a partir de um cartão de contato (vCard) do WhatsApp. */

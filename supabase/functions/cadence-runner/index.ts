@@ -5,6 +5,7 @@
 
 import { adminClient, runDue } from '../_shared/automation/engine.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
+import { closeSilentNavigations } from '../_shared/automation/menuNavDb.ts';
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Método não permitido', { status: 405 });
@@ -12,8 +13,11 @@ Deno.serve(async (req) => {
   const auth = req.headers.get('Authorization') ?? '';
   if (!secret || !timingSafeEqual(auth, `Bearer ${secret}`)) return new Response('Não autorizado', { status: 401 });
   try {
-    const summary = await runDue(adminClient());
-    return Response.json(summary);
+    const db = adminClient();
+    const summary = await runDue(db);
+    // Navegações em menu paradas há 24 h: encerra como "sem resposta" e passa para você.
+    const silentNavs = await closeSilentNavigations(db).catch(() => 0);
+    return Response.json({ ...summary, silentNavs });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

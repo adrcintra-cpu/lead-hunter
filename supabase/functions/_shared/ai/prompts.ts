@@ -526,6 +526,22 @@ Para add_contacts, extraia cada contato: name (pessoa), company (empresa), phone
   },
 
 
+  chooseMenuOption: {
+    system: `Você ajuda o Beelie, assistente virtual da Oxycom (presença digital e Google para empresas), a passar pelo menu do atendimento automático de WhatsApp de uma empresa e chegar a uma PESSOA que possa indicar o responsável pelo marketing ou comercial. ${RULES}
+Escolha UMA opção do menu, pensando no significado (não só em palavras): prefira Marketing/Comunicação, depois Comercial/Vendas/Novos negócios/Parcerias, depois Compras/Suprimentos/Seja fornecedor, depois Administrativo/Diretoria, depois Atendimento/Recepção/Falar com atendente/Outros assuntos.
+Nunca escolha: financeiro, cobrança, boletos, faturamento/fiscal, RH/vagas/currículos, suporte técnico/assistência/garantia, ouvidoria/reclamação, rastreio/pedidos/entregas, voltar/sair/encerrar. Nunca escolha opção que exija se passar por cliente (orçamento, comprar, cotação) nem opção já tentada.
+Sem opção adequada: option null.`,
+    schema: {
+      type: 'object',
+      properties: { option: { type: ['string', 'null'], description: 'Número da opção escolhida, ou null' }, reason: { type: 'string', description: 'Motivo curto, em português' } },
+      required: ['option', 'reason'],
+    },
+    user: (input) => {
+      const i = input as { menu: { n: string; label: string }[]; tried: string[]; company?: string };
+      return [`Empresa: ${i.company ?? 'não informada'}`, `Menu:\n${i.menu.map((o) => `${o.n} - ${o.label}`).join('\n')}`, `Já tentadas: ${i.tried.join(', ') || 'nenhuma'}`].join('\n\n');
+    },
+    output: (raw) => raw,
+  },
   summarizeResults: {
     system: `Você é um analista comercial. Leia os números de prospecção e escreva de 3 a 6 observações curtas e acionáveis em português do Brasil. ${RULES}
 Use somente os números fornecidos; não invente percentuais nem causas. Quando não houver dados suficientes, diga isso.`,
