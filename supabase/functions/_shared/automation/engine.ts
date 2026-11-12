@@ -8,6 +8,7 @@ import { withDefaults } from '../ai/assistantDefaults.ts';
 import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { emailHtml, sendEmail } from '../channels/resend.ts';
+import { emailProblem } from './emailCheck.ts';
 import { inWindow, nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, looksAutomated, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, cleanPersonName, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
@@ -493,6 +494,12 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
     must<Row[]>(db.from('messages').select('status').eq('enrollment_id', e.id)),
   ]);
   const real = replies.filter((r) => r.classification !== 'ausente');
+  // E-mail que já voltou, com formato inválido ou de domínio que não recebe mensagens: a cadência segue como se não houvesse e-mail.
+  const emailIssue = lead.email ? await emailProblem(db, owner, lead.email) : 'sem e-mail';
+  if (lead.email && emailIssue) {
+    const { count: noted } = await db.from('lead_activities').select('id', { count: 'exact', head: true }).eq('lead_id', lead.id).eq('payload->>kind', 'email_skipped');
+    if (!noted) await log(db, owner, lead.id, 'lead_updated', `E-mail não usado na cadência: ${emailIssue}.`, { kind: 'email_skipped', reason: emailIssue });
+  }
   const ctx: PlanContext = {
     now: new Date(),
     replied: real.length > 0,
@@ -505,7 +512,7 @@ async function runEnrollment(db: Db, e: Row, camp: Row): Promise<{ sent: number;
     // se WHATSAPP_AUTO=true e as credenciais estiverem configuradas.
     whatsappAuto: Deno.env.get('WHATSAPP_AUTO') === 'true' && hasWhatsapp(),
     closed: ['cliente', 'nao_interessado'].includes(lead.stage),
-    hasEmail: !!lead.email,
+    hasEmail: !emailIssue,
     window: (p.send_window as SendWindow) ?? DEFAULT_SEND_WINDOW,
   };
 
