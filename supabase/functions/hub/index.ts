@@ -4,6 +4,7 @@
 // O Oxyhub chama esta função do servidor dele, com o cabeçalho x-hub-secret, para:
 //   { action: "pendencias", email }        → o que essa pessoa tem para fazer no Lead Hunter
 //   { action: "acesso", email, para? }     → um link de acesso de uso único (a pessoa entra já logada)
+//   { action: "eventos", email, from, to } → atividades com data para o OxyCalendar (somente leitura)
 //
 // Secrets (Supabase → Edge Functions → Secrets):
 //   HUB_SECRET  o mesmo valor de LEAD_HUB_SECRET no Oxyhub (32+ caracteres)
@@ -45,6 +46,108 @@ function endOfTodayBrasilia() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23 + 3, 59, 59)).toISOString();
 }
 
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Início do dia (Brasília) em UTC. */
+const dayStartUtc = (day: string) => `${day}T03:00:00.000Z`;
+const addDays = (day: string, n: number) => {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const safeInner = (p: unknown) => (typeof p === 'string' && p.startsWith('/') && !p.startsWith('//') ? p : null);
+
+/** Eventos para o OxyCalendar: só o que tem data, horário ou prazo (nunca cada mensagem). */
+async function eventos(owner: string, from: string, to: string) {
+  const start = dayStartUtc(from);
+  const end = dayStartUtc(addDays(to, 1));
+  const now = new Date().toISOString();
+  const [tasks, camps] = await Promise.all([
+    admin
+      .from('tasks')
+      .select('id, lead_id, campaign_id, title, description, owner_name, due_at, status, source, action_url, created_at, done_at, leads(company_id, companies(legal_name, trade_name))')
+      .eq('owner_id', owner)
+      .not('due_at', 'is', null)
+      .gte('due_at', start)
+      .lt('due_at', end)
+      .order('due_at')
+      .limit(1000),
+    admin
+      .from('campaigns')
+      .select('id, name, objective, owner_name, status, channel, scheduled_at, started_at, finished_at, updated_at')
+      .eq('owner_id', owner)
+      .limit(500),
+  ]);
+  if (tasks.error) throw tasks.error;
+  if (camps.error) throw camps.error;
+
+  const SOURCE_LABEL: Record<string, string> = { manual: 'Tarefa comercial', cadencia: 'Follow-up de cadência', resposta: 'Retorno ao lead' };
+  const out: Record<string, unknown>[] = [];
+  for (const t of tasks.data ?? []) {
+    // deno-lint-ignore no-explicit-any
+    const company = (t as any).leads?.companies;
+    const open = t.status === 'aberta';
+    out.push({
+      source_record_id: t.id,
+      kind: 'tarefa',
+      kind_label: SOURCE_LABEL[t.source] ?? 'Tarefa comercial',
+      title: t.title,
+      description: t.description,
+      start_at: t.due_at,
+      end_at: null,
+      all_day: false,
+      client_id: t.lead_id,
+      client_name: company ? company.trade_name || company.legal_name : null,
+      responsible_user_id: owner,
+      responsible_name: t.owner_name,
+      status: open ? (t.due_at < now ? 'Vencida' : 'Pendente') : 'Concluída',
+      status_tone: open ? (t.due_at < now ? 'changes' : 'awaiting') : 'approved',
+      overdue: open && t.due_at < now,
+      derived: false,
+      source_path: safeInner(t.action_url) ?? (t.lead_id ? `/leads/${t.lead_id}` : '/tarefas'),
+      updated_at: t.done_at ?? t.created_at,
+    });
+  }
+  const CAMP: Record<string, [string, string]> = {
+    rascunho: ['Rascunho', 'draft'],
+    agendada: ['Agendada', 'awaiting'],
+    ativa: ['Ativa', 'primary'],
+    pausada: ['Pausada', 'draft'],
+    finalizada: ['Finalizada', 'muted'],
+  };
+  for (const c of camps.data ?? []) {
+    const [label, tone] = CAMP[c.status] ?? [c.status, 'primary'];
+    const marks: [string, string, string | null][] = [
+      ['campanha_inicio', c.status === 'agendada' ? 'Início programado da campanha' : 'Início da campanha', c.started_at ?? c.scheduled_at],
+      ['campanha_fim', 'Fim da campanha', c.finished_at],
+    ];
+    for (const [kind, kindLabel, at] of marks) {
+      if (!at || at < start || at >= end) continue;
+      out.push({
+        source_record_id: c.id,
+        kind,
+        kind_label: kindLabel,
+        title: c.name,
+        description: c.objective || null,
+        start_at: at,
+        end_at: null,
+        all_day: false,
+        client_id: null,
+        client_name: null,
+        responsible_user_id: owner,
+        responsible_name: c.owner_name,
+        status: label,
+        status_tone: tone,
+        overdue: false,
+        derived: false,
+        source_path: `/campanhas/${c.id}`,
+        updated_at: c.updated_at,
+      });
+    }
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405);
   if (SECRET.length < 32 || !sameSecret(req.headers.get('x-hub-secret') ?? '', SECRET)) return json({ error: 'forbidden' }, 403);
@@ -71,6 +174,17 @@ Deno.serve(async (req) => {
     const { data, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email, options: { redirectTo: SITE + para } });
     if (error || !data?.properties?.action_link) return json({ error: error?.message ?? 'Não foi possível gerar o acesso' }, 500);
     return json({ access: true, url: data.properties.action_link });
+  }
+
+  if (body.action === 'eventos') {
+    // deno-lint-ignore no-explicit-any
+    const { from, to } = body as any;
+    if (!DAY_RE.test(String(from)) || !DAY_RE.test(String(to)) || to < from) return json({ error: 'Período inválido' }, 400);
+    try {
+      return json({ access: true, events: await eventos(owner, from, to) });
+    } catch (e) {
+      return json({ error: e instanceof Error ? e.message : 'Erro ao ler eventos' }, 500);
+    }
   }
 
   if (body.action === 'pendencias') {
