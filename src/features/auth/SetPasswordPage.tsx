@@ -6,8 +6,7 @@ import { auth, SESSION_LOST } from '@/services/auth';
 import { Spinner } from '@/components/ui';
 import { AuthLayout } from './LoginPage';
 
-const field =
-  'w-full rounded-xl border border-white/20 bg-transparent px-3.5 py-3 text-[15px] text-white placeholder:text-white/40 outline-none transition-colors focus:border-[#6b8bff] focus:ring-2 focus:ring-[#6b8bff]/30';
+const field = 'input min-h-[46px] text-[15px]';
 
 /** Chegou pelo link do convite ou do "Esqueci a senha": cria a senha (e o nome, no primeiro acesso). */
 export function SetPasswordPage() {
@@ -25,11 +24,11 @@ export function SetPasswordPage() {
   if (!session) {
     return (
       <AuthLayout>
-        <h1 className="text-center text-xl font-bold">Link expirado ou inválido</h1>
-        <p className="mt-3 text-center text-[14px] leading-relaxed text-white/70">
+        <h1 className="text-center text-[28px] font-light leading-tight tracking-[-0.015em]">Link expirado ou inválido</h1>
+        <p className="mt-3 text-center text-[14px] leading-relaxed text-ink-soft">
           Os links de convite e de senha nova valem por pouco tempo e só uma vez. Peça um convite novo ao administrador ou use “Esqueci a senha” na tela de login.
         </p>
-        <button type="button" onClick={() => navigate('/login')} className="mt-8 h-12 w-full rounded-full bg-[#1d3a8a] text-[14px] font-bold uppercase tracking-[0.18em] text-[#c9d6ff] hover:bg-[#2546a6]">
+        <button type="button" onClick={() => navigate('/login')} className="mt-8 h-12 w-full btn-primary glass-tint text-[15px]">
           Ir para o login
         </button>
       </AuthLayout>
@@ -55,24 +54,24 @@ export function SetPasswordPage() {
   return (
     <AuthLayout>
       <form onSubmit={submit} noValidate className="flex flex-col">
-        <h1 className="text-center text-xl font-bold">{invite ? 'Bem-vindo à equipe' : 'Crie uma senha nova'}</h1>
-        <p className="mb-6 mt-2 text-center text-[14px] text-white/60">{session.email}</p>
+        <h1 className="text-center text-[28px] font-light leading-tight tracking-[-0.015em]">{invite ? 'Bem-vindo à equipe' : 'Crie uma senha nova'}</h1>
+        <p className="mb-6 mt-2 text-center text-[14px] text-ink-soft">{session.email}</p>
         {invite && (
           <>
-            <label htmlFor="sp-name" className="mb-1.5 text-[13px] text-white/60">Seu nome</label>
+            <label htmlFor="sp-name" className="label text-[14px]">Seu nome</label>
             <input id="sp-name" className={`${field} mb-5`} placeholder="Como você quer ser chamado" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
           </>
         )}
-        <label htmlFor="sp-pass" className="mb-1.5 text-[13px] text-white/60">Senha (mínimo 8 caracteres)</label>
+        <label htmlFor="sp-pass" className="label text-[14px]">Senha (mínimo 8 caracteres)</label>
         <div className="relative">
           <input id="sp-pass" type={show ? 'text' : 'password'} className={`${field} pr-11`} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
-          <button type="button" onClick={() => setShow(!show)} className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-white/50 hover:text-white" aria-label={show ? 'Esconder senha' : 'Mostrar senha'}>
+          <button type="button" onClick={() => setShow(!show)} className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-ink-faint hover:text-ink" aria-label={show ? 'Esconder senha' : 'Mostrar senha'}>
             {show ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
           </button>
         </div>
-        <label htmlFor="sp-confirm" className="mb-1.5 mt-5 text-[13px] text-white/60">Repita a senha</label>
+        <label htmlFor="sp-confirm" className="label mt-5 text-[14px]">Repita a senha</label>
         <input id="sp-confirm" type={show ? 'text' : 'password'} className={field} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
-        {error && <div role="alert" className="mt-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-[14px] text-red-200">{error}</div>}
+        {error && <div role="alert" className="mt-5 rounded-xl bg-bad-soft px-4 py-3 text-[14px] font-medium text-bad">{error}</div>}
         {error === SESSION_LOST && (
           <button
             type="button"
@@ -90,13 +89,13 @@ export function SetPasswordPage() {
                 setBusy(false);
               }
             }}
-            className="mt-3 h-11 rounded-full border border-white/25 text-[13px] font-bold uppercase tracking-[0.14em] text-white/85 hover:bg-white/10 disabled:opacity-60"
+            className="btn-outline glass-btn mt-3 h-11 text-[15px] disabled:opacity-60"
           >
             Enviar link novo
           </button>
         )}
-        {resent && <div role="status" className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-[14px] text-emerald-100">Link novo enviado para {session.email}. Abra o e-mail e toque no link para criar a senha.</div>}
-        <button type="submit" disabled={busy} className="mt-8 flex h-12 items-center justify-center gap-2 rounded-full bg-[#1d3a8a] text-[14px] font-bold uppercase tracking-[0.18em] text-[#c9d6ff] transition-colors hover:bg-[#2546a6] disabled:opacity-60">
+        {resent && <div role="status" className="mt-5 rounded-xl bg-good-soft px-4 py-3 text-[14px] font-medium text-good">Link novo enviado para {session.email}. Abra o e-mail e toque no link para criar a senha.</div>}
+        <button type="submit" disabled={busy} className="mt-8 flex h-12 items-center justify-center gap-2 btn-primary glass-tint text-[15px] disabled:opacity-60">
           {busy && <Spinner />} Salvar senha
         </button>
       </form>
