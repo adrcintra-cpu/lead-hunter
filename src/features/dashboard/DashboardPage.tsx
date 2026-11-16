@@ -104,14 +104,16 @@ export function DashboardPage() {
     }
   }
 
-  const today = service.now().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const todayRaw = service.now().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+  // Só a primeira letra maiúscula: "Domingo, 15 de novembro" (CSS capitalize deixaria "De Novembro")
+  const today = todayRaw.charAt(0).toUpperCase() + todayRaw.slice(1);
   const total = Math.max(1, db.leads.length);
 
   return (
     <div className="mx-auto flex max-w-[1240px] flex-col gap-6">
       <PageHeader
         title="Visão geral da prospecção"
-        subtitle={<span className="capitalize">{today}</span>}
+        subtitle={<span>{today}</span>}
         actions={
           <>
             <Link to="/campanhas" className="btn-outline"><Megaphone className="h-4 w-4" /> Campanhas</Link>
