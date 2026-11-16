@@ -42,7 +42,7 @@ export function SetPasswordPage() {
     setBusy(true);
     try {
       await auth.setPassword(password, name.trim() || undefined);
-      toast('Senha criada. Bem-vindo ao Lead Hunter!', 'success');
+      toast('Senha criada. Bem-vindo ao OxySDR!', 'success');
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível salvar a senha.');

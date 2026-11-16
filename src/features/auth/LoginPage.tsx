@@ -17,7 +17,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         <div className="glass w-full max-w-[440px] rounded-[24px] px-7 py-10 sm:px-10">
           <div className="mb-9 flex flex-col items-center gap-2">
             <OxyhubLogo className="h-[33px] w-auto" />
-            <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Lead Hunter</span>
+            <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-faint">OxySDR</span>
           </div>
           {children}
         </div>

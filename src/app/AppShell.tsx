@@ -157,7 +157,7 @@ export function AppShell() {
       <aside className="glass-side hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-r">
         <div className="px-5 pb-3 pt-5">
           <OxyhubLogo className="h-7 w-auto" />
-          <div className="mt-1.5 text-[11.5px] text-ink-faint">Lead Hunter</div>
+          <div className="mt-1.5 text-[11.5px] text-ink-faint">OxySDR</div>
         </div>
         <nav aria-label="Navegação principal" className="flex flex-col gap-1 px-3 pt-3">{navLinks()}</nav>
         <div className="mt-auto flex flex-col gap-3 p-3">

@@ -10,10 +10,10 @@ import { HUB_URL as HUB } from '@/lib/oxyhub';
 
 type SystemId = 'aprovacao' | 'lead' | 'coody' | 'proposals';
 const SYSTEMS: { id: SystemId; name: string; description: string; icon: LucideIcon }[] = [
-  { id: 'aprovacao', name: 'Aprovação de conteúdo', description: 'Planejamento e aprovação', icon: Workflow },
-  { id: 'lead', name: 'Lead Hunter', description: 'Prospecção e pipeline', icon: Radar },
-  { id: 'coody', name: 'Coody', description: 'Workspace criativo', icon: Clapperboard },
-  { id: 'proposals', name: 'Oxycom Proposals', description: 'Propostas comerciais', icon: FileText },
+  { id: 'aprovacao', name: 'OxyPlanning', description: 'Planejamento e aprovação', icon: Workflow },
+  { id: 'lead', name: 'OxySDR', description: 'Prospecção e pipeline', icon: Radar },
+  { id: 'coody', name: 'OxyCreate', description: 'Workspace criativo', icon: Clapperboard },
+  { id: 'proposals', name: 'OxyProposal', description: 'Propostas comerciais', icon: FileText },
 ];
 const CURRENT: SystemId = 'lead';
 

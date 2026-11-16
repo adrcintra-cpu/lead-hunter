@@ -343,7 +343,7 @@ function StartFresh() {
     setBusy(true);
     try {
       await service.startFresh();
-      toast('Tudo limpo. O Lead Hunter está pronto para começar.', 'success');
+      toast('Tudo limpo. O OxySDR está pronto para começar.', 'success');
       setOpen(false);
       setTyped('');
     } catch (e) {

@@ -214,7 +214,7 @@ export function WhatsAppConnectionCard() {
           onConfirm={() => void (confirm.kind === 'remove' ? remove(confirm.n) : disconnect(confirm.n))}
         >
           {confirm.kind === 'remove'
-            ? 'O número sai do Lead Hunter. Os leads que conversavam por ele passam a receber pelo número com mais folga.'
+            ? 'O número sai do OxySDR. Os leads que conversavam por ele passam a receber pelo número com mais folga.'
             : 'Os leads deste número esperam até você conectar de novo (não mudam de número).'}
         </ConfirmDialog>
       )}

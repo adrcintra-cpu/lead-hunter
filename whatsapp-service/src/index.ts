@@ -140,7 +140,7 @@ async function authenticate(req: IncomingMessage): Promise<string> {
     if (status === undefined || status >= 500 || /fetch|network|ENOTFOUND|Invalid API key|apikey/i.test(error?.message ?? '')) {
       throw new HttpError(503, 'O serviço de WhatsApp não conseguiu validar seu login. Confira SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no Railway.');
     }
-    throw new HttpError(401, 'Sessão expirada. Entre de novo no Lead Hunter.');
+    throw new HttpError(401, 'Sessão expirada. Entre de novo no OxySDR.');
   }
   tokenCache.set(token, { userId: data.user.id, until: Date.now() + 60_000 });
   if (tokenCache.size > 2000) {

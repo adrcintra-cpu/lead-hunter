@@ -236,7 +236,7 @@ function Conversation({ conv, canWrite, mode, onBack, onChanged }: { conv: IgCon
               onClick={() =>
                 run('lead', async () => {
                   const r = await instagramApi.toLead(conv.id);
-                  toast(r.created ? 'Lead criado no Lead Hunter.' : 'Conversa ligada ao lead que já existia.', 'success');
+                  toast(r.created ? 'Lead criado no OxySDR.' : 'Conversa ligada ao lead que já existia.', 'success');
                   await onChanged();
                 })
               }

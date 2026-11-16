@@ -39,7 +39,7 @@ export function SavedSearchesPage() {
     <div className="mx-auto flex max-w-[1100px] flex-col gap-5">
       <PageHeader
         title="Buscas"
-        subtitle="O BEELIE pode buscar empresas novas sozinho, pelo Brasil todo. Você também pode salvar critérios para rodar de novo (as buscas salvas automáticas rodam enquanto o Lead Hunter estiver aberto em algum navegador)."
+        subtitle="O BEELIE pode buscar empresas novas sozinho, pelo Brasil todo. Você também pode salvar critérios para rodar de novo (as buscas salvas automáticas rodam enquanto o OxySDR estiver aberto em algum navegador)."
       />
       <HunterPanel />
       <section className="flex flex-col gap-3">

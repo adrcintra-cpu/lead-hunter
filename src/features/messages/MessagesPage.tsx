@@ -182,7 +182,7 @@ export function MessagesPage() {
         <div className="flex gap-2 rounded-xl border border-line bg-warn-soft px-4 py-3 text-[13px] text-ink-soft">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden />
           <p>
-            <b>Entrega e abertura ainda não aparecem.</b> Falta ligar o aviso do Resend (webhook) para o Lead Hunter. Enquanto isso, você vê o que foi enviado, as falhas e as respostas.
+            <b>Entrega e abertura ainda não aparecem.</b> Falta ligar o aviso do Resend (webhook) para o OxySDR. Enquanto isso, você vê o que foi enviado, as falhas e as respostas.
           </p>
         </div>
       )}
