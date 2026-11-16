@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronUp, Clapperboard, FileText, LayoutGrid, Radar, Workflow, type LucideIcon } from 'lucide-react';
+import { CalendarDays, ChevronUp, Clapperboard, FileText, LayoutGrid, Radar, TrendingUp, Workflow, type LucideIcon } from 'lucide-react';
 import { cx } from '@/components/ui';
 
 /**
@@ -8,12 +8,14 @@ import { cx } from '@/components/ui';
  */
 import { HUB_URL as HUB } from '@/lib/oxyhub';
 
-type SystemId = 'aprovacao' | 'lead' | 'coody' | 'proposals';
+type SystemId = 'aprovacao' | 'lead' | 'coody' | 'proposals' | 'growth' | 'calendar';
 const SYSTEMS: { id: SystemId; name: string; description: string; icon: LucideIcon }[] = [
   { id: 'aprovacao', name: 'OxyPlanning', description: 'Planejamento e aprovação', icon: Workflow },
   { id: 'lead', name: 'OxySDR', description: 'Prospecção e pipeline', icon: Radar },
   { id: 'coody', name: 'OxyCreate', description: 'Workspace criativo', icon: Clapperboard },
   { id: 'proposals', name: 'OxyProposal', description: 'Propostas comerciais', icon: FileText },
+  { id: 'growth', name: 'OxyGrowth', description: 'Auditoria e crescimento', icon: TrendingUp },
+  { id: 'calendar', name: 'OxyCalendar', description: 'Calendário integrado', icon: CalendarDays },
 ];
 const CURRENT: SystemId = 'lead';
 
@@ -51,7 +53,7 @@ function Items() {
             {body}
           </div>
         ) : (
-          <a key={s.id} href={`${HUB}/abrir/${s.id}`} className="flex items-center gap-3 rounded-[12px] px-3 py-2 hover:bg-ink/5">
+          <a key={s.id} href={s.id === 'calendar' ? `${HUB}/calendario` : `${HUB}/abrir/${s.id}`} className="flex items-center gap-3 rounded-[12px] px-3 py-2 hover:bg-ink/5">
             {body}
           </a>
         );
