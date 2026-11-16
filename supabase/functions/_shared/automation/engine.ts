@@ -459,7 +459,10 @@ export async function chooseWaSlot(db: Db, owner: string, leadId: string, now = 
   if (last) {
     const sticky = (last.wa_slot as string | null) ?? 'principal';
     const n = active.find((x) => x.slot === sticky);
-    if (n) return room(n) > 0 ? sticky : null;
+    // Número do lead fora do ar de vez (erro, ex.: bloqueio 403, ou desconectado): segue por outro
+    // número conectado em vez de virar tarefa manual. "Reconectando" (deploy, queda curta) mantém o número.
+    const down = n && (n.status === 'erro' || n.status === 'desconectado');
+    if (n && !down) return room(n) > 0 ? sticky : null;
   }
   const live = active.filter((n) => n.status === 'conectado' && room(n) > 0).sort((a, b) => room(b) - room(a));
   return live[0]?.slot ?? null;
@@ -623,6 +626,20 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
     template: draft.template,
     context: draft.context,
   };
+
+  if (eff.kind === 'manual_whatsapp' && waSlot && recipient) {
+    // Lead que já conversava por outro número (que saiu do ar): avisa a troca na primeira linha.
+    const { data: prev } = await db.from('messages').select('wa_slot').eq('lead_id', lead.id).eq('channel', 'whatsapp').not('sent_at', 'is', null).order('created_at', { ascending: false }).limit(1);
+    const before = (prev ?? [])[0]?.wa_slot as string | null | undefined;
+    if (prev?.length && (before ?? 'principal') !== waSlot) {
+      const note = 'Aqui é o Beelie, da Oxycom, agora falando por este número.';
+      if (!draft.body.includes(note)) {
+        draft.body = `${note}\n\n${draft.body}`;
+        base.generated_content = draft.body;
+        base.final_content = draft.body;
+      }
+    }
+  }
 
   if (eff.kind === 'manual_whatsapp') {
     // WhatsApp conectado (QR): a mensagem entra na fila do serviço e sai sozinha, com intervalo entre envios.
