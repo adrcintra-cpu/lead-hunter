@@ -5,6 +5,8 @@
 //   { action: "pendencias", email }        → o que essa pessoa tem para fazer no Lead Hunter
 //   { action: "acesso", email, para? }     → um link de acesso de uso único (a pessoa entra já logada)
 //   { action: "eventos", email, from, to } → atividades com data para o OxyCalendar (somente leitura)
+//   { action: "crescimento", email, months } → séries mensais (leads novos, responderam, reuniões, clientes) da conta
+//   { action: "membros", email }            → quem tem acesso à conta e com que papel (somente leitura)
 //
 // Secrets (Supabase → Edge Functions → Secrets):
 //   HUB_SECRET  o mesmo valor de LEAD_HUB_SECRET no Oxyhub (32+ caracteres)
@@ -56,6 +58,61 @@ const addDays = (day: string, n: number) => {
   return d.toISOString().slice(0, 10);
 };
 const safeInner = (p: unknown) => (typeof p === 'string' && p.startsWith('/') && !p.startsWith('//') ? p : null);
+
+
+/** Mês (AAAA-MM) de um instante no horário de Brasília. */
+const monthBR = (iso: string) => new Date(new Date(iso).getTime() - 3 * 3600_000).toISOString().slice(0, 7);
+function lastMonths(n: number) {
+  const now = new Date(Date.now() - 3 * 3600_000);
+  const out: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    out.push(d.toISOString().slice(0, 7));
+  }
+  return out;
+}
+/** Lê todas as linhas (páginas de 1000) de uma consulta simples. */
+// deno-lint-ignore no-explicit-any
+async function allRows(build: (from: number, to: number) => any) {
+  const rows: Record<string, unknown>[] = [];
+  for (let page = 0; page < 50; page++) {
+    const { data, error } = await build(page * 1000, page * 1000 + 999);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows;
+}
+
+/** Crescimento comercial mês a mês, só com dados registrados (nada estimado). */
+async function crescimento(owner: string, months: number) {
+  const keys = lastMonths(months);
+  const since = `${keys[0]}-01T03:00:00.000Z`;
+  const [leads, moves] = await Promise.all([
+    allRows((a, b) => admin.from('leads').select('created_at').eq('owner_id', owner).gte('created_at', since).range(a, b)),
+    allRows((a, b) =>
+      admin.from('lead_activities').select('lead_id, created_at, payload').eq('owner_id', owner).eq('type', 'stage_changed').gte('created_at', since).range(a, b),
+    ),
+  ]);
+  const zero = () => Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, number>;
+  const novos = zero(), responderam = zero(), reunioes = zero(), clientes = zero();
+  for (const l of leads) {
+    const k = monthBR(String(l.created_at));
+    if (k in novos) novos[k]++;
+  }
+  const seen = new Set<string>();
+  for (const m of moves) {
+    const k = monthBR(String(m.created_at));
+    // deno-lint-ignore no-explicit-any
+    const to = String((m.payload as any)?.to ?? '');
+    const bucket = to === 'respondeu' || to === 'interessado' ? responderam : to === 'reuniao' ? reunioes : to === 'cliente' ? clientes : null;
+    const key = `${m.lead_id}:${bucket === responderam ? 'respondeu' : to}`; // cada lead conta uma vez por etapa
+    if (!bucket || !(k in bucket) || seen.has(key)) continue;
+    seen.add(key);
+    bucket[k]++;
+  }
+  return keys.map((k) => ({ month: k, leads_novos: novos[k], responderam: responderam[k], reunioes: reunioes[k], clientes: clientes[k] }));
+}
 
 /** Eventos para o OxyCalendar: só o que tem data, horário ou prazo (nunca cada mensagem). */
 async function eventos(owner: string, from: string, to: string) {
@@ -185,6 +242,29 @@ Deno.serve(async (req) => {
     } catch (e) {
       return json({ error: e instanceof Error ? e.message : 'Erro ao ler eventos' }, 500);
     }
+  }
+
+  if (body.action === 'crescimento') {
+    // deno-lint-ignore no-explicit-any
+    const months = Math.min(24, Math.max(3, Number((body as any).months) || 12));
+    try {
+      return json({ access: true, series: await crescimento(owner, months) });
+    } catch (e) {
+      return json({ error: e instanceof Error ? e.message : 'Erro ao ler o crescimento' }, 500);
+    }
+  }
+
+  if (body.action === 'membros') {
+    const [{ data: team }, { data: ownerUser }] = await Promise.all([
+      admin.from('team_members').select('email, name, role').eq('owner_id', owner),
+      admin.auth.admin.getUserById(owner),
+    ]);
+    const ROLE: Record<string, string> = { admin: 'Administrador', vendedor: 'Vendedor', leitura: 'Somente leitura' };
+    const people = [
+      ...(ownerUser?.user?.email ? [{ email: ownerUser.user.email.toLowerCase(), name: null, role: 'Dono da conta' }] : []),
+      ...(team ?? []).filter((t) => t.email).map((t) => ({ email: String(t.email).toLowerCase(), name: t.name, role: ROLE[t.role] ?? t.role })),
+    ];
+    return json({ access: true, members: people });
   }
 
   if (body.action === 'pendencias') {
