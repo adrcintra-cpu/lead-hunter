@@ -1135,7 +1135,8 @@ export async function handleInbound(db: Db, i: { ownerId: string; leadId: string
     task = { title: d.task.title, description: `${d.task.description ?? ''}${extra}`.trim(), campaignId: camp?.id ?? null, ownerName: camp?.owner_name ?? lead.owner_name ?? null, dueAt: at };
     if (!i.deferTask) await upsertReplyTask(db, i.ownerId, lead.id, task);
   }
-  return { ...(inbound as Row), suggestion, category: cls.category, interest: hasRealInterest(signals), beelie: intelResult?.intel ?? null, task: i.deferTask ? task : null };
+  // body: o texto recebido segue junto (a navegação em menus e a detecção de robô leem dele).
+  return { ...(inbound as Row), body: text, suggestion, category: cls.category, interest: hasRealInterest(signals), beelie: intelResult?.intel ?? null, task: i.deferTask ? task : null };
 }
 
 /** E-mail pronto para sair (Resend + remetente configurados) e IA disponível. */

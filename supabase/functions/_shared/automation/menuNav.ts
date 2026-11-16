@@ -193,7 +193,7 @@ export function decide(prev: NavState | null, text: string, ctx: DecideCtx): { s
     return { state: s, action: { type: 'pass' } };
   }
 
-  const chooseIn = (options: Opt[], buttons: boolean, why?: string) => {
+  const chooseIn = (options: Opt[], _buttons: boolean, why?: string) => {
     if (s.steps >= ctx.maxSteps) return block(`Limite de ${ctx.maxSteps} etapas atingido sem chegar a uma pessoa`);
     const key = menuKey(options);
     const triedHere = s.tried.filter((x) => x.menu === key);
@@ -208,11 +208,13 @@ export function decide(prev: NavState | null, text: string, ctx: DecideCtx): { s
     }
     pick ??= ranked[0];
     if (!pick) return block(triedNs.length ? 'Nenhuma outra opção do menu leva ao comercial' : 'Nenhuma opção do menu leva ao comercial ou a um atendente');
-    const sent = buttons ? pick.label : pick.n;
+    // Digita o número da opção (também em menus de botões, que chegam numerados); se o robô recusar,
+    // a mesma opção vai por extenso (ver 'rejeicao').
+    const sent = pick.n;
     const reason = triedNs.length
       ? `O menu voltou depois da opção ${triedNs[0]}; tentando ${pick.label} (${pick.why})`
       : why ?? `${pick.label}: ${pick.why}`;
-    s.tried.push({ menu: key, n: pick.n, how: buttons ? 'texto' : 'numero' });
+    s.tried.push({ menu: key, n: pick.n, how: 'numero' });
     s.steps += 1;
     s.status = 'NAVEGANDO_MENU';
     s.next_action = 'Aguardar a resposta do atendimento';
