@@ -165,7 +165,7 @@ async function accountOf(userId: string): Promise<{ ownerId: string; role: Role 
   return v;
 }
 /** Rotas que mexem nos números (conectar, desconectar, adicionar, remover, limite): só admin. Envio: admin e vendedor. */
-const ADMIN_ONLY = new Set(['/whatsapp/connect', '/whatsapp/disconnect', '/whatsapp/numbers/add', '/whatsapp/numbers/update', '/whatsapp/numbers/remove']);
+const ADMIN_ONLY = new Set(['/whatsapp/connect', '/whatsapp/pair', '/whatsapp/disconnect', '/whatsapp/numbers/add', '/whatsapp/numbers/update', '/whatsapp/numbers/remove']);
 
 /** Limite simples por usuário e por tipo de rota (janela de 1 minuto). */
 const LIMITS: Record<string, number> = { status: 60, connect: 6, test: 10, disconnect: 6, send: 10, preview: 12 };
@@ -217,6 +217,17 @@ function optionalSlot(body: Record<string, unknown>, query?: URLSearchParams): s
 const routes: Record<string, { method: 'GET' | 'POST'; kind: string; handler: Handler }> = {
   '/whatsapp/status': { method: 'GET', kind: 'status', handler: async (u, _b, q) => ({ ...(await manager.status(u, optionalSlot({}, q))), audio: ttsAvailable() }) },
   '/whatsapp/connect': { method: 'POST', kind: 'connect', handler: (u, b) => manager.connect(u, slotOf(b)) },
+  '/whatsapp/pair': {
+    method: 'POST',
+    kind: 'connect',
+    handler: async (u, b) => {
+      try {
+        return await manager.pair(u, slotOf(b), String(b.phone ?? ''));
+      } catch (err) {
+        throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
+    },
+  },
   '/whatsapp/test': { method: 'POST', kind: 'test', handler: (u, b) => manager.test(u, slotOf(b)) },
   '/whatsapp/disconnect': {
     method: 'POST',

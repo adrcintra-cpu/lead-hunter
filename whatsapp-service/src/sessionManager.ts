@@ -21,6 +21,8 @@ export interface StatusView {
   status: ConnectionStatus;
   /** QR em imagem (data URL), só enquanto aguarda a leitura. */
   qr: string | null;
+  /** Código de 8 caracteres para "Conectar com número de telefone" (alternativa ao QR), se pedido. */
+  pairingCode: string | null;
   phone: string | null;
   connectedAt: string | null;
   lastSeenAt: string | null;
@@ -41,6 +43,9 @@ interface Session {
   sock: WASocket | null;
   status: ConnectionStatus;
   qr: string | null;
+  pairingCode: string | null;
+  /** Número (só dígitos) para o qual o código foi pedido. */
+  pairingPhone: string | null;
   phone: string | null;
   connectedAt: string | null;
   lastSeenAt: string | null;
@@ -127,6 +132,8 @@ export class SessionManager {
         sock: null,
         status: 'desconectado',
         qr: null,
+        pairingCode: null,
+        pairingPhone: null,
         phone: null,
         connectedAt: null,
         lastSeenAt: null,
@@ -150,8 +157,9 @@ export class SessionManager {
 
   view(userId: string, slot: string = MAIN_SLOT): StatusView {
     const s = this.find(userId, slot);
-    if (!s) return { slot, status: 'desconectado', qr: null, phone: null, connectedAt: null, lastSeenAt: null, error: null };
-    return { slot, status: s.status, qr: s.status === 'aguardando_qr' ? s.qr : null, phone: s.phone, connectedAt: s.connectedAt, lastSeenAt: s.lastSeenAt, error: s.error };
+    if (!s) return { slot, status: 'desconectado', qr: null, pairingCode: null, phone: null, connectedAt: null, lastSeenAt: null, error: null };
+    const waiting = s.status === 'aguardando_qr';
+    return { slot, status: s.status, qr: waiting ? s.qr : null, pairingCode: waiting ? s.pairingCode : null, phone: s.phone, connectedAt: s.connectedAt, lastSeenAt: s.lastSeenAt, error: s.error };
   }
 
   /**
@@ -172,6 +180,7 @@ export class SessionManager {
       slot,
       status: data.status === 'conectado' ? 'reconectando' : 'desconectado',
       qr: null,
+      pairingCode: null,
       phone: data.phone_number,
       connectedAt: data.connected_at,
       lastSeenAt: data.last_seen_at,
@@ -198,6 +207,44 @@ export class SessionManager {
   private set(s: Session, patch: Partial<Session>) {
     Object.assign(s, patch);
     void this.persist(s);
+  }
+
+  /** Pede ao WhatsApp o código de 8 caracteres para o número informado. */
+  private async requestCode(s: Session, sock: WASocket) {
+    if (!s.pairingPhone || s.sock !== sock) return;
+    try {
+      const raw = await sock.requestPairingCode(s.pairingPhone);
+      const code = String(raw).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      s.pairingCode = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+      log.info({ user: maskUser(s.userId), phone: maskPhone(s.pairingPhone) }, 'código de conexão gerado');
+    } catch (err) {
+      s.pairingPhone = null;
+      this.set(s, { error: 'Não foi possível gerar o código agora. Tente de novo ou use o QR code.' });
+      log.warn({ user: maskUser(s.userId), err: err instanceof Error ? err.message : String(err) }, 'falha ao gerar código de conexão');
+    }
+  }
+
+  /**
+   * Conectar sem QR: o WhatsApp manda um código para digitar no celular (Aparelhos conectados →
+   * Conectar com número de telefone). Útil quando a pessoa não está diante da tela do OxySDR.
+   */
+  async pair(userId: string, slot: string, phoneRaw: string): Promise<StatusView> {
+    let digits = String(phoneRaw ?? '').replace(/\D/g, '');
+    if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+    if (digits.length < 12 || digits.length > 15) throw new Error('Informe o número com DDD, por exemplo (19) 99999-9999.');
+    const s = this.get(userId, slot);
+    if (s.status === 'conectado') return this.view(userId, slot);
+    const same = s.pairingPhone === digits && !!s.pairingCode;
+    if (!same) {
+      s.pairingPhone = digits;
+      s.pairingCode = null;
+      if (s.sock && s.status === 'aguardando_qr') void this.requestCode(s, s.sock);
+      else await this.connect(userId, slot);
+    }
+    // Espera o código (o socket precisa abrir primeiro).
+    for (let i = 0; i < 40 && !s.pairingCode && s.pairingPhone; i++) await new Promise((r) => setTimeout(r, 500));
+    if (!s.pairingCode) throw new Error(s.error ?? "O WhatsApp demorou para gerar o código. Tente de novo.");
+    return this.view(userId, slot);
   }
 
   /** Inicia (ou retoma) a sessão. Sem sessão salva, gera QR code. */
@@ -297,6 +344,8 @@ export class SessionManager {
           s.qr = await QRCode.toDataURL(u.qr, { margin: 1, width: 320 });
           if (s.status !== 'aguardando_qr') log.info({ user: maskUser(userId) }, 'QR gerado');
           this.set(s, { status: 'aguardando_qr', error: null });
+          // Código por número pedido antes de o socket estar pronto: pede agora (uma vez).
+          if (s.pairingPhone && !s.pairingCode) void this.requestCode(s, sock);
         }
         if (u.connection === 'connecting' && s.status !== 'aguardando_qr') {
           this.set(s, { status: s.retries > 0 ? 'reconectando' : 'conectando' });
@@ -305,7 +354,7 @@ export class SessionManager {
           const now = new Date().toISOString();
           const phone = formatPhone(sock.user?.id);
           s.openedAt = Date.now();
-          this.set(s, { status: 'conectado', qr: null, phone, connectedAt: s.connectedAt && opts.restoring ? s.connectedAt : now, lastSeenAt: now, error: null, retries: 0 });
+          this.set(s, { status: 'conectado', qr: null, pairingCode: null, pairingPhone: null, phone, connectedAt: s.connectedAt && opts.restoring ? s.connectedAt : now, lastSeenAt: now, error: null, retries: 0 });
           log.info({ user: maskUser(userId), phone: maskPhone(phone?.replace(/\D/g, '')), restoring: !!opts.restoring }, opts.restoring ? 'sessão restaurada' : 'sessão conectada');
         }
         if (u.connection === 'close') {
@@ -353,7 +402,7 @@ export class SessionManager {
           }
           if (s.status === 'aguardando_qr' && code === DisconnectReason.timedOut) {
             // QR expirou várias vezes sem leitura: para de gerar até o usuário pedir de novo.
-            this.set(s, { status: 'desconectado', qr: null, error: 'O QR code expirou. Clique em Conectar WhatsApp para gerar outro.' });
+            this.set(s, { status: 'desconectado', qr: null, pairingCode: null, pairingPhone: null, error: s.pairingCode ? 'O código expirou. Gere outro e digite no celular em seguida.' : 'O QR code expirou. Clique em Conectar WhatsApp para gerar outro.' });
             return;
           }
           if (s.retries >= MAX_RETRIES) {
@@ -421,7 +470,7 @@ export class SessionManager {
     }
     s.sock = null;
     await clearAuthState(this.db, userId, slot);
-    this.set(s, { status: 'desconectado', qr: null, phone: null, connectedAt: null, error: null, retries: 0 });
+    this.set(s, { status: 'desconectado', qr: null, pairingCode: null, pairingPhone: null, phone: null, connectedAt: null, error: null, retries: 0 });
     log.info({ user: maskUser(userId), slot }, 'sessão desconectada pelo usuário');
   }
 

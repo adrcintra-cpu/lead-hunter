@@ -18,6 +18,8 @@ export interface WaStatusView {
   slot?: string;
   status: WaStatus;
   qr: string | null;
+  /** Código para "Conectar com número de telefone", quando pedido. */
+  pairingCode?: string | null;
   phone: string | null;
   connectedAt: string | null;
   lastSeenAt: string | null;
@@ -86,6 +88,8 @@ export const whatsappClient = {
   /** Sem número: o principal, ou outro conectado (para saber se dá para enviar). */
   status: (slot?: string) => call<WaStatusView>(slot ? `/whatsapp/status?slot=${encodeURIComponent(slot)}` : '/whatsapp/status'),
   connect: (slot?: string) => call<WaStatusView>('/whatsapp/connect', slot ? { slot } : {}),
+  /** Conectar sem QR: o WhatsApp gera um código para digitar no celular. */
+  pair: (slot: string, phone: string) => call<WaStatusView>('/whatsapp/pair', { slot, phone }),
   test: (slot?: string) => call<{ ok: boolean; message: string }>('/whatsapp/test', slot ? { slot } : {}),
   disconnect: (slot?: string) => call<WaStatusView>('/whatsapp/disconnect', slot ? { slot } : {}),
   numbers: () => call<{ numbers: WaNumber[] }>('/whatsapp/numbers').then((r) => r.numbers),

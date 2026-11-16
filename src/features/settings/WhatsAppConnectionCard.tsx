@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MessageCircle, Pencil, PlugZap, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
+import { KeyRound, MessageCircle, Pencil, PlugZap, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { formatDateTime } from '@/core/utils';
 import { ConfirmDialog, ErrorBox, Modal, Spinner, cx } from '@/components/ui';
@@ -373,14 +373,76 @@ function QrModal({ slot, name, onDone }: { slot: string; name: string; onDone: (
           <ol className="list-decimal space-y-1.5 pl-5 text-[13.5px]">
             {STEPS.map((s) => <li key={s}>{s}</li>)}
           </ol>
-          <p className="mt-3 text-xs text-ink-faint">Use o celular do número que você quer conectar.</p>
+          <p className="mt-3 text-xs text-ink-faint">Use o celular do número que você quer conectar, lendo direto desta tela. Foto ou print do QR não funciona: ele muda a cada 20 segundos e o WhatsApp responde “QR code inválido”.</p>
           <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-faint">
             <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" /> O QR code se renova sozinho quando expira. Esta janela fecha ao conectar.
           </p>
           {v?.error && <div className="mt-3"><ErrorBox>{v.error}</ErrorBox></div>}
         </div>
       </div>
+      <PairByCode slot={slot} code={v?.status === 'aguardando_qr' ? v.pairingCode ?? null : null} />
     </Modal>
+  );
+}
+
+/** Alternativa ao QR: código de 8 caracteres, bom quando a pessoa do número não está diante desta tela. */
+function PairByCode({ slot, code }: { slot: string; code: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [got, setGot] = useState<string | null>(null);
+  const shown = code ?? got;
+
+  if (!open)
+    return (
+      <button type="button" className="mt-5 inline-flex items-center gap-1.5 text-[13.5px] font-semibold text-accent hover:underline" onClick={() => setOpen(true)}>
+        <KeyRound className="h-4 w-4" /> Não dá para ler o QR? Conectar com código
+      </button>
+    );
+
+  return (
+    <div className="mt-5 rounded-xl border border-line bg-surface p-4">
+      <p className="text-[14px] font-semibold">Conectar com código</p>
+      {shown ? (
+        <>
+          <p className="mt-2 text-center font-mono text-[30px] font-bold tracking-[0.18em] text-ink">{shown}</p>
+          <ol className="mt-3 list-decimal space-y-1 pl-5 text-[13.5px]">
+            <li>No celular desse número, abra o WhatsApp → Configurações → Aparelhos conectados.</li>
+            <li>Toque em Conectar aparelho → Conectar com número de telefone.</li>
+            <li>Digite o código acima. Ele vale por poucos minutos.</li>
+          </ol>
+          <p className="mt-2 text-xs text-ink-faint">Pode mandar o código para a pessoa por mensagem. Esta janela fecha sozinha quando conectar.</p>
+        </>
+      ) : (
+        <form
+          className="mt-2 flex flex-wrap items-end gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError('');
+            try {
+              const r = await whatsappClient.pair(slot, phone);
+              setGot(r.pairingCode ?? null);
+              if (!r.pairingCode) setError(r.error ?? 'O WhatsApp não devolveu o código. Tente de novo.');
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Não foi possível gerar o código.');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <div className="min-w-[200px] flex-1">
+            <label htmlFor={`wa-pair-${slot}`} className="label">Número desse WhatsApp, com DDD</label>
+            <input id={`wa-pair-${slot}`} className="input" inputMode="tel" placeholder="(19) 99999-9999" value={phone} onChange={(e) => setPhone(e.target.value)} autoFocus />
+          </div>
+          <button type="submit" className="btn-primary" disabled={busy || phone.replace(/\D/g, '').length < 10}>
+            {busy ? <Spinner /> : <KeyRound className="h-4 w-4" />} Gerar código
+          </button>
+        </form>
+      )}
+      {error && <div className="mt-3"><ErrorBox>{error}</ErrorBox></div>}
+    </div>
   );
 }
 
