@@ -390,3 +390,8 @@ html:not(.dark) .btn-primary {
   }
 }
 
+
+/* Menu lateral no padrão Oxyhub: item ativo em branco, ícone na cor de ação */
+.nav-active { background: #fff; box-shadow: 0 0 0 .5px rgb(38 43 54 / .08), 0 4px 10px -6px rgb(38 43 54 / .18); }
+.nav-active svg { color: rgb(var(--accent)); }
+.dark .nav-active { background: rgb(255 255 255 / .1); box-shadow: none; }

@@ -1,30 +1,42 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useSearchParams } from 'react-router-dom';
-import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow, Send, AtSign, Menu, X } from 'lucide-react';
+import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow, Send, AtSign, Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { SimClock } from './SimClock';
 import { useApp, useDb } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
 import { cx, ThemeSwitcher, Toasts } from '@/components/ui';
 import { LeadDrawer } from '@/features/leads/LeadDrawer';
-import { OxyhubLogo, OxyhubMark } from '@/components/OxyhubLogo';
 import { useInstagramMenu } from '@/features/instagram/useInstagramMenu';
-import { OxyhubSwitcher, OxyhubSystemsList } from '@/components/OxyhubSwitcher';
+import { OxyhubSwitcherTop, OxyhubSystemsList } from '@/components/OxyhubSwitcher';
 import { clearHubLoginAttempt } from '@/lib/oxyhub';
 
-const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/buscar', label: 'Buscar Leads', icon: Sparkles },
-  { to: '/leads', label: 'Leads', icon: Rows3 },
-  { to: '/pipeline', label: 'Pipeline', icon: Kanban },
-  { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
-  { to: '/cadencias', label: 'Cadências', icon: Workflow },
-  { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
-  { to: '/envios', label: 'Envios', icon: Send },
-  { to: '/instagram', label: 'Instagram Agent', icon: AtSign },
-  { to: '/listas', label: 'Listas', icon: List },
-  { to: '/buscas', label: 'Buscas', icon: Bookmark },
-  { to: '/configuracoes', label: 'Configurações', icon: Settings },
+type Item = { to: string; label: string; icon: typeof LayoutDashboard; end?: boolean };
+/** Menu lateral no padrão Oxyhub: seções em maiúsculas. */
+const GROUPS: { label: string; items: Item[] }[] = [
+  { label: 'Visão geral', items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }] },
+  {
+    label: 'Prospecção',
+    items: [
+      { to: '/buscar', label: 'Buscar Leads', icon: Sparkles },
+      { to: '/leads', label: 'Leads', icon: Rows3 },
+      { to: '/pipeline', label: 'Pipeline', icon: Kanban },
+      { to: '/listas', label: 'Listas', icon: List },
+      { to: '/buscas', label: 'Buscas', icon: Bookmark },
+    ],
+  },
+  {
+    label: 'Engajamento',
+    items: [
+      { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
+      { to: '/cadencias', label: 'Cadências', icon: Workflow },
+      { to: '/envios', label: 'Envios', icon: Send },
+      { to: '/instagram', label: 'Instagram Agent', icon: AtSign },
+    ],
+  },
+  { label: 'Operação', items: [{ to: '/tarefas', label: 'Tarefas', icon: CheckSquare }] },
+  { label: 'Sistema', items: [{ to: '/configuracoes', label: 'Configurações', icon: Settings }] },
 ];
+const NAV = GROUPS.flatMap((g) => g.items);
 
 /** Atalhos da barra inferior (só no celular). */
 const DOCK = ['/', '/buscar', '/pipeline', '/instagram'];
@@ -41,6 +53,22 @@ export function AppShell() {
   const showInstagram = useInstagramMenu(!team || team.role === 'admin');
   const nav = NAV.filter((n) => n.to !== '/instagram' || showInstagram);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sdr.sidebar') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem('sdr.sidebar', c ? '0' : '1');
+      } catch {
+        /* ignora */
+      }
+      return !c;
+    });
   const { pathname } = useLocation();
   useEffect(() => setMenuOpen(false), [pathname]);
   useEffect(() => {
@@ -55,27 +83,45 @@ export function AppShell() {
     };
   }, [menuOpen]);
 
-  const navLinks = (onPick?: () => void) =>
-    nav.map(({ to, label, icon: Icon, end }) => (
-      <NavLink
-        key={to}
-        to={to}
-        end={end}
-        onClick={onPick}
-        className={({ isActive }) =>
-          cx(
-            'flex min-h-[38px] shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-3.5 text-sm transition-colors',
-            isActive ? 'glass-chip font-bold text-ink' : 'font-medium text-ink-soft hover:bg-ink/5 hover:text-ink',
-          )
-        }
-      >
-        <Icon className="h-[18px] w-[18px]" aria-hidden />
-        {label}
-        {to === '/tarefas' && openTasks > 0 && (
-          <span className="ml-auto rounded-full bg-warn-soft px-1.5 text-[11px] font-bold text-warn">{openTasks}</span>
-        )}
-      </NavLink>
-    ));
+  const link = ({ to, label, icon: Icon, end }: Item, onPick?: () => void, mini = false) => (
+    <NavLink
+      key={to}
+      to={to}
+      end={end}
+      onClick={onPick}
+      title={mini ? label : undefined}
+      className={({ isActive }) =>
+        cx(
+          'nav-link flex h-10 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full text-sm transition-colors',
+          mini ? 'justify-center px-0' : 'px-3.5',
+          isActive ? 'nav-active font-semibold text-ink' : 'font-medium text-ink-soft hover:bg-ink/5 hover:text-ink',
+        )
+      }
+    >
+      <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
+      {!mini && <span className="min-w-0 flex-1 truncate">{label}</span>}
+      {!mini && to === '/tarefas' && openTasks > 0 && (
+        <span className="ml-auto rounded-full bg-warn-soft px-1.5 text-[11px] font-bold text-warn">{openTasks}</span>
+      )}
+    </NavLink>
+  );
+  const navLinks = (onPick?: () => void, mini = false) =>
+    GROUPS.map((g) => {
+      const items = g.items.filter((i) => nav.includes(i));
+      if (!items.length) return null;
+      return (
+        <div key={g.label} className="flex flex-col gap-1">
+          {!mini && <span className="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">{g.label}</span>}
+          {items.map((i) => link(i, onPick, mini))}
+        </div>
+      );
+    });
+  const logo = (
+    <>
+      <img src="/brand/oxycom.svg" alt="Oxycom" className="h-[33px] w-auto dark:hidden" />
+      <img src="/brand/oxycom-white.svg" alt="Oxycom" className="hidden h-[33px] w-auto dark:block" />
+    </>
+  );
 
   const account = (
     <div className="flex items-center justify-between gap-2 rounded-lg px-1">
@@ -90,15 +136,15 @@ export function AppShell() {
   );
 
   return (
-    <div className="min-h-screen overflow-x-clip md:grid md:grid-cols-[236px_minmax(0,1fr)] md:overflow-x-visible">
+    <div className="min-h-screen overflow-x-clip md:flex md:flex-col md:overflow-x-visible">
       {/* Celular: topo fixo com o símbolo e o menu */}
-      <header className="fixed inset-x-0 top-0 z-30 glass-bar flex h-14 items-center justify-between px-4 pt-[env(safe-area-inset-top)] md:hidden" style={{ boxSizing: 'content-box' }}>
-        <NavLink to="/" aria-label="Ir para o Dashboard" className="-ml-1 rounded-lg p-1">
-          <OxyhubMark className="h-8 w-8" />
-        </NavLink>
-        <button type="button" onClick={() => setMenuOpen(true)} className="btn-ghost -mr-1 min-h-[40px] px-2" aria-label="Abrir menu" aria-expanded={menuOpen} aria-controls="menu-celular">
-          <Menu className="h-6 w-6" />
+      <header className="fixed inset-x-0 top-0 z-30 glass-bar flex h-14 items-center gap-3 px-4 pt-[env(safe-area-inset-top)] md:hidden" style={{ boxSizing: 'content-box' }}>
+        <button type="button" onClick={() => setMenuOpen(true)} className="glass-btn grid h-10 w-10 place-items-center rounded-full" aria-label="Abrir menu" aria-expanded={menuOpen} aria-controls="menu-celular">
+          <Menu className="h-5 w-5" />
         </button>
+        <NavLink to="/" aria-label="Ir para o Dashboard" className="flex items-center">
+          <span className="flex [&_img]:h-7">{logo}</span>
+        </NavLink>
       </header>
 
       {/* Celular: gaveta do menu (todas as páginas, tema e conta) */}
@@ -113,7 +159,7 @@ export function AppShell() {
           )}
         >
           <div className="flex h-14 items-center justify-between px-4">
-            <OxyhubLogo className="h-6 w-auto" />
+            <span className="flex items-center gap-3 [&_img]:h-7">{logo}<span className="border-l border-ink/15 pl-3 text-sm font-semibold text-ink-soft">OxySDR</span></span>
             <button type="button" onClick={() => setMenuOpen(false)} className="btn-ghost -mr-1 min-h-[40px] px-2" aria-label="Fechar menu">
               <X className="h-6 w-6" />
             </button>
@@ -154,36 +200,61 @@ export function AppShell() {
         </div>
       </nav>
 
-      <aside className="glass-side hidden md:sticky md:top-0 md:flex md:h-screen md:flex-col md:overflow-y-auto md:border-r">
-        <div className="px-5 pb-3 pt-5">
-          <OxyhubLogo className="h-7 w-auto" />
-          <div className="mt-1.5 text-[11.5px] text-ink-faint">OxySDR</div>
-        </div>
-        <nav aria-label="Navegação principal" className="flex flex-col gap-1 px-3 pt-3">{navLinks()}</nav>
-        <div className="mt-auto flex flex-col gap-3 p-3">
-          <OxyhubSwitcher />
-          <SimClock />
-          {dataMode === 'mock' && (
-            <div className="glass-chip rounded-[10px] p-3">
-              <div className="flex items-center gap-2 text-xs font-bold">
-                <span className="h-2 w-2 rounded-full bg-warn" />
-                Modo mock
-              </div>
-              <p className="mt-1 text-xs leading-relaxed text-ink-faint">Dados fictícios. Nenhuma API externa conectada.</p>
+      {/* Computador: barra do topo no padrão Oxyhub */}
+      <header className="glass-bar sticky top-0 z-30 hidden h-16 items-center gap-3 px-6 md:flex">
+        <NavLink to="/" className="flex items-center gap-4" aria-label="Ir para o Dashboard">
+          {logo}
+          <span className="border-l border-ink/15 pl-4 text-sm font-semibold text-ink-soft">OxySDR</span>
+        </NavLink>
+        <div className="flex-1" />
+        <OxyhubSwitcherTop />
+        <ThemeSwitcher compact />
+        <span className="hidden text-sm text-ink-soft lg:inline" title={session?.email}>
+          {session?.email?.split('@')[0]}
+          {team && team.role !== 'admin' && <span className="ml-1.5 text-[11px] font-semibold text-ink-faint">({team.role === 'vendedor' ? 'Vendedor' : 'Só leitura'})</span>}
+        </span>
+        <button type="button" onClick={signOut} className="glass-btn grid h-10 w-10 place-items-center rounded-full" aria-label="Sair" title="Sair">
+          <LogOut className="h-[18px] w-[18px]" />
+        </button>
+      </header>
+
+      <div className="md:flex md:flex-1 md:items-start md:gap-6 md:p-6 2xl:px-12">
+        <nav
+          aria-label="Navegação principal"
+          className={cx(
+            'glass sticky top-[88px] hidden max-h-[calc(100vh-112px)] shrink-0 flex-col gap-1 self-start overflow-y-auto rounded-[22px] px-3 py-4 md:flex',
+            collapsed ? 'w-[72px]' : 'w-[248px]',
+          )}
+        >
+          {navLinks(undefined, collapsed)}
+          <button type="button" onClick={toggle} className={cx('nav-link mt-3 flex h-10 items-center gap-2.5 rounded-full text-sm font-medium text-ink-soft hover:bg-ink/5 hover:text-ink', collapsed ? 'justify-center' : 'px-3.5')} aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'}>
+            {collapsed ? <PanelLeftOpen className="h-[18px] w-[18px]" /> : <PanelLeftClose className="h-[18px] w-[18px]" />}
+            {!collapsed && 'Recolher'}
+          </button>
+          {!collapsed && (
+            <div className="mt-3 flex flex-col gap-3 border-t border-ink/10 px-1 pt-3">
+              <SimClock />
+              {dataMode === 'mock' && (
+                <div className="glass-chip rounded-[10px] p-3">
+                  <div className="flex items-center gap-2 text-xs font-bold">
+                    <span className="h-2 w-2 rounded-full bg-warn" />
+                    Modo mock
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-faint">Dados fictícios. Nenhuma API externa conectada.</p>
+                </div>
+              )}
             </div>
           )}
-          <ThemeSwitcher compact />
-          {account}
-        </div>
-      </aside>
-      <main className="min-w-0 px-4 pb-[calc(124px+env(safe-area-inset-bottom))] pt-[calc(80px+env(safe-area-inset-top))] md:px-10 md:pb-20 md:pt-8">
-        {team?.role === 'leitura' && (
-          <div role="status" className="mb-4 rounded-lg bg-warn-soft px-4 py-2.5 text-[13px] text-ink-soft">
-            Seu acesso é <b>só de leitura</b>: você vê tudo, mas alterações não são salvas.
-          </div>
-        )}
-        <Outlet />
-      </main>
+        </nav>
+        <main className="min-w-0 flex-1 px-4 pb-[calc(124px+env(safe-area-inset-bottom))] pt-[calc(80px+env(safe-area-inset-top))] md:px-0 md:pb-20 md:pt-0">
+          {team?.role === 'leitura' && (
+            <div role="status" className="mb-4 rounded-lg bg-warn-soft px-4 py-2.5 text-[13px] text-ink-soft">
+              Seu acesso é <b>só de leitura</b>: você vê tudo, mas alterações não são salvas.
+            </div>
+          )}
+          <Outlet />
+        </main>
+      </div>
       {leadId && <LeadDrawer leadId={leadId} />}
       <Toasts />
     </div>

@@ -106,3 +106,39 @@ export function OxyhubSwitcher() {
     </div>
   );
 }
+
+/** Botão da barra superior (padrão Oxyhub): ícone de grade, abre o menu para baixo. */
+export function OxyhubSwitcherTop() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const close = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', esc);
+    };
+  }, []);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Sistemas Oxyhub"
+        title="Sistemas Oxyhub"
+        className="glass-btn grid h-10 w-10 place-items-center rounded-full text-ink"
+      >
+        <LayoutGrid className="h-[18px] w-[18px]" aria-hidden />
+      </button>
+      {open && (
+        <div role="menu" className="glass-strong absolute right-0 top-full z-50 mt-2 w-72 rounded-[18px] p-1.5 shadow-2xl">
+          <Items />
+        </div>
+      )}
+    </div>
+  );
+}
