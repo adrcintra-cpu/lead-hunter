@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useApp, useService } from '@/store/AppStore';
 import { ErrorBox, Modal, Spinner } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
+import { CityInput } from '@/features/search/CityInput';
 
 /** Cadastro manual de uma empresa: indicação, contato conhecido ou teste. */
 export function AddLeadDialog({ onClose }: { onClose: () => void }) {
@@ -56,7 +57,7 @@ export function AddLeadDialog({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-2">
           <div>
             <label htmlFor="ml-city" className="label">Cidade *</label>
-            <input id="ml-city" className="input" value={f.city} onChange={(e) => set('city', e.target.value)} />
+            <CityInput id="ml-city" className="input" value={f.city} uf={f.state || null} placeholder="Digite a cidade" onCommit={(city, uf) => setF((x) => ({ ...x, city, state: uf ?? x.state }))} />
           </div>
           <div>
             <label htmlFor="ml-uf" className="label">UF *</label>

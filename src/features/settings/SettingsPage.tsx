@@ -5,6 +5,7 @@ import { dataMode, supabase } from '@/lib/supabase';
 import { formatDateTime } from '@/core/utils';
 import { DEFAULT_SEND_WINDOW } from '@/core/types';
 import { ConfirmDialog, Modal, PageHeader, Spinner, ThemeSwitcher, cx } from '@/components/ui';
+import { CityListInput } from '@/features/search/CityInput';
 import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
 import { AssistantCard } from './AssistantCard';
 import { ROLE_LABEL, TeamCard } from './TeamCard';
@@ -111,7 +112,7 @@ export function SettingsPage() {
           </div>
           <div>
             <label htmlFor="s-reg" className="label">Cidades do ICP (separadas por vírgula)</label>
-            <input id="s-reg" className="input" value={form.icpRegions} onChange={(e) => set('icpRegions', e.target.value)} />
+            <CityListInput id="s-reg" className="input" value={form.icpRegions} onChange={(v) => set('icpRegions', v)} placeholder="Ex.: Campinas, Piracicaba" />
           </div>
           <div className="sm:col-span-2">
             <button type="submit" className="btn-primary">Salvar perfil</button>
