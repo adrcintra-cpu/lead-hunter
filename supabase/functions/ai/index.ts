@@ -4,6 +4,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { TASKS, type TaskName } from '../_shared/ai/prompts.ts';
+import { withDefaults } from '../_shared/ai/assistantDefaults.ts';
 import { hasClaude, logRun, runTask, type ClaudeRun } from '../_shared/ai/claude.ts';
 
 const cors = {
@@ -38,6 +39,19 @@ Deno.serve(async (req) => {
     return json({ error: 'JSON inválido' }, 400);
   }
   if (!body.fn || !TASKS[body.fn]) return json({ error: `Função desconhecida: ${body.fn}` }, 400);
+
+  // Mensagens de abordagem seguem a persona do assistente (Configurações → Assistente de IA).
+  if (body.fn === 'generateApproach' && body.input && typeof body.input === 'object') {
+    const input = body.input as { options?: Record<string, unknown> };
+    if (input.options && !input.options.assistant) {
+      const { data: cfg } = await supabase.from('assistant_settings').select('name, persona, knowledge, playbooks').eq('owner_id', accountId).maybeSingle().then(
+        (r: { data: Record<string, unknown> | null }) => r,
+        () => ({ data: null }),
+      );
+      const a = withDefaults(cfg as never);
+      input.options.assistant = { name: a.name, persona: a.persona, knowledge: a.knowledge };
+    }
+  }
 
   const started = Date.now();
   let usage: ClaudeRun['usage'] = {};

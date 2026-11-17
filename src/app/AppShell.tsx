@@ -222,7 +222,7 @@ export function AppShell() {
         <nav
           aria-label="Navegação principal"
           className={cx(
-            'glass sticky top-[88px] hidden max-h-[calc(100vh-112px)] shrink-0 flex-col gap-1 self-start overflow-y-auto rounded-[22px] px-3 py-4 md:flex',
+            'glass sticky top-[88px] hidden max-h-[calc(100vh-112px)] shrink-0 flex-col gap-1 self-start overflow-y-auto overflow-x-hidden side-scroll rounded-[22px] px-3 py-4 md:flex',
             collapsed ? 'w-[72px]' : 'w-[248px]',
           )}
         >

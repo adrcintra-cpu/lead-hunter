@@ -395,3 +395,7 @@ html:not(.dark) .btn-primary {
 .nav-active { background: #fff; box-shadow: 0 0 0 .5px rgb(38 43 54 / .08), 0 4px 10px -6px rgb(38 43 54 / .18); }
 .nav-active svg { color: rgb(var(--accent)); }
 .dark .nav-active { background: rgb(255 255 255 / .1); box-shadow: none; }
+
+/* Menu lateral: rola em telas baixas, sem barra visível (macOS com "mostrar barras sempre"). */
+.side-scroll { scrollbar-width: none; }
+.side-scroll::-webkit-scrollbar { display: none; }

@@ -154,6 +154,16 @@ function templateData(lead: Row, c: Row, p: Row): TemplateData {
 }
 
 /** Mesmo comportamento de AutomationService.compose no app. */
+/** Persona e base de conhecimento do assistente (Configurações → Assistente de IA); sem linha, o padrão. */
+async function assistantFor(db: Db, ownerId: string): Promise<{ name: string; persona: string; knowledge: string }> {
+  const { data } = await db.from('assistant_settings').select('name, persona, knowledge, playbooks').eq('owner_id', ownerId).maybeSingle().then(
+    (r: { data: Row | null }) => r,
+    () => ({ data: null }),
+  );
+  const a = withDefaults(data);
+  return { name: a.name, persona: a.persona, knowledge: a.knowledge };
+}
+
 /** Nome do SDR (assistente) do usuário; sem configuração, "Beelie". */
 async function sdrName(db: Db, ownerId: string): Promise<string> {
   const { data } = await db.from('assistant_settings').select('name').eq('owner_id', ownerId).maybeSingle().then(
@@ -228,6 +238,7 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
         variant: 0,
         // O SDR que assina a prospecção é o assistente (Beelie), não o usuário.
         senderName: await sdrName(db, ownerId),
+        assistant: await assistantFor(db, ownerId),
         senderCompany: p.company_name,
         offer: p.offer,
         contactName: lead.contact_name,
@@ -1240,6 +1251,7 @@ export async function sendReferralEmail(db: Db, ownerId: string, lead: Row, comp
       options: {
         variant: 0,
         senderName: sdr,
+        assistant: await assistantFor(db, ownerId),
         senderCompany: p.company_name,
         offer: p.offer,
         contactName: /^equipe/i.test(ref.name) ? undefined : ref.name,

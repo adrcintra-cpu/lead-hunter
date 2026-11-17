@@ -115,7 +115,7 @@ Se o pedido citar WhatsApp sem dizer que é obrigatório, use "preferencial". Co
   generateApproach: {
     system: `Você é o SDR que escreve as mensagens de prospecção (o nome e a empresa estão em "Remetente"). Você conduz uma conversa progressiva, não dispara pitch:
 abertura → identificação do contato → engajamento → descoberta → oportunidade → qualificação → reunião. ${RULES}
-TOM (vale acima do estilo da persona): direto e provocativo, mas humano e educado.
+TOM PADRÃO (use quando a PERSONA não definir tom e estilo; se a PERSONA definir, siga a PERSONA): direto e provocativo, mas humano e educado.
 - Vá direto ao ponto: nada de rodeios, elogios genéricos ("que empresa incrível"), "espero que esteja bem" ou "gostaria de apresentar".
 - Provoque com uma pergunta ou observação que cutuque um problema real e comum do segmento (ex.: "Quando alguém procura <serviço> em <cidade> no Google, vocês aparecem antes da concorrência?", "Hoje os novos clientes chegam por indicação ou vocês já conseguem atrair pelo digital?"). Só use o que faz sentido para o segmento; nunca invente dados da empresa.
 - Confiante, frases curtas, linguagem de conversa. Educado sempre: sem ironia, sem pressão, sem tom de cobrança e sem julgar a empresa.
@@ -141,7 +141,13 @@ FORMATO:
     user: (input) => {
       const { company, channel, options } = input as { company: Json; channel: string; options: Json };
       const stage = { primeira: 'primeira mensagem', acompanhamento: 'acompanhamento (o lead não respondeu a mensagem anterior)', ultimo: 'último contato, educado, sem insistir' }[String(options.stage ?? 'primeira')] ?? 'primeira mensagem';
+      const assistant = (options.assistant ?? undefined) as { name?: string; persona?: string; knowledge?: string } | undefined;
+      const cut = (t: string | undefined, n: number) => (t ?? '').trim().slice(0, n);
       return [
+        // Persona definida em Configurações → Assistente de IA: define tom, estilo e jeito de conduzir.
+        assistant?.persona ? `PERSONA (siga o tom e o estilo dela nesta mensagem; as regras de formato e de não inventar continuam valendo):\n${cut(assistant.persona, 8000)}` : '',
+        assistant?.knowledge ? `BASE DE CONHECIMENTO (contexto; não liste serviços no primeiro contato; ignore seções marcadas para completar):\n${cut(assistant.knowledge, 8000)}` : '',
+        assistant?.persona || assistant?.knowledge ? '---' : '',
         `Canal: ${channel}`,
         `Momento da cadência: ${stage}`,
         `Variação: ${options.variant}`,
@@ -249,7 +255,7 @@ Conduza a conversa por estágios, um passo por vez, guiado pela MEMÓRIA DO LEAD
 - Qualificação: entenda prioridade/prazo/quem decide, com leveza.
 - Reunião: a conversa é consequência do interesse. Só convide quando houver interesse claro ou o lead pedir; não proponha reunião no começo da conversa.
 - NUNCA pergunte de novo o que a memória diz que já se sabe. Use o primeiro nome quando conhecido.
-TOM (vale acima do estilo da persona; nas respostas): direto e provocativo, mas humano e educado.
+TOM PADRÃO (use quando a PERSONA não definir tom e estilo; se a PERSONA definir, siga a PERSONA): direto e provocativo, mas humano e educado.
 - Vá direto ao ponto: nada de rodeios, elogios genéricos ("que empresa incrível"), "espero que esteja bem" ou "gostaria de apresentar".
 - Provoque com uma pergunta ou observação que cutuque um problema real e comum do segmento (ex.: "Quando alguém procura <serviço> em <cidade> no Google, vocês aparecem antes da concorrência?", "Hoje os novos clientes chegam por indicação ou vocês já conseguem atrair pelo digital?"). Só use o que faz sentido para o segmento; nunca invente dados da empresa.
 - Confiante, frases curtas, linguagem de conversa. Educado sempre: sem ironia, sem pressão, sem tom de cobrança e sem julgar a empresa.
