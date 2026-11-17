@@ -38,16 +38,16 @@ jobs:
 
       # Chamadas pelo site, com o login do usuário (JWT verificado).
       - name: ai
-        run: supabase functions deploy ai --project-ref "$PROJECT_REF" --use-api
+        run: supabase functions deploy ai --project-ref "$PROJECT_REF" --use-api --yes
       - name: providers
-        run: supabase functions deploy providers --project-ref "$PROJECT_REF" --use-api
+        run: supabase functions deploy providers --project-ref "$PROJECT_REF" --use-api --yes
 
       # Chamadas por agendador, serviço ou webhook: cada uma confere o próprio segredo.
       - name: cadence-runner
-        run: supabase functions deploy cadence-runner --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+        run: supabase functions deploy cadence-runner --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
       - name: whatsapp-qr-inbound
-        run: supabase functions deploy whatsapp-qr-inbound --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+        run: supabase functions deploy whatsapp-qr-inbound --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
       - name: email-webhook
-        run: supabase functions deploy email-webhook --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+        run: supabase functions deploy email-webhook --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
       - name: hub
-        run: supabase functions deploy hub --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+        run: supabase functions deploy hub --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
