@@ -399,3 +399,33 @@ html:not(.dark) .btn-primary {
 /* Menu lateral: rola em telas baixas, sem barra visível (macOS com "mostrar barras sempre"). */
 .side-scroll { scrollbar-width: none; }
 .side-scroll::-webkit-scrollbar { display: none; }
+
+/* ── Liquid Glass sem contornos cinza ───────────────────────────────────────
+   Cards, painéis, botões, chips e etiquetas: a borda vem do próprio vidro
+   (brilho + sombra), sem linha cinza. Divisórias internas ficam bem claras.
+   Campos de digitar/selecionar mantêm um limite suave (acessibilidade, WCAG 1.4.11).
+   O anel de foco roxo continua. Área tracejada (soltar arquivo / vazio) também. */
+.border[class*="border-line"]:not(input, select, textarea, .border-dashed),
+.border[class*="border-ink/"]:not(input, select, textarea, .border-dashed) {
+  border-color: transparent !important;
+}
+:is([class*="border-t"], [class*="border-b"], [class*="border-l"], [class*="border-r"], [class*="border-y"], [class*="border-x"])[class*="border-line"]:not(.border, input, select, textarea),
+[class*="divide-line"] > * + * {
+  border-color: rgb(15 21 64 / 0.05) !important;
+}
+input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"])[class*="border"],
+select[class*="border"],
+textarea[class*="border"] {
+  border-color: rgb(15 21 64 / 0.07) !important;
+  box-shadow: inset 0 1px 2px rgb(15 21 64 / 0.06);
+}
+.border:not([class*="border-"]):not(input, select, textarea) {
+  border-color: transparent !important;
+}
+.dark :is([class*="border-t"], [class*="border-b"], [class*="border-l"], [class*="border-r"], [class*="border-y"], [class*="border-x"])[class*="border-line"]:not(.border, input, select, textarea),
+.dark [class*="divide-line"] > * + * { border-color: rgb(255 255 255 / 0.06) !important; }
+.dark input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"])[class*="border"],
+.dark select[class*="border"],
+.dark textarea[class*="border"] { border-color: rgb(255 255 255 / 0.12) !important; box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.25); }
+/* Separador "logo | produto" da barra do topo continua visível (padrão do shell) */
+.glass-bar [class*="border-l"][class*="border-line"] { border-color: var(--color-line-2, #dcdde2) !important; }
