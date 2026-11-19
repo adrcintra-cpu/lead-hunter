@@ -40,16 +40,15 @@ export function igUsername(raw: unknown): string | null {
   return u && !['p', 'reel', 'explore', 'stories'].includes(u.toLowerCase()) ? u : null;
 }
 
+/** Nome curto para busca: tira o descritivo do Google ("Fulana - Advogada especialista em …"). */
+export function shortName(name: string): string {
+  const base = name.split(/\s+[-–—|:•·]\s+|\s*[|:•]\s*|\(/)[0].replace(/["“”]/g, '').trim();
+  return base.split(/\s+/).slice(0, 5).join(' ');
+}
+
 /** Busca de pessoas da empresa no LinkedIn (abre no próprio LinkedIn; não lê nada de lá). */
-export function linkedinSearchUrl(company: string, roles: string): string {
-  const r = roles
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .slice(0, 4)
-    .map((x) => (x.includes(' ') ? `"${x}"` : x))
-    .join(' OR ');
-  return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`"${company}"${r ? ` (${r})` : ''}`)}`;
+export function linkedinSearchUrl(company: string, _roles = ''): string {
+  return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(shortName(company))}`;
 }
 
 /** Textos curtos no tom da persona: comentário (Instagram), convite + 1ª mensagem (LinkedIn). */

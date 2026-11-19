@@ -9,6 +9,7 @@ import {
   discard,
   followUpOf,
   leadFromComment,
+  linkedinLinks,
   loadQueue,
   replyComment,
   loadSettings,
@@ -151,8 +152,9 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
   const [profile, setProfile] = useState('');
   const [busy, setBusy] = useState(false);
   const [showCtx, setShowCtx] = useState(false);
-  const url = item.targetUrl || item.profileUrl;
-  const isSearch = item.channel === 'linkedin' && !!item.profileUrl?.includes('/search/');
+  const li = item.channel === 'linkedin' ? linkedinLinks(item) : null;
+  const url = item.targetUrl || li?.linkedin || item.profileUrl;
+  const isSearch = !!li?.isSearch;
 
   const copyOpen = async () => {
     try {
@@ -211,7 +213,13 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
 
       {isSearch && (
         <label className="mt-3 block text-[13px]">
-          <span className="text-ink-2">O link abre a busca de pessoas da empresa no LinkedIn. Achou o perfil? Cole aqui para guardar (opcional):</span>
+          <span className="text-ink-2">
+            O botão abre a busca pelo nome no LinkedIn. Não achou?{' '}
+            <a className="font-semibold text-accent hover:underline" href={li!.google} target="_blank" rel="noopener noreferrer">
+              Procurar o perfil no Google
+            </a>
+            . Achou o perfil? Cole aqui para guardar (opcional):
+          </span>
           <input className="input mt-1" placeholder="https://www.linkedin.com/in/…" value={profile} disabled={!canWrite || busy} onChange={(e) => setProfile(e.target.value.trim())} />
         </label>
       )}

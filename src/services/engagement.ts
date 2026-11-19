@@ -98,3 +98,19 @@ export const markDone = (id: string, finalText: string, profileUrl?: string) => 
 export const discard = (id: string) => call<{ ok: true }>({ action: 'discard', id });
 export const replyComment = (id: string, finalText: string) => call<{ ok: true }>({ action: 'reply', id, finalText });
 export const leadFromComment = (id: string) => call<{ ok: true; leadId: string; created: boolean }>({ action: 'lead', id });
+
+/** Nome curto para busca: tira o descritivo do Google ("Fulana - Advogada especialista em …"). */
+export function shortName(name: string): string {
+  const base = name.split(/\s+[-–—|:•·]\s+|\s*[|:•]\s*|\(/)[0].replace(/["“”]/g, '').trim();
+  return base.split(/\s+/).slice(0, 5).join(' ');
+}
+/** Links de busca do LinkedIn (dentro do LinkedIn) e do Google (perfis públicos do LinkedIn). */
+export function linkedinLinks(i: EngItem) {
+  const name = shortName(i.title);
+  const city = (contextOf(i).match(/—[^,]*,\s*([^.]+)\./)?.[1] ?? '').trim();
+  return {
+    isSearch: !!i.profileUrl?.includes('/search/'),
+    linkedin: i.profileUrl?.includes('/search/') ? `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(name)}` : i.profileUrl,
+    google: `https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com/in "${name}"${city ? ` ${city}` : ''}`)}`,
+  };
+}
