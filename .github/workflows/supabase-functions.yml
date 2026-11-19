@@ -41,6 +41,8 @@ jobs:
         run: supabase functions deploy ai --project-ref "$PROJECT_REF" --use-api --yes
       - name: providers
         run: supabase functions deploy providers --project-ref "$PROJECT_REF" --use-api --yes
+      - name: engagement
+        run: supabase functions deploy engagement --project-ref "$PROJECT_REF" --use-api --yes
 
       # Chamadas por agendador, serviço ou webhook: cada uma confere o próprio segredo.
       - name: cadence-runner

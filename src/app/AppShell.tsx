@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useSearchParams } from 'react-router-dom';
-import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow, Send, AtSign, Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone, Rows3, Settings, Sparkles, Workflow, Send, AtSign, HeartHandshake, Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { SimClock } from './SimClock';
 import { useApp, useDb } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
@@ -31,6 +31,7 @@ const GROUPS: { label: string; items: Item[] }[] = [
       { to: '/cadencias', label: 'Cadências', icon: Workflow },
       { to: '/envios', label: 'Envios', icon: Send },
       { to: '/instagram', label: 'Instagram Agent', icon: AtSign },
+      { to: '/engajamento', label: 'Engajamento social', icon: HeartHandshake },
     ],
   },
   { label: 'Operação', items: [{ to: '/tarefas', label: 'Tarefas', icon: CheckSquare }] },

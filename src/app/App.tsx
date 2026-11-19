@@ -1,3 +1,4 @@
+import { EngagementPage } from '@/features/engagement/EngagementPage';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useApp } from '@/store/AppStore';
 import { Spinner } from '@/components/ui';
@@ -73,6 +74,7 @@ export function App() {
         <Route path="tarefas" element={<TasksPage />} />
         <Route path="envios" element={<MessagesPage />} />
         <Route path="instagram" element={<InstagramPage />} />
+        <Route path="engajamento" element={<EngagementPage />} />
         <Route path="instagram/conectado" element={<InstagramCallbackPage />} />
         <Route path="configuracoes" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
