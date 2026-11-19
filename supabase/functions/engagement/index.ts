@@ -78,6 +78,7 @@ async function writeTexts(
     'Instagram (comment e resposta): quem publica é a conta da marca @oxycom.tech; fale como a Oxycom, sem assinar. ' +
     'LinkedIn (invite e message): quem envia é um(a) profissional da Oxycom pelo PRÓPRIO perfil pessoal; escreva na primeira pessoa do singular, como gente, sem dizer o próprio nome e sem assinatura (o perfil já mostra quem é); pode citar que trabalha na Oxycom. ' +
     'Nunca invente fatos, números, clientes ou resultados; use só o contexto. ' +
+    'Varie o assunto entre os itens: processos e atendimento com agentes de IA e automação, organização comercial (follow-up, CRM) e atração de clientes/presença digital; escolha o que combina com o segmento, sem falar sempre de marketing. ' +
     'Instagram (comment): comentário genuíno sobre o post, 1 ou 2 frases, até 220 caracteres, sem link, sem vender, sem hashtags, no máximo 1 emoji; deixe invite e message vazios. ' +
     'resposta (comentário que alguém fez num post da própria Oxycom): comment = resposta cordial e específica ao que a pessoa escreveu, até 220 caracteres; se ela demonstrar interesse em contratar ou pedir preço/contato, convide para continuar no Direct; interest = true só nesse caso. ' +
     'LinkedIn: invite = nota de convite de até 280 caracteres, pessoal e específica, sem pitch; message = primeira mensagem depois que aceitar, até 600 caracteres, abre conversa com uma pergunta sobre o negócio dela; deixe comment vazio. ' +

@@ -40,7 +40,7 @@ export interface NavState {
 
 /** Primeira mensagem quando uma pessoa assume (o BEELIE sempre se apresenta como assistente virtual). */
 export const APPROACH =
-  'Olá, tudo bem? Sou o Beelie, assistente virtual da Oxycom. Você consegue me ajudar a falar com a pessoa responsável pelo marketing ou pela presença digital da empresa?';
+  'Olá, tudo bem? Sou o Beelie, assistente virtual da Oxycom. Você consegue me ajudar a falar com a pessoa responsável pela gestão ou pela parte comercial da empresa?';
 /** Quando perguntam o motivo do contato. */
 export const MOTIVE =
   'A Oxycom trabalha com soluções digitais para ajudar empresas a fortalecer sua presença no Google e gerar novas oportunidades comerciais. Queria entender com quem posso conversar sobre isso.';
@@ -159,8 +159,8 @@ const DATA_ANSWER: Record<string, string> = {
   'nome completo': 'Beelie, assistente virtual da Oxycom',
   empresa: 'Oxycom',
   'razao social': 'Oxycom',
-  assunto: 'Presença digital e Google: gostaria de falar com o responsável pelo marketing ou comercial.',
-  motivo: 'Presença digital e Google: gostaria de falar com o responsável pelo marketing ou comercial.',
+  assunto: 'Tecnologia, automação e marketing: gostaria de falar com o responsável pela gestão ou pelo comercial.',
+  motivo: 'Tecnologia, automação e marketing: gostaria de falar com o responsável pela gestão ou pelo comercial.',
 };
 
 export function decide(prev: NavState | null, text: string, ctx: DecideCtx): { state: NavState | null; action: Action } {
@@ -184,7 +184,7 @@ export function decide(prev: NavState | null, text: string, ctx: DecideCtx): { s
   if (s.status === 'ATENDIMENTO_HUMANO_PROVAVEL' && turn.kind !== 'menu') {
     if (turn.kind === 'robo' || turn.kind === 'transferencia') return { state: s, action: { type: 'wait' } };
     s.status = 'CONTATO_COMERCIAL_INICIADO';
-    s.next_action = 'Conversa com a pessoa: identificar o responsável pelo marketing';
+    s.next_action = 'Conversa com a pessoa: identificar o responsável pela gestão ou pelo comercial';
     if (ASKS_MOTIVE.test(norm(text))) {
       s.path.push({ at, kind: 'motivo', sent: MOTIVE, reason: 'A pessoa perguntou o motivo do contato', result: 'Motivo explicado' });
       return { state: s, action: { type: 'send', text: MOTIVE, template: 'humano' } };
@@ -266,7 +266,7 @@ export function decide(prev: NavState | null, text: string, ctx: DecideCtx): { s
       s.status = 'ATENDIMENTO_HUMANO_PROVAVEL';
       s.attendance = 'humano_provavel';
       s.human_evidence = turn.kind === 'humano' ? turn.evidence : `Mensagem escrita livremente depois da navegação: “${String(text).slice(0, 80)}”`;
-      s.next_action = 'Identificar o responsável pelo marketing';
+      s.next_action = 'Identificar o responsável pela gestão ou pelo comercial';
       const motive = ASKS_MOTIVE.test(norm(text));
       const sent = motive ? MOTIVE : APPROACH;
       s.path.push({ at, kind: 'humano', sent, reason: s.human_evidence, result: motive ? 'Motivo explicado' : 'Abordagem enviada' });
