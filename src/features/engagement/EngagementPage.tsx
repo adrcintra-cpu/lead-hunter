@@ -208,7 +208,14 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
         </span>
         <textarea className="input min-h-[84px] py-2" value={text} disabled={!canWrite || busy} onChange={(e) => setText(e.target.value)} maxLength={item.kind === 'convite' ? 300 : 3000} />
       </label>
-      {item.kind === 'convite' && <p className="mt-1 text-[12px] text-ink-faint">{text.length}/300 caracteres (limite do convite no LinkedIn). Depois do convite, a primeira mensagem entra na fila em 3 dias.</p>}
+      {item.kind === 'convite' && (
+        <p className="mt-1 text-[12px] text-ink-faint">
+          {text.length}/300 caracteres. No perfil, clique em <b>Conectar</b> (às vezes dentro de <b>Mais</b>) → <b>Adicionar nota</b> e cole. Não use o botão <b>Mensagem</b>: para quem não é conexão ele pede o Premium (InMail). Depois do convite, a primeira mensagem entra na fila em 3 dias.
+        </p>
+      )}
+      {item.kind === 'mensagem' && (
+        <p className="mt-1 text-[12px] text-ink-faint">Envie só se o convite foi aceito: aí o botão Mensagem funciona sem Premium.</p>
+      )}
       {item.kind === 'convite' && followUpOf(item) && <p className="mt-1 text-[12px] text-ink-faint">Mensagem preparada para depois: “{followUpOf(item).slice(0, 140)}…”</p>}
 
       {isSearch && (
