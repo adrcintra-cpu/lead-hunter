@@ -8,7 +8,9 @@ import {
   contextOf,
   discard,
   followUpOf,
+  leadFromComment,
   loadQueue,
+  replyComment,
   loadSettings,
   markDone,
   saveSettings,
@@ -17,7 +19,7 @@ import {
 } from '@/services/engagement';
 
 const today = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
-const KIND_LABEL: Record<EngItem['kind'], string> = { comentario: 'Comentar no post', convite: 'Enviar convite', mensagem: 'Primeira mensagem' };
+const KIND_LABEL: Record<EngItem['kind'], string> = { comentario: 'Comentar no post', convite: 'Enviar convite', mensagem: 'Primeira mensagem', resposta: 'Responder comentário no post da Oxycom' };
 
 /** Engajamento social assistido: o OxySDR encontra e escreve; você envia na rede e marca como feito. */
 export function EngagementPage() {
@@ -187,6 +189,9 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
             Ver lead
           </button>
         )}
+        {item.kind === 'resposta' && contextOf(item).startsWith('Possível cliente') && (
+          <span className="rounded-full bg-good-soft px-2.5 py-0.5 text-[12px] font-bold text-good">Possível cliente</span>
+        )}
         {item.forDate < today() && <span className="text-[12px] font-semibold text-warn">desde {item.forDate.split('-').reverse().slice(0, 2).join('/')}</span>}
       </div>
 
@@ -211,6 +216,26 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
         </label>
       )}
 
+      {item.kind === 'resposta' ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button className="btn btn-primary" disabled={!canWrite || busy || !text.trim()} onClick={() => void run(() => replyComment(item.id, text), 'Resposta publicada no Instagram.')}>
+            <Check size={18} /> Responder no Instagram
+          </button>
+          {!item.leadId && (
+            <button className="btn btn-outline" disabled={!canWrite || busy} onClick={() => void run(() => leadFromComment(item.id), 'Lead criado a partir do comentário.')}>
+              <Sparkles size={18} /> Criar lead
+            </button>
+          )}
+          {item.targetUrl && (
+            <a className="btn btn-ghost" href={item.targetUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink size={16} /> Ver o post
+            </a>
+          )}
+          <button className="btn btn-ghost" disabled={!canWrite || busy} onClick={() => void run(() => discard(item.id), 'Comentário ignorado.')}>
+            <X size={18} /> Ignorar
+          </button>
+        </div>
+      ) : (
       <div className="mt-4 flex flex-wrap gap-2">
         <button className="btn btn-primary" disabled={busy || !text.trim()} onClick={() => void copyOpen()}>
           <Copy size={18} /> Copiar e abrir {item.channel === 'instagram' ? 'o post' : isSearch ? 'a busca' : 'o perfil'} <ExternalLink size={14} />
@@ -222,6 +247,7 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
           <X size={18} /> Descartar
         </button>
       </div>
+      )}
     </li>
   );
 }

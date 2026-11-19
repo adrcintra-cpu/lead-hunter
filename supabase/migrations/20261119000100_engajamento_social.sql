@@ -50,3 +50,9 @@ create policy "equipe: alterar" on engagement_settings for update using (owner_i
 create policy "equipe: ler" on engagement_queue for select using (owner_id = (select public.current_owner()));
 create policy "equipe: inserir" on engagement_queue for insert with check (owner_id = (select public.current_owner()) and (select public.can_write()));
 create policy "equipe: alterar" on engagement_queue for update using (owner_id = (select public.current_owner()) and (select public.can_write())) with check (owner_id = (select public.current_owner()));
+
+-- Respostas a comentários nos posts da própria conta (a API permite responder no que é seu).
+alter table engagement_queue drop constraint if exists engagement_queue_kind_check;
+alter table engagement_queue add constraint engagement_queue_kind_check check (kind in ('comentario', 'convite', 'mensagem', 'resposta'));
+alter table engagement_queue add column if not exists external_id text;   -- id do comentário no Instagram
+create unique index if not exists engagement_queue_external on engagement_queue (owner_id, external_id) where external_id is not null;

@@ -3,7 +3,7 @@
 import { supabase } from '@/lib/supabase';
 
 export type EngChannel = 'instagram' | 'linkedin';
-export type EngKind = 'comentario' | 'convite' | 'mensagem';
+export type EngKind = 'comentario' | 'convite' | 'mensagem' | 'resposta';
 
 export interface EngItem {
   id: string;
@@ -96,3 +96,5 @@ export async function saveSettings(ownerId: string, s: EngSettings) {
 export const buildQueue = () => call<{ created: number; notes: string[] }>({ action: 'build' });
 export const markDone = (id: string, finalText: string, profileUrl?: string) => call<{ ok: true }>({ action: 'done', id, finalText, profileUrl });
 export const discard = (id: string) => call<{ ok: true }>({ action: 'discard', id });
+export const replyComment = (id: string, finalText: string) => call<{ ok: true }>({ action: 'reply', id, finalText });
+export const leadFromComment = (id: string) => call<{ ok: true; leadId: string; created: boolean }>({ action: 'lead', id });
