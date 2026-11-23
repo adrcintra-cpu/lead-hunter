@@ -115,6 +115,7 @@ No modo `supabase` o app usa:
    ```bash
    supabase secrets set GOOGLE_PLACES_API_KEY=...
    supabase secrets set ANTHROPIC_API_KEY=...
+   # opcionais (troca de modelo sem deploy): ANTHROPIC_MODEL (tarefas do dono e análises) e ANTHROPIC_MODEL_FAST (todo o resto)
    supabase functions deploy providers
    supabase functions deploy ai
    ```

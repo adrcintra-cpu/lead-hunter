@@ -2,7 +2,7 @@
 // e quando volta. O aviso não usa a IA: vai direto pelo serviço do WhatsApp.
 // Controle de repetição: o próprio aviso fica registrado em ai_runs (fn = alerta_ia_*).
 
-import { MODEL } from '../ai/claude.ts';
+import { FAST_MODEL, MAIN_MODEL } from '../ai/claude.ts';
 import { notifyOwner } from './ownerChat.ts';
 import { explainClaudeError } from '../ai/errors.ts';
 
@@ -25,14 +25,17 @@ export async function probeClaude(fetchImpl: Fetch = fetch): Promise<string | nu
   const key = Deno.env.get('ANTHROPIC_API_KEY');
   if (!key) return 'A chave da IA (ANTHROPIC_API_KEY) não está configurada no servidor.';
   try {
-    const res = await fetchImpl('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, max_tokens: 1, messages: [{ role: 'user', content: 'ok' }] }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (res.ok) return null;
-    return explainClaudeError(res.status, await res.text().catch(() => ''));
+    // Testa os dois modelos: um pode parar (ex.: limite de pedidos) com o outro funcionando.
+    for (const model of new Set([FAST_MODEL, MAIN_MODEL])) {
+      const res = await fetchImpl('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ok' }] }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return explainClaudeError(res.status, await res.text().catch(() => ''));
+    }
+    return null;
   } catch {
     return 'A IA não respondeu (falha de conexão).';
   }
@@ -45,7 +48,7 @@ async function lastAlert(db: Db, ownerId: string): Promise<Row | null> {
 }
 
 async function record(db: Db, ownerId: string, fn: string) {
-  await db.from('ai_runs').insert({ owner_id: ownerId, fn, model: MODEL, prompt_version: 'alerta', latency_ms: 0, status: 'ok' });
+  await db.from('ai_runs').insert({ owner_id: ownerId, fn, model: FAST_MODEL, prompt_version: 'alerta', latency_ms: 0, status: 'ok' });
 }
 
 /** Chamado pelo cadence-runner a cada rodada. Devolve quantos avisos foram enviados. */
