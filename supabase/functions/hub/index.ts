@@ -8,6 +8,8 @@
 //   { action: "crescimento", email, months } → séries mensais (leads novos, responderam, reuniões, clientes) da conta
 //   { action: "membros", email }            → quem tem acesso à conta e com que papel (somente leitura)
 //   { action: "acesso_opcoes", email }      → papéis possíveis (para a tela "Pessoas e acessos" do Oxyhub)
+//   { action: "avisar", email, canal, para, ... } → convite/lembrete de agenda do OxyCalendar por e-mail (Resend)
+//       ou WhatsApp (API oficial, template WHATSAPP_AGENDA_TEMPLATE). Só a pedido de quem criou o compromisso.
 //   { action: "definir_acesso", email, alvo, nome?, papel } → inclui, muda o papel ou tira (papel null) alguém da equipe.
 //       Só para o dono ou administradores. Quem sai tem o login bloqueado (nada é apagado).
 //
@@ -17,6 +19,8 @@
 // Publicar com "Verify JWT" desligado: a proteção é o x-hub-secret.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { hasResend, sendEmail } from '../_shared/channels/resend.ts';
+import { hasWhatsapp, sendWhatsapp } from '../_shared/channels/metaWhatsapp.ts';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
   auth: { persistSession: false },
@@ -26,6 +30,14 @@ const SITE = (Deno.env.get('SITE_URL') ?? '').replace(/\/+$/, '');
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+
+/** Texto UTF-8 → base64 (anexos de e-mail). */
+function b64(text: string) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
 
 function sameSecret(a: string, b: string) {
   if (!a || !b || a.length !== b.length) return false;
@@ -320,6 +332,51 @@ Deno.serve(async (req) => {
       ...(team ?? []).filter((t) => t.email).map((t) => ({ email: String(t.email).toLowerCase(), name: t.name, role: ROLE[t.role] ?? t.role, papel: t.role })),
     ];
     return json({ access: true, members: people });
+  }
+
+  // Aviso de agenda (OxyCalendar): convite, lembrete ou cancelamento para um convidado.
+  if (body.action === 'avisar') {
+    const b = body as Record<string, unknown>;
+    const str = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+    const canal = b.canal === 'whatsapp' ? 'whatsapp' : b.canal === 'email' ? 'email' : '';
+    const texto = str(b.texto, 4000);
+    if (!canal || !texto) return json({ access: true, ok: false, error: 'Aviso incompleto.' }, 400);
+    try {
+      if (canal === 'email') {
+        if (!hasResend()) return json({ access: true, ok: false, estado: 'aguardando_integracao', error: 'E-mail do OxySDR não configurado (RESEND_API_KEY).' });
+        const to = str(b.para, 200).toLowerCase();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return json({ access: true, ok: false, error: 'E-mail do convidado inválido.' }, 400);
+        // Remetente: o próprio e-mail de quem criou, se for do domínio verificado; senão o remetente da conta.
+        let from = /@oxycom\.tech$/i.test(email) ? email : '';
+        if (!from) {
+          const { data: p } = await admin.from('profiles').select('sender_email').eq('id', owner).maybeSingle();
+          from = p?.sender_email || Deno.env.get('EMAIL_FROM_FALLBACK') || '';
+        }
+        if (!from) return json({ access: true, ok: false, error: 'Sem remetente de e-mail configurado no OxySDR.' });
+        const ics = str(b.ics, 20000);
+        const r = await sendEmail({
+          from,
+          fromName: str(b.remetente, 80) || 'Oxycom',
+          to,
+          subject: str(b.assunto, 200) || 'Agenda Oxycom',
+          text: texto,
+          html: str(b.html, 20000) || undefined,
+          replyTo: email,
+          transactional: true,
+          attachments: ics ? [{ filename: 'convite.ics', content: b64(ics), contentType: `text/calendar; charset=utf-8; method=${b.metodo === 'CANCEL' ? 'CANCEL' : 'REQUEST'}` }] : undefined,
+        });
+        return json({ access: true, ok: true, id: r.externalId });
+      }
+      if (!hasWhatsapp()) return json({ access: true, ok: false, estado: 'aguardando_integracao', error: 'WhatsApp oficial não configurado no OxySDR.' });
+      const template = (Deno.env.get('WHATSAPP_AGENDA_TEMPLATE') ?? '').trim();
+      if (!template) return json({ access: true, ok: false, estado: 'aguardando_template', error: 'Falta o modelo de mensagem de agenda aprovado pela Meta (WHATSAPP_AGENDA_TEMPLATE).' });
+      const phone = str(b.para, 30).replace(/\D/g, '');
+      if (phone.length < 10) return json({ access: true, ok: false, error: 'Telefone do convidado inválido.' }, 400);
+      const r = await sendWhatsapp({ to: phone, text: texto, templateName: template });
+      return json({ access: true, ok: true, id: r.externalId });
+    } catch (e) {
+      return json({ access: true, ok: false, error: e instanceof Error ? e.message.slice(0, 300) : 'Falha no envio.' });
+    }
   }
 
   if (body.action === 'pendencias') {

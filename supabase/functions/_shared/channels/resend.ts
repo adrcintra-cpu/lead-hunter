@@ -16,6 +16,10 @@ export interface EmailSend {
   /** Versão HTML (com a imagem da assinatura). O texto continua indo junto. */
   html?: string;
   replyTo?: string;
+  /** Anexos (conteúdo em base64), ex.: convite .ics */
+  attachments?: { filename: string; content: string; contentType?: string }[];
+  /** Sem o cabeçalho de descadastro (mensagens transacionais, como convite de reunião). */
+  transactional?: boolean;
 }
 
 export async function sendEmail(m: EmailSend): Promise<{ externalId: string; provider: 'resend' }> {
@@ -32,8 +36,9 @@ export async function sendEmail(m: EmailSend): Promise<{ externalId: string; pro
       text: m.text,
       ...(m.html ? { html: m.html } : {}),
       reply_to: m.replyTo ?? m.from,
+      ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, content: a.content, ...(a.contentType ? { content_type: a.contentType } : {}) })) } : {}),
       // Descadastro em um clique nos clientes de e-mail (Gmail/Outlook mostram "Cancelar inscrição").
-      headers: { 'List-Unsubscribe': `<mailto:${m.from}?subject=PARAR>` },
+      ...(m.transactional ? {} : { headers: { 'List-Unsubscribe': `<mailto:${m.from}?subject=PARAR>` } }),
     }),
   });
   const data = await res.json().catch(() => ({}));
