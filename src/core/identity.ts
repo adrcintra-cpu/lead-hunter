@@ -39,7 +39,8 @@ export function canonicalPhone(raw: string | undefined, city?: string): string |
   return null;
 }
 
-function domainKey(url: string | undefined): string | null {
+/** Domínio próprio da empresa (sem redes sociais, encurtadores e páginas genéricas). */
+export function domainKey(url: string | undefined): string | null {
   if (!url) return null;
   const host = normalizeDomain(url).replace(/:\d+$/, '');
   if (!host || !host.includes('.') || SHARED_HOSTS.test(host)) return null;

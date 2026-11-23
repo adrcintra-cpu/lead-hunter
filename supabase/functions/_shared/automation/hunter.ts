@@ -106,9 +106,16 @@ function phoneKey(raw?: string | null): string | null {
   if (d.startsWith('0')) d = d.slice(1);
   return d.length === 10 || d.length === 11 ? `${d.slice(0, 2)}${d.slice(-8)}` : null;
 }
-function domainKey(site?: string | null): string | null {
+/** Domínios compartilhados por várias empresas (mesma lista do app): não identificam ninguém. */
+const SHARED_HOSTS =
+  /(^|\.)(instagram\.com|facebook\.com|fb\.com|fb\.me|wa\.me|whatsapp\.com|api\.whatsapp\.com|linktr\.ee|linkr\.bio|bio\.link|beacons\.ai|linkedin\.com|tiktok\.com|youtube\.com|youtu\.be|twitter\.com|x\.com|google\.com|goo\.gl|g\.page|maps\.app\.goo\.gl|sites\.google\.com|business\.site|wixsite\.com|blogspot\.com|wordpress\.com|ifood\.com\.br|mercadolivre\.com\.br|olx\.com\.br|bit\.ly|negocio\.site)$/;
+function hostOf(site?: string | null): string | null {
   const host = (site ?? '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();
   return host && host.includes('.') ? host : null;
+}
+function domainKey(site?: string | null): string | null {
+  const host = hostOf(site);
+  return host && !SHARED_HOSTS.test(host) ? host : null;
 }
 function keysOf(c: { phone?: string | null; whatsapp?: string | null; website?: string | null; legal_name?: string | null; trade_name?: string | null; legalName?: string; tradeName?: string; city?: string | null }): string[] {
   const out = new Set<string>();
@@ -332,7 +339,7 @@ export async function runOne(db: Db, st: HunterState, target: { segment: string;
         address: raw.address ?? null,
         lat: raw.lat ?? null,
         lng: raw.lng ?? null,
-        website: domainKey(raw.website),
+        website: hostOf(raw.website),
         phone: raw.phone ?? null,
         whatsapp: raw.whatsapp ?? null,
         whatsapp_status: raw.whatsapp ? raw.whatsappStatus ?? 'desconhecido' : 'desconhecido',

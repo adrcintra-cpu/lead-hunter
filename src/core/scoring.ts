@@ -1,10 +1,16 @@
 import type { Company, CompanyField, FieldSource, Profile, RawCompany, ScoreRule, ScoreTier } from './types';
 import { digits, normalize, normalizeDomain, nowIso, uid } from './utils';
+import { domainKey } from './identity';
 
-/** Chave de deduplicação em cascata: CNPJ → domínio → telefone + cidade. */
+/**
+ * Chave de deduplicação em cascata: CNPJ → domínio próprio → telefone + cidade → nome + cidade.
+ * Sites compartilhados (wa.me, iFood, Instagram, bit.ly…) não identificam a empresa: antes viravam
+ * a mesma chave (ex.: web:wa.me) e o banco recusava toda empresa nova com esse "site".
+ */
 export function dedupeKey(c: Pick<RawCompany, 'cnpj' | 'website' | 'phone' | 'city' | 'legalName'>): string {
   if (c.cnpj) return `cnpj:${digits(c.cnpj)}`;
-  if (c.website) return `web:${normalizeDomain(c.website)}`;
+  const web = domainKey(c.website);
+  if (web) return `web:${web}`;
   if (c.phone) return `tel:${digits(c.phone)}:${normalize(c.city)}`;
   return `nome:${normalize(c.legalName)}:${normalize(c.city)}`;
 }
