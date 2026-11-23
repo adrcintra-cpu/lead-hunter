@@ -271,7 +271,8 @@ export function withSiteInvite(body: string, intent: string, site: string | null
     const text = t.toLowerCase();
     return (/instagram\.com\//i.test(u) ? text : text.replace(/instagram\.com\/\S*/g, '')).includes(hostOf(u));
   };
-  const s = site && !said(body, site) ? hostOf(site) : null;
+  // Link completo (https://), para virar link clicável no WhatsApp e no e-mail
+  const s = site && !said(body, site) ? `https://${hostOf(site)}` : null;
   const ig = instagram && !said(body, instagram) ? instagram : null;
   if (!s && !ig) return body;
   const lines = [s && `Site: ${s}`, ig && `Instagram: ${ig}`].filter(Boolean).join('\n');

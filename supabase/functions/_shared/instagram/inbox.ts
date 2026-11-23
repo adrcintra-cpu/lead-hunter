@@ -287,7 +287,7 @@ export async function suggest(db: Db, cfg: MetaConfig, ownerId: string, conversa
   const siteHost = site?.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase();
   if (closing && site && siteHost && ![r.message, ...real.map((m) => String(m.body ?? ''))].some((t) => t.toLowerCase().replace(/instagram\.com\/\S*/g, '').includes(siteHost)))
   {
-    const withSite = `${r.message.trim()}\n\nSe quiser conhecer mais sobre a gente: ${siteHost}`;
+    const withSite = `${r.message.trim()}\n\nSe quiser conhecer mais sobre a gente: https://${siteHost}`;
     if (new TextEncoder().encode(withSite).length <= 1000) r.message = withSite;
   }
 
