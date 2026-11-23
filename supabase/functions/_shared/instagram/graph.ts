@@ -12,6 +12,8 @@ export const DEFAULT_SCOPES = [
   'instagram_basic',
   'instagram_manage_messages',
   'instagram_manage_comments',
+  // Business Discovery (ler perfis comerciais dos leads) exige insights além de instagram_basic
+  'instagram_manage_insights',
   'pages_show_list',
   'pages_read_engagement',
   'pages_manage_metadata',
