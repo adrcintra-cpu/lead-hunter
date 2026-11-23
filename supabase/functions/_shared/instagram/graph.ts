@@ -14,6 +14,8 @@ export const DEFAULT_SCOPES = [
   'instagram_manage_comments',
   // Business Discovery (ler perfis comerciais dos leads) exige insights além de instagram_basic
   'instagram_manage_insights',
+  // Curtir posts e comentários (Like Media and Comments API, abr/2026)
+  'instagram_manage_engagement',
   'pages_show_list',
   'pages_read_engagement',
   'pages_manage_metadata',
@@ -107,6 +109,8 @@ export interface ConnectResult {
   scopes: string[];
   declined: string[];
   expiresAt: string | null;
+  /** Token de usuário de longa duração (a API de curtidas pede token de usuário). */
+  userToken?: string;
 }
 
 /**
@@ -137,5 +141,5 @@ export async function exchangeCode(cfg: MetaConfig, code: string, redirectUri: s
   const da = dbg.data?.data_access_expires_at;
   const ue = dbg.data?.expires_at;
   const expiresAt = da && da > 0 ? new Date(da * 1000).toISOString() : ue && ue > 0 ? new Date(ue * 1000).toISOString() : null;
-  return { accounts, scopes, declined, expiresAt };
+  return { accounts, scopes, declined, expiresAt, userToken };
 }

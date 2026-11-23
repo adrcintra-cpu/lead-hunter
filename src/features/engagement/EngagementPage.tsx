@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AtSign, Check, Copy, ExternalLink, Briefcase, Plus, RefreshCw, Settings2, Sparkles, Trash2, X } from 'lucide-react';
+import { AtSign, Check, Copy, ExternalLink, Briefcase, Heart, Plus, RefreshCw, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { EmptyState, ErrorBox, PageHeader, Spinner, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
@@ -9,6 +9,8 @@ import {
   discard,
   followUpOf,
   leadFromComment,
+  likeNow,
+  likesToday,
   linkedinLinks,
   loadQueue,
   replyComment,
@@ -36,10 +38,12 @@ export function EngagementPage() {
   const [notes, setNotes] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [filter, setFilter] = useState<'todos' | 'instagram' | 'linkedin'>('todos');
+  const [liked, setLiked] = useState(0);
 
   const load = useCallback(async () => {
     try {
-      const [q, s] = await Promise.all([loadQueue(today()), loadSettings()]);
+      const [q, s, l] = await Promise.all([loadQueue(today()), loadSettings(), likesToday(today()).catch(() => 0)]);
+      setLiked(l);
       setItems(q.pending);
       setDone(q.done);
       setSettings(s);
@@ -74,7 +78,7 @@ export function EngagementPage() {
     <div className="space-y-6">
       <PageHeader
         title="Engajamento social"
-        subtitle="O OxySDR encontra os perfis e posts e escreve o texto no tom do Beelie. Você abre, envia na rede e marca como feito: nada é publicado sozinho (Instagram e LinkedIn proíbem robôs)."
+        subtitle="O OxySDR encontra os perfis e posts e escreve o texto no tom do Beelie. Comentários e convites você envia na rede e marca como feito. Curtir pode ser automático (API oficial da Meta, nos Ajustes)."
         actions={
           <>
             <button className="btn btn-outline" onClick={() => setShowSettings((v) => !v)}>
@@ -93,6 +97,15 @@ export function EngagementPage() {
           {notes.map((n) => (
             <p key={n}>{n}</p>
           ))}
+        </div>
+      )}
+
+      {settings?.autoLike && (
+        <div className="card flex flex-wrap items-center gap-3 p-4 text-sm">
+          <Heart size={18} className="text-accent" />
+          <span>
+            <b>Curtida automática ligada:</b> {liked} de {settings.dailyLikes} curtidas hoje. O OxySDR curte um post por vez, com intervalo, entre 8h e 21h.
+          </span>
         </div>
       )}
 
@@ -156,6 +169,7 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
   const li = item.channel === 'linkedin' ? linkedinLinks(item) : null;
   const url = item.targetUrl || li?.linkedin || item.profileUrl;
   const isSearch = !!li?.isSearch;
+  const canLike = item.channel === 'instagram' && !item.likedAt && (item.kind === 'resposta' ? !!item.externalId : !!item.mediaId);
 
   const copyOpen = async () => {
     try {
@@ -195,9 +209,15 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
         {item.kind === 'resposta' && contextOf(item).startsWith('Possível cliente') && (
           <span className="rounded-full bg-good-soft px-2.5 py-0.5 text-[12px] font-bold text-good">Possível cliente</span>
         )}
+        {item.likedAt && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-good-soft px-2.5 py-0.5 text-[12px] font-bold text-good">
+            <Heart size={12} /> Curtido
+          </span>
+        )}
         {item.forDate < today() && <span className="text-[12px] font-semibold text-warn">desde {item.forDate.split('-').reverse().slice(0, 2).join('/')}</span>}
       </div>
 
+      {item.likeError && !item.likedAt && <p className="mt-1 text-[12px] text-warn">Não curtiu: {item.likeError}</p>}
       <button className="mt-2 text-[13px] text-ink-faint hover:text-ink" onClick={() => setShowCtx((v) => !v)}>
         {showCtx ? 'Esconder contexto' : 'Ver o que a IA leu'}
       </button>
@@ -247,6 +267,11 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
               <ExternalLink size={16} /> Ver o post
             </a>
           )}
+          {canLike && (
+            <button className="btn btn-ghost" disabled={!canWrite || busy} onClick={() => void run(() => likeNow(item.id), 'Curtido no Instagram.')}>
+              <Heart size={16} /> Curtir {item.kind === 'resposta' ? 'o comentário' : 'agora'}
+            </button>
+          )}
           <button className="btn btn-ghost" disabled={!canWrite || busy} onClick={() => void run(() => discard(item.id), 'Comentário ignorado.')}>
             <X size={18} /> Ignorar
           </button>
@@ -259,6 +284,11 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
         <button className="btn btn-outline" disabled={!canWrite || busy || !text.trim()} onClick={() => void run(() => markDone(item.id, text, profile || undefined), 'Marcado como feito e registrado no lead.')}>
           <Check size={18} /> Marcar como feito
         </button>
+        {canLike && (
+          <button className="btn btn-ghost" disabled={!canWrite || busy} onClick={() => void run(() => likeNow(item.id), 'Curtido no Instagram.')}>
+            <Heart size={16} /> Curtir {item.kind === 'resposta' ? 'o comentário' : 'agora'}
+          </button>
+        )}
         <button className="btn btn-ghost" disabled={!canWrite || busy} onClick={() => void run(() => discard(item.id), 'Sugestão descartada.')}>
           <X size={18} /> Descartar
         </button>
@@ -289,6 +319,8 @@ function SettingsCard({ initial, ownerId, canWrite, onSaved }: { initial: EngSet
   const [ig, setIg] = useState(initial.dailyInstagram);
   const [li, setLi] = useState(initial.dailyLinkedin);
   const [roles, setRoles] = useState(initial.linkedinRoles);
+  const [autoLike, setAutoLike] = useState(initial.autoLike);
+  const [likes, setLikes] = useState(initial.dailyLikes);
   const [busy, setBusy] = useState(false);
   const totalTags = new Set(themes.filter((t) => t.enabled).flatMap((t) => tagsOf(t.tags))).size;
   const save = async () => {
@@ -303,6 +335,8 @@ function SettingsCard({ initial, ownerId, canWrite, onSaved }: { initial: EngSet
       dailyInstagram: Math.min(40, Math.max(0, ig)),
       dailyLinkedin: Math.min(40, Math.max(0, li)),
       linkedinRoles: roles.trim() || initial.linkedinRoles,
+      autoLike,
+      dailyLikes: Math.min(60, Math.max(0, likes)),
     };
     setBusy(true);
     try {
@@ -319,7 +353,7 @@ function SettingsCard({ initial, ownerId, canWrite, onSaved }: { initial: EngSet
       <div className="md:col-span-2">
         <span className="label">Temas para comentar no Instagram</span>
         <p className="mb-2 text-[13px] text-ink-faint">
-          Cada tema tem algumas hashtags. Todo dia o OxySDR sorteia os temas e as hashtags, pega posts recentes e escreve um comentário sobre o assunto de cada post. Você só cola, curte e marca como feito.
+          Cada tema tem algumas hashtags. Todo dia o OxySDR sorteia os temas e as hashtags, pega posts recentes e escreve um comentário sobre o assunto de cada post. Você só cola e marca como feito (a curtida pode ser automática).
         </p>
         <div className="grid gap-2">
           {themes.map((t, i) => (
@@ -379,6 +413,20 @@ function SettingsCard({ initial, ownerId, canWrite, onSaved }: { initial: EngSet
         <span className="label">Posts do Instagram por dia</span>
         <input className="input" type="number" min={0} max={40} value={ig} disabled={!canWrite} onChange={(e) => setIg(Number(e.target.value))} />
       </label>
+      <div className="rounded-[14px] bg-ink/[0.03] p-3 md:col-span-2">
+        <label className="flex items-center gap-2 text-[14px] font-semibold">
+          <input type="checkbox" checked={autoLike} disabled={!canWrite} onChange={(e) => setAutoLike(e.target.checked)} />
+          <Heart size={16} className="text-accent" /> Curtir automaticamente os posts da fila
+        </label>
+        <p className="mt-1 text-[13px] text-ink-faint">
+          Usa a API oficial da Meta (permissão “Curtir posts e comentários”). Curte um post por vez, com intervalo de pelo menos 9 minutos, entre 8h e 21h, e também os comentários que deixarem nos posts da Oxycom. Não curte Stories nem contas privadas. Comentários continuam com você: a Meta não permite comentar automaticamente em posts de outras contas.
+        </p>
+        <label className="mt-2 block max-w-[240px]">
+          <span className="label">Limite de curtidas por dia</span>
+          <input className="input" type="number" min={0} max={60} value={likes} disabled={!canWrite || !autoLike} onChange={(e) => setLikes(Number(e.target.value))} />
+          <span className="mt-1 block text-[12px] text-ink-faint">Recomendado: 20 a 30.</span>
+        </label>
+      </div>
       <label className="block">
         <span className="label">Pessoas no LinkedIn por dia</span>
         <input className="input" type="number" min={0} max={40} value={li} disabled={!canWrite} onChange={(e) => setLi(Number(e.target.value))} />

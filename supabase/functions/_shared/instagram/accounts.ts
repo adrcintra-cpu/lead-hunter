@@ -35,7 +35,7 @@ export async function saveConnection(db: Db, ownerId: string, actorId: string, r
       .select('id, username')
       .single();
     if (error || !row) throw new Error(`Não foi possível salvar a conta @${a.username ?? a.igUserId}.`);
-    const { error: tErr } = await db.from('instagram_tokens').upsert({ account_id: row.id, token_enc: await seal(a.pageToken), updated_at: new Date().toISOString() }, { onConflict: 'account_id' });
+    const { error: tErr } = await db.from('instagram_tokens').upsert({ account_id: row.id, token_enc: await seal(a.pageToken), user_token_enc: r.userToken ? await seal(r.userToken) : null, updated_at: new Date().toISOString() }, { onConflict: 'account_id' });
     if (tErr) throw new Error('Não foi possível guardar a autorização com segurança.');
     saved.push(row);
   }

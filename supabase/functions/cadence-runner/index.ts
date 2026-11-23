@@ -6,6 +6,7 @@
 import { adminClient, runDue } from '../_shared/automation/engine.ts';
 import { timingSafeEqual } from '../_shared/channels/metaWhatsapp.ts';
 import { closeSilentNavigations } from '../_shared/automation/menuNavDb.ts';
+import { likeDue } from '../_shared/engagement/likes.ts';
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Método não permitido', { status: 405 });
@@ -17,7 +18,9 @@ Deno.serve(async (req) => {
     const summary = await runDue(db);
     // Navegações em menu paradas há 24 h: encerra como "sem resposta" e passa para você.
     const silentNavs = await closeSilentNavigations(db).catch(() => 0);
-    return Response.json({ ...summary, silentNavs });
+    // Curtida automática no Instagram (só para quem ligou; 1 por vez, com intervalo e limite diário)
+    const likes = await likeDue(db).catch(() => ({ liked: 0, skipped: 0 }));
+    return Response.json({ ...summary, silentNavs, likes });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

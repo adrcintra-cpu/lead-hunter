@@ -89,6 +89,7 @@ export const IG_SCOPE_LABEL: Record<string, string> = {
   pages_manage_metadata: 'Receber avisos de mensagens novas (webhook)',
   business_management: 'Acessar Páginas do portfólio empresarial',
   instagram_manage_insights: 'Ler perfis e posts de outras contas comerciais (leads)',
+  instagram_manage_engagement: 'Curtir posts e comentários (curtida automática)',
 };
 
 function need() {

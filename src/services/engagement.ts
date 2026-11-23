@@ -1,5 +1,5 @@
 // Engajamento social assistido: leitura direta (RLS da equipe); montar a fila e marcar como feito
-// passam pela função `engagement`. Nada é enviado para as redes por aqui.
+// passam pela função `engagement`. Comentários e convites a pessoa envia; curtir pode ser automático.
 import { supabase } from '@/lib/supabase';
 
 export type EngChannel = 'instagram' | 'linkedin';
@@ -19,6 +19,10 @@ export interface EngItem {
   status: 'sugerida' | 'feita' | 'descartada';
   forDate: string;
   doneAt: string | null;
+  mediaId: string | null;
+  externalId: string | null;
+  likedAt: string | null;
+  likeError: string | null;
 }
 
 export interface EngTheme {
@@ -35,6 +39,9 @@ export interface EngSettings {
   dailyInstagram: number;
   dailyLinkedin: number;
   linkedinRoles: string;
+  /** Curtida automática (API oficial da Meta). */
+  autoLike: boolean;
+  dailyLikes: number;
 }
 
 const FOLLOW_MARK = '\n\nMensagem para depois que aceitar o convite:\n';
@@ -71,6 +78,10 @@ const map = (r: Record<string, unknown>): EngItem => ({
   status: r.status as EngItem['status'],
   forDate: String(r.for_date),
   doneAt: (r.done_at as string) ?? null,
+  mediaId: (r.media_id as string) ?? null,
+  externalId: (r.external_id as string) ?? null,
+  likedAt: (r.liked_at as string) ?? null,
+  likeError: (r.like_error as string) ?? null,
 });
 
 export async function loadQueue(today: string): Promise<{ pending: EngItem[]; done: EngItem[] }> {
@@ -94,13 +105,15 @@ export async function loadSettings(): Promise<EngSettings> {
     dailyInstagram: (data?.daily_instagram as number) ?? 10,
     dailyLinkedin: (data?.daily_linkedin as number) ?? 10,
     linkedinRoles: (data?.linkedin_roles as string) ?? 'sócio, diretor, gerente comercial, gerente de marketing',
+    autoLike: data?.auto_like === true,
+    dailyLikes: typeof data?.daily_likes === 'number' ? (data.daily_likes as number) : 20,
   };
 }
 
 export async function saveSettings(ownerId: string, s: EngSettings) {
   const { error } = await need()
     .from('engagement_settings')
-    .upsert({ owner_id: ownerId, hashtags: s.hashtags, themes: s.themes, theme_share: s.themeShare, daily_instagram: s.dailyInstagram, daily_linkedin: s.dailyLinkedin, linkedin_roles: s.linkedinRoles, updated_at: new Date().toISOString() });
+    .upsert({ owner_id: ownerId, hashtags: s.hashtags, themes: s.themes, theme_share: s.themeShare, daily_instagram: s.dailyInstagram, daily_linkedin: s.dailyLinkedin, linkedin_roles: s.linkedinRoles, auto_like: s.autoLike, daily_likes: s.dailyLikes, updated_at: new Date().toISOString() });
   if (error) throw new Error(error.message);
 }
 
@@ -108,6 +121,12 @@ export const buildQueue = () => call<{ created: number; notes: string[] }>({ act
 export const markDone = (id: string, finalText: string, profileUrl?: string) => call<{ ok: true }>({ action: 'done', id, finalText, profileUrl });
 export const discard = (id: string) => call<{ ok: true }>({ action: 'discard', id });
 export const replyComment = (id: string, finalText: string) => call<{ ok: true }>({ action: 'reply', id, finalText });
+export const likeNow = (id: string) => call<{ ok: true; already?: boolean }>({ action: 'like', id });
+/** Curtidas automáticas de hoje (a partir da meia-noite de São Paulo). */
+export async function likesToday(today: string): Promise<number> {
+  const { count } = await need().from('engagement_queue').select('id', { count: 'exact', head: true }).gte('liked_at', `${today}T03:00:00Z`);
+  return count ?? 0;
+}
 export const leadFromComment = (id: string) => call<{ ok: true; leadId: string; created: boolean }>({ action: 'lead', id });
 
 /** Nome curto para busca: tira o descritivo do Google ("Fulana - Advogada especialista em …"). */

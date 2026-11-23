@@ -4,7 +4,8 @@
 //   { action: 'discard', id }                   → descarta a sugestão
 //   { action: 'reply', id, finalText }          → responde o comentário no post da própria conta (API oficial; só com o clique da pessoa)
 //   { action: 'lead', id }                      → cria (ou liga) o lead de quem comentou
-// Regras: nada é enviado por aqui. O OxySDR só encontra e escreve; a pessoa envia na rede.
+//   { action: 'like', id }                      → curte o post (ou o comentário recebido) agora, pela API oficial
+// Regras: comentários e convites quem envia é a pessoa. Curtir pode ser automático (API oficial, ligado nas configurações).
 // Instagram: só a API oficial (Business Discovery para perfis comerciais, busca de hashtag).
 // LinkedIn: sem API de busca/mensagem; o link abre a busca de pessoas da empresa no próprio LinkedIn.
 
@@ -13,6 +14,7 @@ import { MODEL, hasClaude, strictSchema } from '../_shared/ai/claude.ts';
 import { withDefaults } from '../_shared/ai/assistantDefaults.ts';
 import { graph, metaConfig, MetaError } from '../_shared/instagram/graph.ts';
 import { openToken } from '../_shared/instagram/crypto.ts';
+import { likeItem } from '../_shared/engagement/likes.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -198,7 +200,7 @@ async function build(db: Db, owner: string) {
         const user = igUsername(c.instagram)!;
         try {
           const r = await graph<{ business_discovery?: Row }>(ig.cfg, ig.igId, {
-            fields: `business_discovery.username(${user}){username,name,biography,followers_count,media.limit(3){caption,permalink,timestamp}}`,
+            fields: `business_discovery.username(${user}){username,name,biography,followers_count,media.limit(3){id,caption,permalink,timestamp}}`,
             access_token: ig.token,
           });
           const bd = r.business_discovery;
@@ -206,7 +208,7 @@ async function build(db: Db, owner: string) {
           if (!post?.permalink) continue;
           const key = `ig-${l.id}`;
           const context = `Empresa: ${companyName(c)} (${c.segment ?? ''}, ${c.city ?? ''}). Perfil @${bd?.username}: ${String(bd?.biography ?? '').slice(0, 300)}. Último post: ${String(post.caption ?? '(sem legenda)').slice(0, 700)}`;
-          drafts.push({ key, channel: 'instagram', context, row: { channel: 'instagram', kind: 'comentario', lead_id: l.id, company_id: c.id, title: `@${bd?.username ?? user}`, profile_url: `https://www.instagram.com/${bd?.username ?? user}/`, target_url: post.permalink, context } });
+          drafts.push({ key, channel: 'instagram', context, row: { channel: 'instagram', kind: 'comentario', lead_id: l.id, company_id: c.id, title: `@${bd?.username ?? user}`, profile_url: `https://www.instagram.com/${bd?.username ?? user}/`, target_url: post.permalink, media_id: post.id ? String(post.id) : null, context } });
           used++;
         } catch (e) {
           // Perfil pessoal, inexistente ou privado: o Business Discovery só lê contas comerciais
@@ -247,7 +249,7 @@ async function build(db: Db, owner: string) {
           if (!pick || busy.has(`instagram:${pick.m.permalink}`)) continue;
           const key = `ht-${pick.m.id}`;
           const context = `Tema escolhido: ${pick.theme}. Post recente na hashtag #${pick.tag}: ${String(pick.m.caption).slice(0, 800)}`;
-          drafts.push({ key, channel: 'instagram', context, row: { channel: 'instagram', kind: 'comentario', title: `${pick.theme} · #${pick.tag}`, target_url: pick.m.permalink, context, theme: pick.theme } });
+          drafts.push({ key, channel: 'instagram', context, row: { channel: 'instagram', kind: 'comentario', title: `${pick.theme} · #${pick.tag}`, target_url: pick.m.permalink, media_id: String(pick.m.id), context, theme: pick.theme } });
           busy.add(`instagram:${pick.m.permalink}`);
           used++;
         }
@@ -336,6 +338,11 @@ Deno.serve(async (req) => {
     if (body.action === 'discard') {
       await db.from('engagement_queue').update({ status: 'descartada', done_at: new Date().toISOString(), done_by: auth.user.id }).eq('id', id);
       return json({ ok: true });
+    }
+    if (body.action === 'like') {
+      if (item.liked_at) return json({ ok: true, already: true });
+      const r = await likeItem(db, owner, item, auth.user.id);
+      return r.ok ? json({ ok: true }) : json({ error: r.error }, 400);
     }
     if (body.action === 'reply') {
       if (item.kind !== 'resposta' || !item.external_id) return json({ error: 'Só comentários dos posts da própria conta podem ser respondidos por aqui.' }, 400);
