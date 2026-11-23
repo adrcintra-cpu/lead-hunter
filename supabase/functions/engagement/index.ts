@@ -185,11 +185,14 @@ async function build(db: Db, owner: string) {
     else {
       const { data: leads } = await db
         .from('leads')
-        .select('id, stage, current_score, contact_name, company:companies(id, trade_name, legal_name, segment, city, instagram)')
+        .select('id, stage, current_score, contact_name, company:companies!inner(id, trade_name, legal_name, segment, city, instagram)')
         .eq('owner_id', owner)
         .not('stage', 'in', '(nao_interessado)')
+        // Só quem tem @ do Instagram (antes pegava os 400 de maior nota e quase nenhum tinha)
+        .not('company.instagram', 'is', null)
+        .neq('company.instagram', '')
         .order('current_score', { ascending: false, nullsFirst: false })
-        .limit(400);
+        .limit(1000);
       const withIg = (leads ?? []).filter((l: Row) => igUsername((l.company as Row | null)?.instagram) && !busy.has(`instagram:${l.id}`));
       let used = 0;
       // Por que um perfil de lead não entrou (vira um aviso claro na tela)
