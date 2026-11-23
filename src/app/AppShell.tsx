@@ -8,7 +8,7 @@ import { cx, ThemeSwitcher, Toasts } from '@/components/ui';
 import { LeadDrawer } from '@/features/leads/LeadDrawer';
 import { useInstagramMenu } from '@/features/instagram/useInstagramMenu';
 import { OxyhubSwitcherTop, OxyhubSystemsList } from '@/components/OxyhubSwitcher';
-import { clearHubLoginAttempt } from '@/lib/oxyhub';
+import { clearHubLoginAttempt, HUB_URL } from '@/lib/oxyhub';
 
 type Item = { to: string; label: string; icon: typeof LayoutDashboard; end?: boolean };
 /** Menu lateral no padrão Oxyhub: seções em maiúsculas. */
@@ -119,8 +119,8 @@ export function AppShell() {
     });
   const logo = (
     <>
-      <img src="/brand/oxycom.svg" alt="Oxycom" className="h-[33px] w-auto dark:hidden" />
-      <img src="/brand/oxycom-white.svg" alt="Oxycom" className="hidden h-[33px] w-auto dark:block" />
+      <img src="/brand/oxyhub-logo.svg" alt="Oxyhub" className="h-[33px] w-auto dark:hidden" />
+      <img src="/brand/oxyhub-logo-white.svg" alt="Oxyhub" className="hidden h-[33px] w-auto dark:block" />
     </>
   );
 
@@ -143,9 +143,9 @@ export function AppShell() {
         <button type="button" onClick={() => setMenuOpen(true)} className="glass-btn grid h-10 w-10 place-items-center rounded-full" aria-label="Abrir menu" aria-expanded={menuOpen} aria-controls="menu-celular">
           <Menu className="h-5 w-5" />
         </button>
-        <NavLink to="/" aria-label="Ir para o Dashboard" className="flex items-center">
+        <a href={HUB_URL} aria-label="Oxyhub · tela inicial" className="flex items-center">
           <span className="flex [&_img]:h-7">{logo}</span>
-        </NavLink>
+        </a>
       </header>
 
       {/* Celular: gaveta do menu (todas as páginas, tema e conta) */}
@@ -203,8 +203,10 @@ export function AppShell() {
 
       {/* Computador: barra do topo no padrão Oxyhub */}
       <header className="glass-bar sticky top-0 z-30 hidden h-16 items-center gap-3 px-6 md:flex">
-        <NavLink to="/" className="flex items-center gap-4" aria-label="Ir para o Dashboard">
+        <a href={HUB_URL} className="flex items-center" aria-label="Oxyhub · tela inicial" title="Tela inicial do Oxyhub">
           {logo}
+        </a>
+        <NavLink to="/" className="flex items-center" aria-label="Ir para o Dashboard do OxySDR">
           <span className="border-l border-ink/15 pl-4 text-sm font-semibold text-ink-soft">OxySDR</span>
         </NavLink>
         <div className="flex-1" />
