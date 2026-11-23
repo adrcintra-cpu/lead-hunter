@@ -91,18 +91,12 @@ export function AppShell() {
       end={end}
       onClick={onPick}
       title={mini ? label : undefined}
-      className={({ isActive }) =>
-        cx(
-          'nav-link flex h-10 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full text-sm transition-colors',
-          mini ? 'justify-center px-0' : 'px-3.5',
-          isActive ? 'nav-active font-semibold text-ink' : 'font-medium text-ink-soft hover:bg-ink/5 hover:text-ink',
-        )
-      }
+      className={cx('oxy-nav-item', mini && '!justify-center !px-0')}
     >
       <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
       {!mini && <span className="min-w-0 flex-1 truncate">{label}</span>}
       {!mini && to === '/tarefas' && openTasks > 0 && (
-        <span className="ml-auto rounded-full bg-warn-soft px-1.5 text-[11px] font-bold text-warn">{openTasks}</span>
+        <span className="oxy-nav-badge">{openTasks}</span>
       )}
     </NavLink>
   );
@@ -112,7 +106,7 @@ export function AppShell() {
       if (!items.length) return null;
       return (
         <div key={g.label} className="flex flex-col gap-1">
-          {!mini && <span className="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">{g.label}</span>}
+          {!mini && <span className="oxy-nav-label">{g.label}</span>}
           {items.map((i) => link(i, onPick, mini))}
         </div>
       );
@@ -221,16 +215,14 @@ export function AppShell() {
         </button>
       </header>
 
-      <div className="md:flex md:flex-1 md:items-start md:gap-6 md:p-6 2xl:px-12">
+      {/* Menu encostado na borda esquerda (padrão Oxyhub); o conteúdo tem o próprio respiro */}
+      <div className="md:flex md:flex-1 md:items-start md:gap-6">
         <nav
           aria-label="Navegação principal"
-          className={cx(
-            'glass sticky top-[88px] hidden max-h-[calc(100vh-112px)] shrink-0 flex-col gap-1 self-start overflow-y-auto overflow-x-hidden side-scroll rounded-[22px] px-3 py-4 md:flex',
-            collapsed ? 'w-[72px]' : 'w-[248px]',
-          )}
+          className={cx('glass oxy-sidenav hidden md:flex', collapsed ? 'w-[72px]' : 'w-[248px]')}
         >
           {navLinks(undefined, collapsed)}
-          <button type="button" onClick={toggle} className={cx('nav-link mt-3 flex h-10 items-center gap-2.5 rounded-full text-sm font-medium text-ink-soft hover:bg-ink/5 hover:text-ink', collapsed ? 'justify-center' : 'px-3.5')} aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'}>
+          <button type="button" onClick={toggle} className={cx('oxy-nav-item mt-3', collapsed && '!justify-center !px-0')} aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'}>
             {collapsed ? <PanelLeftOpen className="h-[18px] w-[18px]" /> : <PanelLeftClose className="h-[18px] w-[18px]" />}
             {!collapsed && 'Recolher'}
           </button>
@@ -249,7 +241,7 @@ export function AppShell() {
             </div>
           )}
         </nav>
-        <main className="min-w-0 flex-1 px-4 pb-[calc(124px+env(safe-area-inset-bottom))] pt-[calc(80px+env(safe-area-inset-top))] md:px-0 md:pb-20 md:pt-0">
+        <main className="min-w-0 flex-1 px-4 pb-[calc(124px+env(safe-area-inset-bottom))] pt-[calc(80px+env(safe-area-inset-top))] md:pb-20 md:pl-0 md:pr-6 md:pt-6 2xl:pr-12">
           {team?.role === 'leitura' && (
             <div role="status" className="mb-4 rounded-lg bg-warn-soft px-4 py-2.5 text-[13px] text-ink-soft">
               Seu acesso é <b>só de leitura</b>: você vê tudo, mas alterações não são salvas.
