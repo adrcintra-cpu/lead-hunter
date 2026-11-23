@@ -18,7 +18,7 @@
 
   var me = document.currentScript;
   var SELECTOR = (me && me.getAttribute('data-selector')) || '.glass, .glass-strong, .glass-btn, .glass-tint';
-  var EXTRA = (me && me.getAttribute('data-backdrop')) || 'saturate(160%) brightness(1.05)';
+  var EXTRA = (me && me.getAttribute('data-backdrop')) || 'blur(16px) saturate(160%) brightness(1.05)';
   // data-only-light: em sistemas com tema escuro (classe .dark no <html>), a refração só vale no tema claro
   var ONLY_LIGHT = !!(me && me.hasAttribute('data-only-light'));
   var root = document.documentElement;
