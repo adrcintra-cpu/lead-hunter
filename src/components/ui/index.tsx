@@ -76,15 +76,17 @@ export function ErrorBox({ children }: { children: ReactNode }) {
   return <div role="alert" className="rounded-lg bg-bad-soft px-4 py-3 text-sm text-bad">{children}</div>;
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
+/** Testeira padrão Oxyhub: sobretítulo (contexto) → título em Saira Light → frase de apoio; ações à direita. */
+export function PageHeader({ eyebrow = 'OxySDR', title, subtitle, actions }: { eyebrow?: string; title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="h1">{title}</h1>
-        {subtitle && <div className="mt-1 text-sm text-ink-faint">{subtitle}</div>}
+    <header className="oxy-pagehead">
+      <div className="oxy-pagehead-text">
+        <span className="eyebrow">{eyebrow}</span>
+        <h1 className="oxy-pagehead-title">{title}</h1>
+        {subtitle && <div className="oxy-pagehead-sub">{subtitle}</div>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
-    </div>
+      {actions && <div className="oxy-pagehead-actions">{actions}</div>}
+    </header>
   );
 }
 

@@ -488,3 +488,30 @@ textarea[class*="border"] {
 .dark .oxy-nav-item:hover { background: rgb(255 255 255 / .06); color: rgb(var(--ink)); }
 .dark .oxy-nav-item[aria-current="page"] { background: rgb(255 255 255 / .1); color: rgb(var(--ink)); box-shadow: none; }
 .dark .oxy-nav-item[aria-current="page"] svg { color: rgb(var(--accent)); }
+
+/* ── Oxyhub · testeira padrão (23/11/2026) ─────────────────────────────────
+   Topo de toda página: sobretítulo (contexto: sistema ou cliente) → título em
+   Saira Light → frase de apoio; ações à direita, alinhadas pela base do texto.
+   No celular as ações descem para baixo do texto. */
+.oxy-pagehead {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+  gap: 16px 24px; margin: 0 0 28px;
+}
+.oxy-pagehead-text { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1 1 420px; }
+.oxy-pagehead .eyebrow { margin: 0; align-self: flex-start; }
+.oxy-pagehead .oxy-pagehead-title { margin: 0; }
+.oxy-pagehead-title {
+  font-weight: 300; font-size: clamp(34px, 2.4vw + 18px, 46px); line-height: 1.08;
+  letter-spacing: -0.015em; color: #262b36; text-wrap: balance; overflow-wrap: anywhere;
+  display: flex; align-items: center; gap: 12px;
+}
+.oxy-pagehead-sub { margin: 0; max-width: 72ch; font-size: 15px; line-height: 1.6; color: #737985; }
+.oxy-pagehead-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (max-width: 640px) {
+  .oxy-pagehead { margin-bottom: 20px; }
+  .oxy-pagehead-actions { width: 100%; }
+}
+.dark .oxy-pagehead-title { color: rgb(var(--ink)); }
+.dark .oxy-pagehead-sub { color: rgb(var(--ink-faint)); }
+/* OxySDR: as páginas já espaçam os blocos com gap; a testeira só soma um respiro curto */
+.oxy-pagehead { margin-bottom: 8px; }

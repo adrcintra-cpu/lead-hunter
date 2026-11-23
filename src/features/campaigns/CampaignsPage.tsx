@@ -272,15 +272,16 @@ export function CampaignDetailPage() {
       <Link to="/campanhas" className="btn-ghost -ml-3 w-fit">
         <ArrowLeft className="h-4 w-4" /> Campanhas
       </Link>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="h1">{camp.name}</h1>
+      <div className="oxy-pagehead">
+        <div className="oxy-pagehead-text">
+          <span className="eyebrow">Campanha</span>
+          <h1 className="oxy-pagehead-title flex-wrap">
+            {camp.name}
             <StatusChip status={camp.status} />
-          </div>
-          {camp.objective && <p className="mt-1 text-sm text-ink-faint">{camp.objective}</p>}
+          </h1>
+          {camp.objective && <p className="oxy-pagehead-sub">{camp.objective}</p>}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="oxy-pagehead-actions">
           {(camp.status === 'ativa' || camp.status === 'agendada') && (
             <button type="button" className="btn-outline" onClick={() => auto.pauseCampaign(camp.id)}><Pause className="h-4 w-4" /> Pausar</button>
           )}
