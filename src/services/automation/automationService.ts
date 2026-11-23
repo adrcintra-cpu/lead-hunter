@@ -754,7 +754,7 @@ export class AutomationService {
     const raw = s.message?.trim();
     // Despedida com o site e o Instagram da empresa (uma vez por conversa), como na resposta automática.
     const body = raw
-      ? withSiteInvite(raw, s.intent, siteFromKnowledge(assistant.knowledge), conv.filter((m) => m.from === 'vendedor').map((m) => m.text), instagramFromKnowledge(assistant.knowledge))
+      ? withSiteInvite(raw, s.intent, siteFromKnowledge(assistant.knowledge), conv.filter((m) => m.from === 'vendedor').map((m) => m.text), instagramFromKnowledge(assistant.knowledge), conv[conv.length - 1]?.text)
       : raw;
     if (!body) return null;
     const at = this.nowIso();

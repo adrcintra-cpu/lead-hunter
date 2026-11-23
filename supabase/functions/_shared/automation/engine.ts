@@ -1009,10 +1009,10 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       inbound: lead.origin === INBOUND_ORIGIN,
     });
     await logRun(db, ownerId, 'suggestReply', started, 'ok', run.usage);
-    // Despedida com o site e o Instagram da empresa (uma vez por conversa).
+    // Fim de conversa: sempre com o convite para o site e o Instagram da empresa.
     const raw = run.output.message?.trim();
     const body = raw
-      ? withSiteInvite(raw, run.output.intent, siteFromKnowledge(assistant.knowledge), conversation.filter((m) => m.from === 'vendedor').map((m) => m.text), instagramFromKnowledge(assistant.knowledge))
+      ? withSiteInvite(raw, run.output.intent, siteFromKnowledge(assistant.knowledge), conversation.filter((m) => m.from === 'vendedor').map((m) => m.text), instagramFromKnowledge(assistant.knowledge), conversation[conversation.length - 1]?.text)
       : raw;
     if (!body) return null;
     // Uma sugestão por vez: a anterior, se não foi enviada, é substituída.

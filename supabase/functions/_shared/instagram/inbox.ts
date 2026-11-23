@@ -6,6 +6,7 @@
 // - Texto de até 1000 bytes (UTF-8).
 // - Nunca inicia conversa.
 
+import { siteFromKnowledge } from '../automation/replies.ts';
 import { withDefaults } from '../ai/assistantDefaults.ts';
 import type { MetaConfig, Fetch } from './graph.ts';
 import { graph, MetaError } from './graph.ts';
@@ -279,6 +280,16 @@ export async function suggest(db: Db, cfg: MetaConfig, ownerId: string, conversa
     await logOp(db, ownerId, null, 'passou_para_humano', 'ok', { conversa: conversationId, motivo: r.humanReason });
   }
   if (!r.message) return { status: 'ignorada', reason: 'O BEELIE não viu o que responder.' };
+  // Fim de conversa no Direct (recusou ou passou para a equipe): despede com o convite para o site.
+  // O Instagram a pessoa já está seguindo a conversa nele; o site entra uma vez por conversa.
+  const site = siteFromKnowledge(withDefaults(a).knowledge);
+  const closing = r.classification === 'nao_interessado' || (r.needsHuman && r.classification !== 'opt_out');
+  const siteHost = site?.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase();
+  if (closing && site && siteHost && ![r.message, ...real.map((m) => String(m.body ?? ''))].some((t) => t.toLowerCase().replace(/instagram\.com\/\S*/g, '').includes(siteHost)))
+  {
+    const withSite = `${r.message.trim()}\n\nSe quiser conhecer mais sobre a gente: ${siteHost}`;
+    if (new TextEncoder().encode(withSite).length <= 1000) r.message = withSite;
+  }
 
   const { data: row } = await db
     .from('instagram_messages')

@@ -254,32 +254,28 @@ export function instagramFromKnowledge(knowledge?: string | null): string | null
   return m ? `https://www.instagram.com/${m[1].toLowerCase()}/` : null;
 }
 
+/** Intenções que fecham a conversa do Beelie (despedida, conversa marcada, passou para o vendedor). */
+export const CLOSING_INTENTS = ['encerrar', 'confirmar_conversa', 'passar_para_vendedor'];
+
 /**
- * Fim de conversa (lead recusou, pediu para falar depois ou a conversa foi confirmada):
- * o Beelie se despede convidando a conhecer o site e o Instagram. Só uma vez por conversa e nunca
- * para quem pediu para não receber mensagens.
+ * Fim de conversa: o Beelie SEMPRE se despede convidando a conhecer o site e o Instagram da empresa
+ * (links da base de conhecimento). Fica de fora só o que a própria mensagem já trouxer e quem pediu
+ * para não receber mais mensagens (última mensagem do lead).
  */
-export function withSiteInvite(body: string, intent: string, site: string | null, alreadySent: string[], instagram: string | null = null): string {
-  if ((!site && !instagram) || !['encerrar', 'confirmar_conversa'].includes(intent)) return body;
+export function withSiteInvite(body: string, intent: string, site: string | null, _alreadySent: string[] = [], instagram: string | null = null, lastLead?: string | null): string {
+  if ((!site && !instagram) || !CLOSING_INTENTS.includes(intent)) return body;
+  if (lastLead && analyzeReplyRules(lastLead).category === 'sem_contato') return body;
   const hostOf = (u: string) => u.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '').toLowerCase();
   // O endereço do Instagram contém o nome do site (instagram.com/oxycom.tech): ao procurar o site, ignora links do Instagram.
   const said = (t: string, u: string) => {
     const text = t.toLowerCase();
     return (/instagram\.com\//i.test(u) ? text : text.replace(/instagram\.com\/\S*/g, '')).includes(hostOf(u));
   };
-  // Despedida (encerrar): o convite vai SEMPRE, a menos que a própria mensagem já tenha o site.
-  // Conversa confirmada: só se o site ainda não foi enviado nesta conversa.
-  const closing = intent === 'encerrar';
-  const fresh = (u: string | null) => !!u && !said(body, u) && (closing || !alreadySent.some((t) => said(t, u)));
-  const s = fresh(site) ? hostOf(site!) : null;
-  const ig = fresh(instagram) && !alreadySent.some((t) => said(t, instagram!)) ? instagram : null;
+  const s = site && !said(body, site) ? hostOf(site) : null;
+  const ig = instagram && !said(body, instagram) ? instagram : null;
   if (!s && !ig) return body;
-  const invite = s && ig
-    ? `Se quiser conhecer mais sobre nós, acesse ${s} ou siga no Instagram: ${ig}`
-    : s
-      ? `Se quiser conhecer mais sobre nós, acesse ${s}`
-      : `Se quiser acompanhar a gente, estamos no Instagram: ${ig}`;
-  return `${body.trim()}\n\n${invite}`;
+  const lines = [s && `Site: ${s}`, ig && `Instagram: ${ig}`].filter(Boolean).join('\n');
+  return `${body.trim()}\n\nSe quiser conhecer mais sobre a gente:\n${lines}`;
 }
 
 /**
