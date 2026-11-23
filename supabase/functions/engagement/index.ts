@@ -192,32 +192,50 @@ async function build(db: Db, owner: string) {
         .limit(400);
       const withIg = (leads ?? []).filter((l: Row) => igUsername((l.company as Row | null)?.instagram) && !busy.has(`instagram:${l.id}`));
       let used = 0;
-      // Divisão do dia: parte para leads, parte para os temas (ajustável; sem temas, tudo para leads).
-      const leadCap = themes.length ? Math.max(0, Math.round(igSlots * (1 - themeShare))) : igSlots;
-      for (const l of withIg) {
-        if (used >= leadCap) break;
-        const c = l.company as Row;
-        const user = igUsername(c.instagram)!;
-        try {
-          const r = await graph<{ business_discovery?: Row }>(ig.cfg, ig.igId, {
-            fields: `business_discovery.username(${user}){username,name,biography,followers_count,media.limit(3){id,caption,permalink,timestamp}}`,
-            access_token: ig.token,
-          });
-          const bd = r.business_discovery;
-          const post = ((bd?.media as Row | undefined)?.data as Row[] | undefined)?.[0];
-          if (!post?.permalink) continue;
-          const key = `ig-${l.id}`;
-          const context = `Empresa: ${companyName(c)} (${c.segment ?? ''}, ${c.city ?? ''}). Perfil @${bd?.username}: ${String(bd?.biography ?? '').slice(0, 300)}. Último post: ${String(post.caption ?? '(sem legenda)').slice(0, 700)}`;
-          drafts.push({ key, channel: 'instagram', context, row: { channel: 'instagram', kind: 'comentario', lead_id: l.id, company_id: c.id, title: `@${bd?.username ?? user}`, profile_url: `https://www.instagram.com/${bd?.username ?? user}/`, target_url: post.permalink, media_id: post.id ? String(post.id) : null, context } });
-          used++;
-        } catch (e) {
-          // Perfil pessoal, inexistente ou privado: o Business Discovery só lê contas comerciais
-          if (e instanceof MetaError && /permiss|permission|#10|#200/i.test(e.message)) {
-            notes.push('Instagram: a Meta não liberou a leitura de perfis comerciais (Business Discovery) para este app.');
-            break;
+      // Por que um perfil de lead não entrou (vira um aviso claro na tela)
+      const why = { semPost: 0, naoComercial: 0, outro: 0, outroMsg: '' };
+      let li = 0;
+      let bdBlocked = false;
+      let permErr = 0;
+      const fillLeads = async (cap: number) => {
+        while (!bdBlocked && used < cap && li < withIg.length) {
+          const l = withIg[li++];
+          const c = l.company as Row;
+          const user = igUsername(c.instagram)!;
+          try {
+            const r = await graph<{ business_discovery?: Row }>(ig.cfg, ig.igId, {
+              fields: `business_discovery.username(${user}){username,name,biography,followers_count,media.limit(3){id,caption,permalink,timestamp}}`,
+              access_token: ig.token,
+            });
+            const bd = r.business_discovery;
+            const post = ((bd?.media as Row | undefined)?.data as Row[] | undefined)?.[0];
+            if (!post?.permalink) {
+              why.semPost++;
+              continue;
+            }
+            const key = `ig-${l.id}`;
+            const context = `Empresa: ${companyName(c)} (${c.segment ?? ''}, ${c.city ?? ''}). Perfil @${bd?.username}: ${String(bd?.biography ?? '').slice(0, 300)}. Último post: ${String(post.caption ?? '(sem legenda)').slice(0, 700)}`;
+            drafts.push({ key, channel: 'instagram', context, row: { channel: 'instagram', kind: 'comentario', lead_id: l.id, company_id: c.id, title: `@${bd?.username ?? user}`, profile_url: `https://www.instagram.com/${bd?.username ?? user}/`, target_url: post.permalink, media_id: post.id ? String(post.id) : null, context } });
+            used++;
+          } catch (e) {
+            if (e instanceof MetaError && e.kind === 'permissao' && ++permErr >= 3 && used === 0 && why.semPost === 0) {
+              notes.push('Instagram: a Meta não liberou a leitura de perfis comerciais (Business Discovery) para este app.');
+              bdBlocked = true;
+            } else if (e instanceof MetaError && e.kind === 'limite') {
+              notes.push('Instagram: limite de uso da Meta atingido; tente preparar de novo daqui a 1 hora.');
+              bdBlocked = true;
+            } else if (e instanceof MetaError && (e.kind === 'meta' || e.kind === 'permissao')) {
+              why.naoComercial++; // perfil pessoal, privado ou @ que não existe: o Business Discovery só lê contas comerciais
+            } else {
+              why.outro++;
+              why.outroMsg ||= e instanceof Error ? e.message : 'erro';
+            }
           }
         }
-      }
+      };
+      // Divisão do dia: parte para leads, parte para os temas (ajustável; sem temas, tudo para leads).
+      const leadCap = themes.length ? Math.max(0, Math.round(igSlots * (1 - themeShare))) : igSlots;
+      await fillLeads(leadCap);
       // Temas: sorteia a ordem e 1 hashtag por tema a cada rodada (a Meta limita 30 hashtags diferentes por semana),
       // pega posts recentes com legenda e distribui entre os temas, sem repetir post nem perfil.
       const shuffle = <T,>(a: T[]) => a.map((v) => [Math.random(), v] as const).sort((x, y) => x[0] - y[0]).map((x) => x[1]);
@@ -254,6 +272,16 @@ async function build(db: Db, owner: string) {
           used++;
         }
       }
+      // Vagas dos temas que sobraram (busca por hashtag indisponível ou sem posts): completa com leads
+      if (used < igSlots) await fillLeads(igSlots);
+      const checked = li;
+      if (checked && (why.semPost || why.naoComercial || why.outro))
+        notes.push(
+          `Instagram: verifiquei ${checked} ${checked === 1 ? 'perfil' : 'perfis'} de leads e ${used ? 'aproveitei os que deu' : 'nenhum entrou'}. ` +
+            [why.naoComercial && `${why.naoComercial} não são conta comercial, estão privados ou o @ não existe`, why.semPost && `${why.semPost} sem post`, why.outro && `${why.outro} com erro (${why.outroMsg})`].filter(Boolean).join('; ') +
+            `. Há ${withIg.length} leads com Instagram disponíveis (os usados nos últimos 21 dias ficam de fora).`,
+        );
+      else if (!withIg.length) notes.push('Instagram: nenhum lead com @ do Instagram disponível (os usados nos últimos 21 dias ficam de fora).');
     }
   }
 
