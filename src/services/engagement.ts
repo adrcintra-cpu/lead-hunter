@@ -21,8 +21,17 @@ export interface EngItem {
   doneAt: string | null;
 }
 
+export interface EngTheme {
+  name: string;
+  hashtags: string[];
+  enabled: boolean;
+}
+
 export interface EngSettings {
   hashtags: string[];
+  themes: EngTheme[];
+  /** % das vagas diárias do Instagram para os temas (o resto vai para os leads). */
+  themeShare: number;
   dailyInstagram: number;
   dailyLinkedin: number;
   linkedinRoles: string;
@@ -80,6 +89,8 @@ export async function loadSettings(): Promise<EngSettings> {
   if (error) throw new Error(error.message);
   return {
     hashtags: (data?.hashtags as string[]) ?? [],
+    themes: Array.isArray(data?.themes) ? (data!.themes as EngTheme[]).map((t) => ({ name: String(t.name ?? ''), hashtags: Array.isArray(t.hashtags) ? t.hashtags.map(String) : [], enabled: t.enabled !== false })) : [],
+    themeShare: typeof data?.theme_share === 'number' ? (data.theme_share as number) : 50,
     dailyInstagram: (data?.daily_instagram as number) ?? 10,
     dailyLinkedin: (data?.daily_linkedin as number) ?? 10,
     linkedinRoles: (data?.linkedin_roles as string) ?? 'sócio, diretor, gerente comercial, gerente de marketing',
@@ -89,7 +100,7 @@ export async function loadSettings(): Promise<EngSettings> {
 export async function saveSettings(ownerId: string, s: EngSettings) {
   const { error } = await need()
     .from('engagement_settings')
-    .upsert({ owner_id: ownerId, hashtags: s.hashtags, daily_instagram: s.dailyInstagram, daily_linkedin: s.dailyLinkedin, linkedin_roles: s.linkedinRoles, updated_at: new Date().toISOString() });
+    .upsert({ owner_id: ownerId, hashtags: s.hashtags, themes: s.themes, theme_share: s.themeShare, daily_instagram: s.dailyInstagram, daily_linkedin: s.dailyLinkedin, linkedin_roles: s.linkedinRoles, updated_at: new Date().toISOString() });
   if (error) throw new Error(error.message);
 }
 

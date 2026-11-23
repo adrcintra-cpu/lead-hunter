@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AtSign, Check, Copy, ExternalLink, Briefcase, RefreshCw, Settings2, Sparkles, X } from 'lucide-react';
+import { AtSign, Check, Copy, ExternalLink, Briefcase, Plus, RefreshCw, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { EmptyState, ErrorBox, PageHeader, Spinner, cx } from '@/components/ui';
 import { useLeadDrawer } from '@/app/useLeadDrawer';
@@ -17,6 +17,7 @@ import {
   saveSettings,
   type EngItem,
   type EngSettings,
+  type EngTheme,
 } from '@/services/engagement';
 
 const today = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
@@ -267,16 +268,38 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
   );
 }
 
+const THEME_IDEAS: EngTheme[] = [
+  { name: 'Agentes de IA e automação', hashtags: ['inteligenciaartificial', 'automacao', 'agentesdeia'], enabled: true },
+  { name: 'Gestão comercial', hashtags: ['vendasb2b', 'gestaocomercial', 'crm'], enabled: true },
+  { name: 'Marketing digital', hashtags: ['marketingdigital', 'trafegopago', 'brandingempresarial'], enabled: true },
+];
+const tagsOf = (v: string) => [...new Set(v.split(/[\s,]+/).map((t) => t.replace(/^#/, '').trim().toLowerCase()).filter(Boolean))].slice(0, 8);
+
 function SettingsCard({ initial, ownerId, canWrite, onSaved }: { initial: EngSettings; ownerId: string; canWrite: boolean; onSaved: (s: EngSettings) => void }) {
   const { toast } = useApp();
-  const [tags, setTags] = useState(initial.hashtags.map((t) => '#' + t.replace(/^#/, '')).join(' '));
+  // Temas: migra as hashtags avulsas antigas para um tema "Nicho" na primeira edição
+  const [themes, setThemes] = useState<{ name: string; tags: string; enabled: boolean }[]>(() =>
+    (initial.themes.length ? initial.themes : initial.hashtags.length ? [{ name: 'Nicho', hashtags: initial.hashtags, enabled: true }] : []).map((t) => ({
+      name: t.name,
+      tags: t.hashtags.map((h) => '#' + h.replace(/^#/, '')).join(' '),
+      enabled: t.enabled,
+    })),
+  );
+  const [share, setShare] = useState(initial.themeShare);
   const [ig, setIg] = useState(initial.dailyInstagram);
   const [li, setLi] = useState(initial.dailyLinkedin);
   const [roles, setRoles] = useState(initial.linkedinRoles);
   const [busy, setBusy] = useState(false);
+  const totalTags = new Set(themes.filter((t) => t.enabled).flatMap((t) => tagsOf(t.tags))).size;
   const save = async () => {
+    const list: EngTheme[] = themes
+      .map((t) => ({ name: t.name.trim().slice(0, 60), hashtags: tagsOf(t.tags), enabled: t.enabled }))
+      .filter((t) => t.name && t.hashtags.length)
+      .slice(0, 10);
     const s: EngSettings = {
-      hashtags: [...new Set(tags.split(/[\s,]+/).map((t) => t.replace(/^#/, '').trim().toLowerCase()).filter(Boolean))].slice(0, 10),
+      hashtags: [],
+      themes: list,
+      themeShare: Math.min(100, Math.max(0, share)),
       dailyInstagram: Math.min(40, Math.max(0, ig)),
       dailyLinkedin: Math.min(40, Math.max(0, li)),
       linkedinRoles: roles.trim() || initial.linkedinRoles,
@@ -293,10 +316,64 @@ function SettingsCard({ initial, ownerId, canWrite, onSaved }: { initial: EngSet
   };
   return (
     <section className="card grid gap-4 p-5 md:grid-cols-2">
+      <div className="md:col-span-2">
+        <span className="label">Temas para comentar no Instagram</span>
+        <p className="mb-2 text-[13px] text-ink-faint">
+          Cada tema tem algumas hashtags. Todo dia o OxySDR sorteia os temas e as hashtags, pega posts recentes e escreve um comentário sobre o assunto de cada post. Você só cola, curte e marca como feito.
+        </p>
+        <div className="grid gap-2">
+          {themes.map((t, i) => (
+            <div key={i} className="grid gap-2 rounded-[14px] bg-ink/[0.03] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] sm:items-center">
+              <input
+                className="input"
+                value={t.name}
+                disabled={!canWrite}
+                placeholder="Nome do tema"
+                aria-label="Nome do tema"
+                onChange={(e) => setThemes(themes.map((x, k) => (k === i ? { ...x, name: e.target.value } : x)))}
+              />
+              <input
+                className="input"
+                value={t.tags}
+                disabled={!canWrite}
+                placeholder="#automacao #inteligenciaartificial"
+                aria-label={`Hashtags do tema ${t.name}`}
+                onChange={(e) => setThemes(themes.map((x, k) => (k === i ? { ...x, tags: e.target.value } : x)))}
+              />
+              <div className="flex items-center gap-2">
+                <label className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-ink-soft">
+                  <input type="checkbox" checked={t.enabled} disabled={!canWrite} onChange={(e) => setThemes(themes.map((x, k) => (k === i ? { ...x, enabled: e.target.checked } : x)))} />
+                  Ativo
+                </label>
+                <button className="btn btn-ghost" disabled={!canWrite} aria-label={`Remover o tema ${t.name}`} onClick={() => setThemes(themes.filter((_, k) => k !== i))}>
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button className="btn btn-outline" disabled={!canWrite || themes.length >= 10} onClick={() => setThemes([...themes, { name: '', tags: '', enabled: true }])}>
+            <Plus size={16} /> Adicionar tema
+          </button>
+          {!themes.length ? (
+            <button
+              className="btn btn-ghost"
+              disabled={!canWrite}
+              onClick={() => setThemes(THEME_IDEAS.map((t) => ({ name: t.name, tags: t.hashtags.map((h) => '#' + h).join(' '), enabled: true })))}
+            >
+              <Sparkles size={16} /> Usar sugestões de temas
+            </button>
+          ) : null}
+          <span className={`text-[12px] ${totalTags > 30 ? 'font-semibold text-bad' : 'text-ink-faint'}`}>
+            {totalTags} hashtags ativas · a Meta permite buscar até 30 hashtags diferentes por semana
+          </span>
+        </div>
+      </div>
       <label className="block md:col-span-2">
-        <span className="label">Hashtags do nicho (Instagram)</span>
-        <input className="input" value={tags} disabled={!canWrite} onChange={(e) => setTags(e.target.value)} placeholder="#marketingdigital #agronegocio #clinicaodontologica" />
-        <span className="mt-1 block text-[12px] text-ink-faint">Até 3 são usadas por dia. A busca por hashtag precisa do recurso "Instagram Public Content Access" aprovado pela Meta.</span>
+        <span className="label">Divisão dos posts do Instagram: {100 - share}% leads · {share}% temas</span>
+        <input type="range" min={0} max={100} step={10} value={share} disabled={!canWrite} onChange={(e) => setShare(Number(e.target.value))} className="w-full accent-[#4700ff]" />
+        <span className="mt-1 block text-[12px] text-ink-faint">Leads: o último post de empresas da sua base. Temas: posts das hashtags acima. A busca por hashtag precisa do recurso "Instagram Public Content Access" aprovado pela Meta.</span>
       </label>
       <label className="block">
         <span className="label">Posts do Instagram por dia</span>
