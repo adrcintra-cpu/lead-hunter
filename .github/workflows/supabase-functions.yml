@@ -43,6 +43,10 @@ jobs:
         run: supabase functions deploy providers --project-ref "$PROJECT_REF" --use-api --yes
       - name: engagement
         run: supabase functions deploy engagement --project-ref "$PROJECT_REF" --use-api --yes
+      - name: instagram-auth
+        run: supabase functions deploy instagram-auth --project-ref "$PROJECT_REF" --use-api --yes
+      - name: instagram-agent
+        run: supabase functions deploy instagram-agent --project-ref "$PROJECT_REF" --use-api --yes
 
       # Chamadas por agendador, serviço ou webhook: cada uma confere o próprio segredo.
       - name: cadence-runner
@@ -51,5 +55,7 @@ jobs:
         run: supabase functions deploy whatsapp-qr-inbound --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
       - name: email-webhook
         run: supabase functions deploy email-webhook --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
+      - name: instagram-webhook
+        run: supabase functions deploy instagram-webhook --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
       - name: hub
         run: supabase functions deploy hub --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
