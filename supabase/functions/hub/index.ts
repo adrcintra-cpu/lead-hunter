@@ -7,6 +7,9 @@
 //   { action: "eventos", email, from, to } → atividades com data para o OxyCalendar (somente leitura)
 //   { action: "crescimento", email, months } → séries mensais (leads novos, responderam, reuniões, clientes) da conta
 //   { action: "membros", email }            → quem tem acesso à conta e com que papel (somente leitura)
+//   { action: "acesso_opcoes", email }      → papéis possíveis (para a tela "Pessoas e acessos" do Oxyhub)
+//   { action: "definir_acesso", email, alvo, nome?, papel } → inclui, muda o papel ou tira (papel null) alguém da equipe.
+//       Só para o dono ou administradores. Quem sai tem o login bloqueado (nada é apagado).
 //
 // Secrets (Supabase → Edge Functions → Secrets):
 //   HUB_SECRET  o mesmo valor de LEAD_HUB_SECRET no Oxyhub (32+ caracteres)
@@ -222,8 +225,60 @@ Deno.serve(async (req) => {
   if (!user) return json({ access: false });
 
   // Conta em uso: a do dono, para quem é da equipe
-  const { data: tm } = await admin.from('team_members').select('owner_id').eq('user_id', user.id).maybeSingle();
+  const { data: tm } = await admin.from('team_members').select('owner_id, role').eq('user_id', user.id).maybeSingle();
   const owner = tm?.owner_id ?? user.id;
+  const isAdmin = !tm || tm.role === 'admin';
+
+  if (body.action === 'acesso_opcoes') {
+    if (!isAdmin) return json({ access: true, error: 'Somente administradores.' }, 403);
+    return json({
+      access: true,
+      roles: [
+        { value: 'admin', label: 'Administrador' },
+        { value: 'vendedor', label: 'Vendedor' },
+        { value: 'leitura', label: 'Somente leitura' },
+      ],
+    });
+  }
+
+  if (body.action === 'definir_acesso') {
+    if (!isAdmin) return json({ access: true, error: 'Somente administradores.' }, 403);
+    // deno-lint-ignore no-explicit-any
+    const b = body as any;
+    const alvo = String(b.alvo ?? '').trim().toLowerCase();
+    const nome = typeof b.nome === 'string' ? b.nome.trim().slice(0, 80) : '';
+    const papel = b.papel === null ? null : String(b.papel ?? '');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(alvo)) return json({ access: true, error: 'E-mail inválido.' }, 400);
+    if (papel !== null && !['admin', 'vendedor', 'leitura'].includes(papel)) return json({ access: true, error: 'Papel inválido.' }, 400);
+    const { data: ownerUser } = await admin.auth.admin.getUserById(owner);
+    if ((ownerUser?.user?.email ?? '').toLowerCase() === alvo) return json({ access: true, error: 'O dono da conta não pode ser alterado por aqui.' }, 400);
+    let target = await userByEmail(alvo);
+    if (papel === null) {
+      if (target) {
+        await admin.from('team_members').delete().eq('owner_id', owner).eq('user_id', target.id);
+        await admin.auth.admin.updateUserById(target.id, { ban_duration: '876000h' }).catch(() => undefined);
+      }
+      await admin.from('team_invites').delete().eq('owner_id', owner).eq('email', alvo);
+      return json({ access: true, ok: true });
+    }
+    if (!target) {
+      // Login só pelo Oxyhub: a conta nasce confirmada e sem senha (entra pelo link de uso único do Hub).
+      const { data: created, error } = await admin.auth.admin.createUser({ email: alvo, email_confirm: true, user_metadata: nome ? { full_name: nome } : {} });
+      if (error || !created?.user) return json({ access: true, error: `Não foi possível criar o acesso: ${error?.message ?? 'erro'}` }, 500);
+      target = created.user;
+    } else if ((target as { banned_until?: string }).banned_until) {
+      await admin.auth.admin.updateUserById(target.id, { ban_duration: 'none' }).catch(() => undefined);
+    }
+    if (target.id === owner) return json({ access: true, error: 'O dono da conta não pode ser alterado por aqui.' }, 400);
+    const { data: other } = await admin.from('team_members').select('owner_id').eq('user_id', target.id).maybeSingle();
+    if (other && other.owner_id !== owner) return json({ access: true, error: 'Esse e-mail já faz parte de outra conta do OxySDR.' }, 409);
+    const { error: upErr } = await admin
+      .from('team_members')
+      .upsert({ user_id: target.id, owner_id: owner, role: papel, email: alvo, ...(nome ? { name: nome } : {}) }, { onConflict: 'user_id' });
+    if (upErr) return json({ access: true, error: upErr.message }, 500);
+    await admin.from('team_invites').delete().eq('owner_id', owner).eq('email', alvo);
+    return json({ access: true, ok: true });
+  }
 
   if (body.action === 'acesso') {
     if (!SITE) return json({ error: 'SITE_URL não configurado' }, 500);
@@ -261,8 +316,8 @@ Deno.serve(async (req) => {
     ]);
     const ROLE: Record<string, string> = { admin: 'Administrador', vendedor: 'Vendedor', leitura: 'Somente leitura' };
     const people = [
-      ...(ownerUser?.user?.email ? [{ email: ownerUser.user.email.toLowerCase(), name: null, role: 'Dono da conta' }] : []),
-      ...(team ?? []).filter((t) => t.email).map((t) => ({ email: String(t.email).toLowerCase(), name: t.name, role: ROLE[t.role] ?? t.role })),
+      ...(ownerUser?.user?.email ? [{ email: ownerUser.user.email.toLowerCase(), name: null, role: 'Dono da conta', papel: 'dono' }] : []),
+      ...(team ?? []).filter((t) => t.email).map((t) => ({ email: String(t.email).toLowerCase(), name: t.name, role: ROLE[t.role] ?? t.role, papel: t.role })),
     ];
     return json({ access: true, members: people });
   }
