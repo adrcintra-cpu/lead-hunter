@@ -286,7 +286,7 @@ function QueueCard({ item, canWrite, onChange }: { item: EngItem; canWrite: bool
         </button>
         {canLike && (
           <button className="btn btn-ghost" disabled={!canWrite || busy} onClick={() => void run(() => likeNow(item.id), 'Curtido no Instagram.')}>
-            <Heart size={16} /> Curtir {item.kind === 'resposta' ? 'o comentário' : 'agora'}
+            <Heart size={16} /> Curtir agora
           </button>
         )}
         <button className="btn btn-ghost" disabled={!canWrite || busy} onClick={() => void run(() => discard(item.id), 'Sugestão descartada.')}>
