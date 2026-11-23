@@ -445,16 +445,17 @@ textarea[class*="border"] {
 .glass-bar [class*="border-l"][class*="border-line"] { border-color: var(--color-line-2, #dcdde2) !important; }
 
 /* ── Oxyhub · menu lateral padrão (23/11/2026) ─────────────────────────────
-   Igual em todos os sistemas: menu encostado na borda esquerda, logo abaixo da
-   barra do topo (64px), na altura toda da tela; item em pílula de 40px.
+   Igual em todos os sistemas: menu suspenso (vidro, cantos de 22px) a 12px da
+   borda esquerda, logo abaixo da barra do topo; item em pílula de 40px.
    Hover: fundo ink 5%. Selecionado: pílula branca com sombra curta, texto 600 e
    ícone roxo. Foco do teclado: anel roxo de 2px. */
 .oxy-sidenav {
-  position: sticky; top: 64px; align-self: flex-start;
-  height: calc(100svh - 64px); max-height: none; margin: 0;
+  /* Suspenso e perto da borda: 12px da lateral, do topo (abaixo da barra) e do rodapé */
+  position: sticky; top: 76px; align-self: flex-start;
+  height: calc(100svh - 88px); max-height: none; margin: 12px 0 12px 12px;
   flex-direction: column; gap: 4px; flex: none; /* display fica com o sistema (some no celular) */
   padding: 16px 12px; overflow-y: auto; overflow-x: hidden; scrollbar-width: none;
-  border-radius: 0 !important; z-index: 20;
+  border-radius: 22px !important; z-index: 20;
 }
 .oxy-sidenav::-webkit-scrollbar { display: none; }
 .oxy-nav-label {

@@ -215,7 +215,7 @@ export function AppShell() {
         </button>
       </header>
 
-      {/* Menu encostado na borda esquerda (padrão Oxyhub); o conteúdo tem o próprio respiro */}
+      {/* Menu suspenso a 12px da borda esquerda (padrão Oxyhub); o conteúdo tem o próprio respiro */}
       <div className="md:flex md:flex-1 md:items-start md:gap-6">
         <nav
           aria-label="Navegação principal"
