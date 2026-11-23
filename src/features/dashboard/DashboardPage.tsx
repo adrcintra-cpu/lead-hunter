@@ -14,14 +14,25 @@ import { ChannelChart } from './ChannelChart';
 import { MenuNavStats } from './MenuNavStats';
 
 /** Cartão de número; com `to`, abre a lista correspondente. */
-function Kpi({ label, value, note, accent, to }: { label: string; value: string | number; note?: string; accent?: boolean; to?: string }) {
+type Tone = 'blue' | 'violet' | 'cyan' | 'green';
+/** Paleta Oxy: cada indicador tem sua cor (ponto + número). */
+const TONE: Record<Tone, { dot: string; text: string }> = {
+  blue: { dot: 'rgb(var(--viz-1))', text: 'rgb(var(--oxy-blue))' },
+  violet: { dot: 'rgb(var(--viz-2))', text: 'rgb(var(--oxy-violet))' },
+  cyan: { dot: 'rgb(var(--viz-3))', text: 'rgb(var(--oxy-cyan))' },
+  green: { dot: 'rgb(var(--viz-4))', text: 'rgb(var(--oxy-green))' },
+};
+function Kpi({ label, value, note, tone, to }: { label: string; value: string | number; note?: string; tone?: Tone; to?: string }) {
   const body = (
     <>
       <div className="flex items-center justify-between text-[12.5px] font-semibold text-ink-faint">
-        {label}
+        <span className="inline-flex items-center gap-1.5">
+          {tone && <span className="h-2 w-2 rounded-full" style={{ background: TONE[tone].dot }} aria-hidden />}
+          {label}
+        </span>
         {to && <ChevronRight className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />}
       </div>
-      <div className={cx('mt-1.5 font-mono text-3xl font-semibold tabular-nums', accent && 'text-accent')}>{value}</div>
+      <div className="mt-1.5 font-mono text-3xl font-semibold tabular-nums" style={tone && Number(value) !== 0 ? { color: TONE[tone].text } : undefined}>{value}</div>
       {note && <div className="mt-0.5 text-xs text-ink-faint">{note}</div>}
     </>
   );
@@ -164,12 +175,12 @@ export function DashboardPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi to="/leads" label="Leads" value={db.leads.length} note={`${db.leads.filter((l) => l.stage === 'cliente').length} viraram clientes`} />
-            <Kpi to="/leads?ver=cadencia" label="Em cadência" value={db.enrollments.filter((e) => e.status === 'ativa').length} note={`${liveCampaigns.length} campanhas em andamento`} />
-            <Kpi to="/campanhas" label="Mensagens enviadas" value={m.sent} note={`${m.delivered} entregues · ${m.failed} falhas`} />
-            <Kpi to="/leads?ver=respostas" label="Respostas" value={m.replies} note={`taxa de ${m.replyRate}%`} accent />
-            <Kpi to="/leads?ver=interessados" label="Interessados" value={m.interested} note={`${m.meetings} pediram reunião`} accent />
-            <Kpi to="/tarefas" label="Tarefas abertas" value={openTasks.length} note="atendimento humano" />
+            <Kpi to="/leads" label="Leads" tone="blue" value={db.leads.length} note={`${db.leads.filter((l) => l.stage === 'cliente').length} viraram clientes`} />
+            <Kpi to="/leads?ver=cadencia" label="Em cadência" tone="violet" value={db.enrollments.filter((e) => e.status === 'ativa').length} note={`${liveCampaigns.length} campanhas em andamento`} />
+            <Kpi to="/campanhas" label="Mensagens enviadas" tone="cyan" value={m.sent} note={`${m.delivered} entregues · ${m.failed} falhas`} />
+            <Kpi to="/leads?ver=respostas" label="Respostas" value={m.replies} note={`taxa de ${m.replyRate}%`} tone="blue" />
+            <Kpi to="/leads?ver=interessados" label="Interessados" value={m.interested} note={`${m.meetings} pediram reunião`} tone="green" />
+            <Kpi to="/tarefas" label="Tarefas abertas" tone="violet" value={openTasks.length} note="atendimento humano" />
             <Kpi to="/leads?ver=optout" label="Opt-out" value={m.optOuts} note="pediram para não receber" />
             <div className="card px-4 py-4">
               <div className="text-[12.5px] font-semibold text-ink-faint">Temperatura dos leads</div>

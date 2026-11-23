@@ -18,9 +18,16 @@
   --accent-ink: 255 255 255;
   --accent-soft: 241 235 255;
   --accent-strong: 50 0 184;
-  /* Séries de gráfico (validadas para daltonismo e contraste). */
-  --viz-1: 71 0 255;
-  --viz-2: 235 104 52;
+  /* Paleta Oxy para dados (gráficos, indicadores): azul, violeta, ciano + status. */
+  --viz-1: 37 99 235;   /* Azul OXY #2563EB */
+  --viz-2: 124 58 237;  /* Violeta IA #7C3AED */
+  --viz-3: 34 211 238;  /* Ciano Digital #22D3EE (só preenchimento/linha no claro) */
+  --viz-4: 16 185 129;  /* Sucesso #10B981 */
+  /* Mesmas cores legíveis como texto */
+  --oxy-blue: 37 99 235;
+  --oxy-violet: 124 58 237;
+  --oxy-cyan: 14 116 144;
+  --oxy-green: 4 120 87;
   --good: 11 122 75;
   --good-soft: 227 245 236;
   --warn: 138 90 0;
@@ -41,26 +48,33 @@
 }
 
 .dark {
-  --bg: 12 17 29;
-  --surface: 17 23 40;
-  --subtle: 14 20 34;
-  --muted: 27 35 56;
-  --line: 37 47 66;
-  --line-strong: 56 68 92;
-  --ink: 232 236 245;
-  --ink-soft: 186 194 210;
-  --ink-faint: 148 158 180;
+  /* Paleta Oxy escura */
+  --bg: 11 16 32;          /* Background Dark #0B1020 */
+  --surface: 21 29 50;     /* Surface #151D32 */
+  --subtle: 16 23 41;
+  --muted: 30 40 64;
+  --line: 41 52 73;        /* Bordas #293449 */
+  --line-strong: 58 72 99;
+  --ink: 248 250 252;      /* Texto principal #F8FAFC */
+  --ink-soft: 203 213 225;
+  --ink-faint: 148 163 184; /* Texto secundário #94A3B8 */
   --accent: 62 0 255;
   --accent-ink: 255 255 255;
   --accent-soft: 30 14 82;
   --accent-strong: 176 160 255;
-  --viz-1: 124 92 255;
-  --viz-2: 217 89 38;
-  --good: 120 214 186;
+  --viz-1: 37 99 235;
+  --viz-2: 124 58 237;
+  --viz-3: 34 211 238;
+  --viz-4: 16 185 129;
+  --oxy-blue: 96 145 245;
+  --oxy-violet: 167 130 245;
+  --oxy-cyan: 34 211 238;
+  --oxy-green: 52 211 153;
+  --good: 52 211 153;
   --good-soft: 18 52 44;
-  --warn: 240 190 110;
+  --warn: 245 158 11;
   --warn-soft: 58 42 16;
-  --bad: 245 150 150;
+  --bad: 248 113 113;
   --bad-soft: 66 26 26;
   --ai: 190 172 250;
   --ai-soft: 40 32 70;
@@ -340,14 +354,14 @@
 
 /* Cores dos canais nos gráficos (validadas para daltonismo, claro e escuro). */
 :root {
-  --ch-whatsapp: #13a35a;
-  --ch-email: #3e00ff;
-  --ch-instagram: #e1306c;
+  --ch-whatsapp: #10b981;
+  --ch-email: #2563eb;
+  --ch-instagram: #7c3aed;
 }
 .dark {
-  --ch-whatsapp: #1fa660;
-  --ch-email: #8f74ff;
-  --ch-instagram: #f2508a;
+  --ch-whatsapp: #10b981;
+  --ch-email: #3b82f6;
+  --ch-instagram: #8b5cf6;
 }
 
 /* Card com campo aberto (lista de sugestões) fica por cima dos cards seguintes. */
