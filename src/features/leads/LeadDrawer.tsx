@@ -165,7 +165,7 @@ function ScoreCard({ row }: { row: LeadRow }) {
   const { lead, score } = row;
   const service = useService();
   const [busy, setBusy] = useState(false);
-  const bar = lead.scoreTier === 'alta' ? 'bg-good' : lead.scoreTier === 'media' ? 'bg-warn' : 'bg-ink-faint';
+  const bar = lead.scoreTier === 'alta' ? 'bg-good' : lead.scoreTier === 'media' ? 'bg-warn-fill' : 'bg-ink-faint';
   const chip = lead.scoreTier === 'alta' ? 'bg-good-soft text-good' : lead.scoreTier === 'media' ? 'bg-warn-soft text-warn' : 'bg-muted text-ink-soft';
   return (
     <section className="rounded-xl border border-line p-4">

@@ -27,6 +27,7 @@ export default {
         good: token('good'),
         'good-soft': token('good-soft'),
         warn: token('warn'),
+        'warn-fill': token('warn-fill'),
         'warn-soft': token('warn-soft'),
         bad: token('bad'),
         'bad-soft': token('bad-soft'),

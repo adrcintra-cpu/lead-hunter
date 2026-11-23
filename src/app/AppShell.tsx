@@ -232,7 +232,7 @@ export function AppShell() {
               {dataMode === 'mock' && (
                 <div className="glass-chip rounded-[10px] p-3">
                   <div className="flex items-center gap-2 text-xs font-bold">
-                    <span className="h-2 w-2 rounded-full bg-warn" />
+                    <span className="h-2 w-2 rounded-full bg-warn-fill" />
                     Modo mock
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-ink-faint">Dados fictícios. Nenhuma API externa conectada.</p>

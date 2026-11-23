@@ -186,7 +186,7 @@ export function DashboardPage() {
               <div className="text-[12.5px] font-semibold text-ink-faint">Temperatura dos leads</div>
               <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-muted" aria-hidden>
                 <div className="bg-bad" style={{ width: `${(temp.hot / total) * 100}%` }} />
-                <div className="bg-warn" style={{ width: `${(temp.warm / total) * 100}%` }} />
+                <div className="bg-warn-fill" style={{ width: `${(temp.warm / total) * 100}%` }} />
                 <div className="bg-ink-faint" style={{ width: `${(temp.cold / total) * 100}%` }} />
               </div>
               <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-xs">

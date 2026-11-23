@@ -25,9 +25,9 @@ const TONE: Record<WaStatus, string> = {
 
 const DOT: Record<WaStatus, string> = {
   desconectado: 'bg-ink-faint',
-  aguardando_qr: 'bg-warn animate-pulse',
-  conectando: 'bg-warn animate-pulse',
-  reconectando: 'bg-warn animate-pulse',
+  aguardando_qr: 'bg-warn-fill animate-pulse',
+  conectando: 'bg-warn-fill animate-pulse',
+  reconectando: 'bg-warn-fill animate-pulse',
   conectado: 'bg-good',
   erro: 'bg-bad',
 };

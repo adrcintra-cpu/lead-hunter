@@ -201,7 +201,7 @@ function Accounts({ status, accounts, isAdmin, reload }: { status: IgStatus | nu
 
       {status && !ready && (
         <div className="mt-4 rounded-xl border border-line bg-subtle px-4 py-3.5">
-          <div className="flex items-center gap-2 text-sm font-bold"><span className="h-2 w-2 rounded-full bg-warn" aria-hidden /> Aguardando configuração</div>
+          <div className="flex items-center gap-2 text-sm font-bold"><span className="h-2 w-2 rounded-full bg-warn-fill" aria-hidden /> Aguardando configuração</div>
           <p className="mt-1 text-[13px] text-ink-soft">Falta configurar o app da Meta no Supabase (Edge Functions → Secrets):</p>
           <ul className="mt-1.5 list-disc pl-5 text-[13px] text-ink-soft">
             {!status.configured && <li><span className="font-mono text-xs">META_APP_ID</span> e <span className="font-mono text-xs">META_APP_SECRET</span> (do Meta for Developers)</li>}

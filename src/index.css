@@ -30,8 +30,10 @@
   --oxy-green: 4 120 87;
   --good: 11 122 75;
   --good-soft: 227 245 236;
-  --warn: 138 90 0;
-  --warn-soft: 255 243 220;
+  /* Atenção (paleta Oxy): texto #B45309 (contraste 5:1), preenchimento #F59E0B, fundo suave #FEF3C7 */
+  --warn: 180 83 9;
+  --warn-fill: 245 158 11;
+  --warn-soft: 254 243 199;
   --bad: 180 35 90;
   --bad-soft: 253 231 239;
   --ai: 75 46 158;
@@ -72,7 +74,8 @@
   --oxy-green: 52 211 153;
   --good: 52 211 153;
   --good-soft: 18 52 44;
-  --warn: 245 158 11;
+  --warn: 251 191 36;
+  --warn-fill: 245 158 11;
   --warn-soft: 58 42 16;
   --bad: 248 113 113;
   --bad-soft: 66 26 26;

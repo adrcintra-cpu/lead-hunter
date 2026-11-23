@@ -423,10 +423,10 @@ const DOT: Partial<Record<ActivityType, string>> = {
   message_sent: 'bg-accent',
   reply_received: 'bg-good',
   reply_classified: 'bg-ai',
-  cadence_paused: 'bg-warn',
+  cadence_paused: 'bg-warn-fill',
   cadence_stopped: 'bg-bad',
   message_failed: 'bg-bad',
-  task_created: 'bg-warn',
+  task_created: 'bg-warn-fill',
   stage_changed: 'bg-ink-soft',
 };
 
