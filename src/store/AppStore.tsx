@@ -164,7 +164,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     signOut: async () => {
       await auth.signOut();
       // Login único: sai também do Oxyhub (senão o hub logaria a pessoa de volta)
-      if (dataMode === 'supabase') window.location.assign(HUB_SIGN_OUT);
+      if (dataMode === 'supabase') (window.top ?? window).location.href = HUB_SIGN_OUT;
       else setSession(null);
     },
   };

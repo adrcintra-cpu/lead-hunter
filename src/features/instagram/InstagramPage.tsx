@@ -172,7 +172,8 @@ function Accounts({ status, accounts, isAdmin, reload }: { status: IgStatus | nu
     setError('');
     try {
       const { url } = await instagramApi.startConnect();
-      window.location.assign(url);
+      // Dentro do Hub, a autorização da Meta abre na janela inteira (o Facebook não abre em quadro).
+      (window.top ?? window).location.href = url;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy('');

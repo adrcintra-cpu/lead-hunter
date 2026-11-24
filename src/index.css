@@ -549,3 +549,10 @@ a.oxy-kpi:hover .oxy-kpi-arrow, button.oxy-kpi:hover .oxy-kpi-arrow { transform:
 .dark .oxy-kpi-foot, .dark .oxy-kpi-arrow { color: rgb(var(--ink-faint)); }
 .dark .oxy-kpi-value { color: #60a5fa; }
 .dark .oxy-kpi-value.is-zero { color: rgb(255 255 255 / .3); }
+
+/* Dentro do Hub (hub.oxyhub.com.br/s/lead): a barra do Hub substitui a do sistema */
+/* No computador; no celular a barra fica porque tem o botão do menu de páginas */
+@media (min-width: 768px) {
+  .oxyhub-embed header.glass-bar { display: none !important; }
+  .oxyhub-embed .oxy-sidenav { top: 12px; height: calc(100svh - 24px); }
+}
