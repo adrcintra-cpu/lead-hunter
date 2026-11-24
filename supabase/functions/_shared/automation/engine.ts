@@ -109,6 +109,28 @@ function isSuppressed(supp: Row[], company: Row, lead: Row): boolean {
   );
 }
 
+/** Nome da empresa como as pessoas falam (sem LTDA, ME, S.A., EIRELI e com só a inicial maiúscula). */
+function spokenCompany(name: unknown): string {
+  const n = String(name ?? '')
+    .replace(/\b(ltda|me|epp|eireli|s\/?a|s\.a\.?|cia|mei)\b\.?/gi, '')
+    .replace(/[\s,.-]+$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (!n) return '';
+  return n === n.toUpperCase() ? n.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_, a, b) => a + b.toUpperCase()).replace(/\b(De|Da|Do|Das|Dos|E)\b/g, (w) => w.toLowerCase()) : n;
+}
+/** Garante a abertura "Olá, <primeiro nome ou empresa>, tudo bem?" na primeira mensagem. */
+function softOpening(body: string, contact: unknown, company: unknown): string {
+  const first = String(contact ?? '').trim().split(/\s+/)[0] || '';
+  const who = first ? first.charAt(0).toUpperCase() + first.slice(1).toLowerCase() : spokenCompany(company);
+  const greet = who ? `Olá, ${who}, tudo bem?` : 'Olá, tudo bem?';
+  const text = body.trim();
+  if (/^ol[áa](?=[\s,!.])[^\n]{0,60}tudo bem\??/i.test(text)) return text;
+  // Tira um cumprimento curto que a IA tenha colocado ("Oi, Ana!", "Olá!") e põe a saudação padrão
+  const rest = text.replace(/^(ol[áa]|oi|bom dia|boa tarde|boa noite)(?=[\s,!.])[^.!?\n]{0,40}[.!?,]?\s*/i, '').trim();
+  return `${greet}\n\n${rest.charAt(0).toUpperCase()}${rest.slice(1)}`;
+}
+
 function companyForAI(c: Row) {
   return {
     legalName: c.legal_name,
@@ -257,6 +279,8 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
   }
   const parsed = parseSubject(raw);
   let body = parsed.body;
+  // Primeira mensagem começa suave: "Olá, <nome ou empresa>, tudo bem?" (garante mesmo se a IA esquecer)
+  if (!conv.history.length && step.channel !== 'linkedin') body = softOpening(body, lead.contact_name, c.trade_name || c.legal_name);
   if (step.channel === 'email') {
     if (p.signature && !body.includes(p.signature)) body = `${body}\n\n${p.signature}`;
     body = withOptOutFooter(body);
