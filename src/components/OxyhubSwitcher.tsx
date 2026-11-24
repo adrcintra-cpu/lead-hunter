@@ -12,7 +12,7 @@ type SystemId = 'aprovacao' | 'lead' | 'coody' | 'proposals' | 'growth' | 'calen
 const SYSTEMS: { id: SystemId; name: string; description: string; icon: LucideIcon }[] = [
   { id: 'aprovacao', name: 'OxyPlanning', description: 'Planejamento e aprovação', icon: Workflow },
   { id: 'lead', name: 'OxySDR', description: 'Prospecção e pipeline', icon: Radar },
-  { id: 'coody', name: 'OxyCreate', description: 'Workspace criativo', icon: Clapperboard },
+  { id: 'coody', name: 'OxyStudio', description: 'Workspace criativo', icon: Clapperboard },
   { id: 'proposals', name: 'OxyProposal', description: 'Propostas comerciais', icon: FileText },
   { id: 'growth', name: 'OxyGrowth', description: 'Auditoria e crescimento', icon: TrendingUp },
   { id: 'calendar', name: 'OxyCalendar', description: 'Calendário integrado', icon: CalendarDays },
