@@ -71,6 +71,12 @@ export function AppShell() {
       return !c;
     });
   const { pathname } = useLocation();
+  // Nome da aba no padrão Oxyhub: "Página · OxySDR · Oxyhub"
+  useEffect(() => {
+    const all = GROUPS.flatMap((g) => g.items);
+    const hit = all.find((i) => (i.to === '/' ? pathname === '/' : pathname === i.to || pathname.startsWith(i.to + '/')));
+    document.title = `${hit?.label ?? 'OxySDR'}${hit ? ' · OxySDR' : ''} · Oxyhub`;
+  }, [pathname]);
   useEffect(() => setMenuOpen(false), [pathname]);
   useEffect(() => {
     if (!menuOpen) return;

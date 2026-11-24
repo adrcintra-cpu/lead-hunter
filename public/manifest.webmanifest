@@ -1,6 +1,6 @@
 {
-  "name": "OxyHub",
-  "short_name": "OxyHub",
+  "name": "OxySDR",
+  "short_name": "OxySDR",
   "description": "OxySDR da Oxycom: busca, prospecção e atendimento com o BEELIE.",
   "lang": "pt-BR",
   "start_url": "/",
@@ -9,8 +9,23 @@
   "background_color": "#3700FA",
   "theme_color": "#3700FA",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
