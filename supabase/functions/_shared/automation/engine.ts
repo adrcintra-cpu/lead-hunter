@@ -5,7 +5,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { PROMPT_VERSION } from '../ai/prompts.ts';
 import { withDefaults } from '../ai/assistantDefaults.ts';
-import { hasClaude, logRun, MODEL, runTask } from '../ai/claude.ts';
+import { hasClaude, logRun, modelFor, runTask } from '../ai/claude.ts';
 import { hasWhatsapp, sendWhatsapp, toE164Digits, waMeLink } from '../channels/metaWhatsapp.ts';
 import { emailHtml, sendEmail } from '../channels/resend.ts';
 import { emailProblem } from './emailCheck.ts';
@@ -266,7 +266,7 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
     subject: parsed.subject ?? (step.subject ? renderTemplate(step.subject, data).text : undefined),
     body,
     context: leadContext(c, lead),
-    model: MODEL,
+    model: modelFor('generateApproach'),
     template: step.whatsappTemplate ? `IA + template Meta “${step.whatsappTemplate}”` : `IA — ${stage === 'primeira' ? 'mensagem inicial' : stage === 'ultimo' ? 'último contato' : 'acompanhamento'}`,
     editedByUser: false,
     generatedAt: at,
@@ -1023,7 +1023,7 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       channel,
       generated_content: body,
       final_content: body,
-      model: MODEL,
+      model: modelFor('suggestReply'),
       prompt_version: PROMPT_VERSION,
       campaign_id: campaignId ?? null,
       recipient: channel === 'email' ? lead.email : toE164Digits(company.whatsapp ?? ''),
@@ -1284,7 +1284,7 @@ export async function sendReferralEmail(db: Db, ownerId: string, lead: Row, comp
     generated_content: body,
     final_content: body,
     status: 'sent',
-    model: MODEL,
+    model: modelFor('generateApproach'),
     prompt_version: PROMPT_VERSION,
     subject,
     sender,

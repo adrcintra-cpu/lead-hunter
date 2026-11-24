@@ -4,7 +4,18 @@
 
 import { PROMPT_VERSION, TASKS, type TaskName } from './prompts.ts';
 
-export const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-5-5';
+// Dois modelos: o principal (tarefas de MAIN_MODEL_TASKS) e o rápido (todo o resto, que é o volume).
+// Os segredos trocam o modelo sem deploy. Para voltar tudo ao principal:
+// supabase secrets set ANTHROPIC_MODEL_FAST=claude-sonnet-5-5
+export const MAIN_MODEL = Deno.env.get('ANTHROPIC_MODEL') || 'claude-sonnet-5-5';
+export const FAST_MODEL = Deno.env.get('ANTHROPIC_MODEL_FAST') || 'claude-haiku-5-5';
+
+const MAIN_MODEL_TASKS: ReadonlySet<string> = new Set<TaskName>(['ownerCommand', 'ownerAsk', 'summarizeResults', 'analyzeCompany', 'screenInbound']);
+
+/** Modelo usado por uma tarefa (o mesmo nome gravado em ai_runs.fn). */
+export function modelFor(fn: string): string {
+  return MAIN_MODEL_TASKS.has(fn) ? MAIN_MODEL : FAST_MODEL;
+}
 
 export interface ClaudeRun<T = unknown> {
   output: T;
@@ -48,7 +59,7 @@ export async function runTask<T = unknown>(fn: TaskName, input: unknown): Promis
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
+      model: modelFor(fn),
       max_tokens: 3000,
       system: task.system,
       messages: [{ role: 'user', content: task.user(input) }],
@@ -80,7 +91,7 @@ export async function logRun(db: any, ownerId: string, fn: string, started: numb
   await db.from('ai_runs').insert({
     owner_id: ownerId,
     fn,
-    model: MODEL,
+    model: modelFor(fn),
     prompt_version: PROMPT_VERSION,
     input_tokens: usage.input_tokens ?? null,
     output_tokens: usage.output_tokens ?? null,
@@ -101,7 +112,7 @@ export async function describeImageClaude(base64: string, mediaType: string, cap
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
+      model: modelFor('describeImage'),
       max_tokens: 400,
       system:
         'Você lê imagens enviadas no WhatsApp de uma empresa. Responda em português do Brasil, em até 4 linhas, só com o que está visível: ' +

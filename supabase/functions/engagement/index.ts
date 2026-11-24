@@ -10,7 +10,7 @@
 // LinkedIn: sem API de busca/mensagem; o link abre a busca de pessoas da empresa no próprio LinkedIn.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { MODEL, hasClaude, strictSchema } from '../_shared/ai/claude.ts';
+import { hasClaude, modelFor, strictSchema } from '../_shared/ai/claude.ts';
 import { withDefaults } from '../_shared/ai/assistantDefaults.ts';
 import { graph, metaConfig, MetaError } from '../_shared/instagram/graph.ts';
 import { openToken } from '../_shared/instagram/crypto.ts';
@@ -91,7 +91,7 @@ async function writeTexts(
     method: 'POST',
     headers: { 'x-api-key': Deno.env.get('ANTHROPIC_API_KEY')!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
+      model: modelFor('engagement'),
       max_tokens: 6000,
       system,
       messages: [{ role: 'user', content: JSON.stringify({ itens: items.map((i) => ({ key: i.key, canal: i.channel, contexto: i.context.slice(0, 1500) })) }) }],
@@ -328,7 +328,7 @@ async function build(db: Db, owner: string) {
       const suggestion = d.channel === 'linkedin' ? t?.invite : t?.comment;
       if (!suggestion) return null;
       const context = d.channel === 'linkedin' && t?.message ? `${d.context}${FOLLOW_MARK}${t.message}` : d.channel === 'resposta' && t?.interest ? `Possível cliente: demonstrou interesse.\n${d.context}` : d.context;
-      return { ...d.row, owner_id: owner, suggestion, for_date: day, ai_model: MODEL, context };
+      return { ...d.row, owner_id: owner, suggestion, for_date: day, ai_model: modelFor('engagement'), context };
     })
     .filter(Boolean) as Row[];
   let created = 0;
