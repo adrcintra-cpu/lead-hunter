@@ -131,6 +131,34 @@ function softOpening(body: string, contact: unknown, company: unknown): string {
   return `${greet}\n\n${rest.charAt(0).toUpperCase()}${rest.slice(1)}`;
 }
 
+/**
+ * Abertura em duas partes (WhatsApp conectado): no primeiro contato envia só "Olá, X, tudo bem?" e guarda
+ * o restante em leads.beelie.pendingOpening. Sem contato anterior e sem cumprimento na primeira linha, não divide.
+ */
+async function splitOpening(db: Db, lead: Row, body: string): Promise<{ greeting: string; rest: string } | null> {
+  const m = /^(ol[áa](?=[\s,!.])[^\n]{0,60}tudo bem\?)\s*\n+([\s\S]+)$/i.exec(body.trim());
+  if (!m) return null;
+  const { count } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('lead_id', lead.id).not('sent_at', 'is', null);
+  if ((count ?? 0) > 0) return null;
+  const rest = m[2].trim();
+  const beelie = { ...((lead.beelie as Row) ?? {}), pendingOpening: rest, pendingOpeningAt: new Date().toISOString() };
+  const { error } = await db.from('leads').update({ beelie }).eq('id', lead.id);
+  if (error) return null; // sem onde guardar, manda a mensagem inteira como antes
+  lead.beelie = beelie;
+  return { greeting: m[1].trim(), rest };
+}
+/** Tira a continuação guardada (já foi usada na resposta ou no acompanhamento). */
+async function clearPendingOpening(db: Db, lead: Row) {
+  // Lê a memória atual (a resposta pode ter acabado de atualizá-la) e tira só a continuação.
+  const { data } = await db.from('leads').select('beelie').eq('id', lead.id).maybeSingle();
+  const b = { ...((data?.beelie as Row) ?? {}) };
+  if (!b.pendingOpening) return;
+  delete b.pendingOpening;
+  delete b.pendingOpeningAt;
+  lead.beelie = b;
+  await db.from('leads').update({ beelie: b }).eq('id', lead.id);
+}
+
 function companyForAI(c: Row) {
   return {
     legalName: c.legal_name,
@@ -246,6 +274,12 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
       editedByUser: false,
       generatedAt: at,
     };
+  }
+  // Só o cumprimento saiu e o contato não respondeu: o acompanhamento por WhatsApp é a continuação preparada.
+  const pending = typeof lead.beelie?.pendingOpening === 'string' ? (lead.beelie.pendingOpening as string) : '';
+  if (pending && step.channel === 'whatsapp' && !step.whatsappTemplate) {
+    await clearPendingOpening(db, lead);
+    return { channel: step.channel, body: pending, context: leadContext(c, lead), model: modelFor('generateApproach'), template: 'IA — continuação da abertura', editedByUser: false, generatedAt: at };
   }
   if (!hasClaude()) throw new Error('Etapa com IA, mas ANTHROPIC_API_KEY não está configurada.');
   const started = Date.now();
@@ -680,6 +714,13 @@ async function applyEffect(db: Db, eff: Effect, e: Row, camp: Row, lead: Row, c:
     // WhatsApp conectado (QR): a mensagem entra na fila do serviço e sai sozinha, com intervalo entre envios.
     // Se o serviço não aceitar (desligado, desconectado, sem configuração), vira tarefa manual como antes.
     if (p?.whatsapp_qr_campaigns !== false && qrServiceConfigured() && recipient) {
+      // Primeiro contato em duas partes: sai só o cumprimento; o restante fica guardado e vai quando o contato responder.
+      const split = await splitOpening(db, lead, draft.body);
+      if (split) {
+        draft.body = split.greeting;
+        base.generated_content = split.greeting;
+        base.final_content = split.greeting;
+      }
       const queued: Row = await must(db.from('messages').insert({ ...base, status: 'queued', provider: 'whatsapp_qr', ...(waSlot ? { wa_slot: waSlot } : {}) }).select('id').single());
       const ok = await queueQrSend({ ownerId: owner, leadId: lead.id, messageId: queued.id, phone: recipient, text: draft.body, slot: waSlot });
       if (ok) {
@@ -1031,8 +1072,11 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       brief: beelieBrief(lead.beelie, { contactName: lead.contact_name, contactRole: lead.contact_role, email: lead.email }),
       // Lead que chamou sozinho: o Beelie não fez abordagem e ainda não conhece a empresa.
       inbound: lead.origin === INBOUND_ORIGIN,
+      // Abertura em duas partes: a continuação preparada vai agora, depois da resposta ao cumprimento.
+      pendingOpening: typeof lead.beelie?.pendingOpening === 'string' ? lead.beelie.pendingOpening : undefined,
     });
     await logRun(db, ownerId, 'suggestReply', started, 'ok', run.usage);
+    await clearPendingOpening(db, lead);
     // Fim de conversa: sempre com o convite para o site e o Instagram da empresa.
     const raw = run.output.message?.trim();
     const body = raw

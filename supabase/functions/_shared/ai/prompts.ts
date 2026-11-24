@@ -317,6 +317,7 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         assistant?: { name?: string; persona?: string; knowledge?: string; playbooks?: string };
         brief?: string;
         inbound?: boolean;
+        pendingOpening?: string;
       };
       const cut = (t: string | undefined, n: number) => (t ?? '').trim().slice(0, n);
       return [
@@ -331,6 +332,9 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         i.category ? `Classificação da última resposta: ${i.category}` : '',
         i.inbound
           ? 'IMPORTANTE: o lead procurou a empresa por conta própria (não houve abordagem antes). Agradeça o contato, apresente-se uma vez e ajude com o que ele pediu. Ainda não se sabe o nome da pessoa nem a empresa dela: descubra com naturalidade, uma pergunta por vez. Não diga que viu algo sobre a empresa dele.'
+          : '',
+        i.pendingOpening
+          ? `ABERTURA EM DUAS PARTES: a sua primeira mensagem foi só o cumprimento e o lead respondeu agora. Responda ao cumprimento em poucas palavras, de forma natural (ex.: "Tudo ótimo, obrigado!" se ele perguntou de volta) e, na mesma mensagem, siga com esta continuação já preparada, ajustando só o necessário para soar natural depois da resposta dele: "${cut(i.pendingOpening, 600)}". Se a resposta dele já trouxe outra coisa (pediu o motivo, disse que não é a pessoa certa, recusou), responda a isso primeiro, seguindo as regras dos estágios.`
           : '',
         i.brief ? `MEMÓRIA DO LEAD (siga o objetivo do estágio; não pergunte o que já se sabe):\n${i.brief}` : '',
         `Empresa do lead (dados reais): ${JSON.stringify(stripInternal(i.company))}`,
