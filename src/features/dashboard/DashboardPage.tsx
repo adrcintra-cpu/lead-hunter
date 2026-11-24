@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bot, ChevronRight, Database, Megaphone, Plus, Sparkles } from 'lucide-react';
+import { ArrowUpRight, Bot, Database, Megaphone, Plus, Sparkles } from 'lucide-react';
 import { useApp, useDb, useService } from '@/store/AppStore';
 import { useLeadRows } from '@/store/selectors';
 import { CLOSED_STAGES, stageLabel } from '@/core/types';
@@ -22,23 +22,30 @@ const TONE: Record<Tone, { dot: string; text: string }> = {
   cyan: { dot: 'rgb(var(--viz-3))', text: 'rgb(var(--oxy-cyan))' },
   green: { dot: 'rgb(var(--viz-4))', text: 'rgb(var(--oxy-green))' },
 };
-function Kpi({ label, value, note, tone, to }: { label: string; value: string | number; note?: string; tone?: Tone; to?: string }) {
+/** Indicador padrão Oxyhub (igual à Home do Hub): ponto + rótulo, número em Saira Light azul, rodapé. */
+function Kpi({ label, value, note, tone = 'blue', to }: { label: string; value: string | number; note?: string; tone?: Tone; to?: string }) {
+  const zero = Number(value) === 0;
   const body = (
     <>
-      <div className="flex items-center justify-between text-[12.5px] font-semibold text-ink-faint">
-        <span className="inline-flex items-center gap-1.5">
-          {tone && <span className="h-2 w-2 rounded-full" style={{ background: TONE[tone].dot }} aria-hidden />}
-          {label}
-        </span>
-        {to && <ChevronRight className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />}
+      <div className="oxy-kpi-head">
+        <span className="oxy-kpi-dot" style={{ background: TONE[tone].dot }} aria-hidden />
+        <p className="oxy-kpi-label">{label}</p>
+        {to && <ArrowUpRight className="oxy-kpi-arrow" aria-hidden />}
       </div>
-      <div className="mt-1.5 font-mono text-3xl font-semibold tabular-nums" style={tone && Number(value) !== 0 ? { color: TONE[tone].text } : undefined}>{value}</div>
-      {note && <div className="mt-0.5 text-xs text-ink-faint">{note}</div>}
+      <div className="oxy-kpi-body">
+        <p className={cx('oxy-kpi-value', zero && 'is-zero')}>{value}</p>
+      </div>
+      {note && (
+        <p className="oxy-kpi-foot">
+          {note}
+          <span className="oxy-kpi-src">OxySDR</span>
+        </p>
+      )}
     </>
   );
-  if (!to) return <div className="card px-4 py-4">{body}</div>;
+  if (!to) return <div className="card oxy-kpi">{body}</div>;
   return (
-    <Link to={to} className="card group block px-4 py-4 transition-colors hover:border-accent/50 hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+    <Link to={to} className="card oxy-kpi">
       {body}
     </Link>
   );
