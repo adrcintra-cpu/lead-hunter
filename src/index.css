@@ -555,4 +555,7 @@ a.oxy-kpi:hover .oxy-kpi-arrow, button.oxy-kpi:hover .oxy-kpi-arrow { transform:
 @media (min-width: 768px) {
   .oxyhub-embed header.glass-bar { display: none !important; }
   .oxyhub-embed .oxy-sidenav { top: 12px; height: calc(100svh - 24px); }
+  /* O menu deste sistema aparece no menu do Hub (como na Vercel) */
+  .oxyhub-nav-hub [data-oxyhub-nav] { display: none !important; }
+  .oxyhub-nav-hub [data-oxyhub-nav] ~ main { padding-left: 24px; }
 }

@@ -96,6 +96,7 @@ export function AppShell() {
       to={to}
       end={end}
       onClick={onPick}
+      data-oxyhub-item={label}
       title={mini ? label : undefined}
       className={cx('oxy-nav-item', mini && '!justify-center !px-0')}
     >
@@ -111,7 +112,7 @@ export function AppShell() {
       const items = g.items.filter((i) => nav.includes(i));
       if (!items.length) return null;
       return (
-        <div key={g.label} className="flex flex-col gap-1">
+        <div key={g.label} className="flex flex-col gap-1" data-oxyhub-section={g.label}>
           {!mini && <span className="oxy-nav-label">{g.label}</span>}
           {items.map((i) => link(i, onPick, mini))}
         </div>
@@ -224,6 +225,7 @@ export function AppShell() {
       {/* Menu suspenso a 12px da borda esquerda (padrão Oxyhub); o conteúdo tem o próprio respiro */}
       <div className="md:flex md:flex-1 md:items-start md:gap-6">
         <nav
+          data-oxyhub-nav
           aria-label="Navegação principal"
           className={cx('glass oxy-sidenav hidden md:flex', collapsed ? 'w-[72px]' : 'w-[248px]')}
         >
