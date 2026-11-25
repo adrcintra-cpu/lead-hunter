@@ -175,6 +175,19 @@ async function withRetry<T extends { error: { message: string } | null }>(run: (
   throw new Error(readable(table, last?.error?.message ?? ''));
 }
 
+
+/**
+ * O que não precisa vir para o aparelho:
+ * - "cadence_step" (registro técnico de cada etapa da cadência; nenhuma tela mostra) — um terço do histórico;
+ * - chamadas de IA antigas: só os últimos 30 dias (aparecem só como contagem em Configurações).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function scope(t: TableName, q: any): any {
+  if (t === 'activities') return q.neq('type', 'cadence_step');
+  if (t === 'aiRuns') return q.gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString());
+  return q;
+}
+
 export class SupabaseRepository implements Repository {
   private state: DbState = emptyDb();
   private listeners = new Set<() => void>();
@@ -228,18 +241,32 @@ export class SupabaseRepository implements Repository {
     private onError: (message: string) => void = () => {},
   ) {}
 
-  /** Todas as linhas de uma consulta, de 1000 em 1000. */
+  /**
+   * Todas as linhas de uma consulta, em páginas de 1000.
+   * A primeira página traz o total; as demais são pedidas em paralelo (antes eram uma após a outra,
+   * e tabelas com dezenas de milhares de linhas levavam vários segundos no celular).
+   */
   private async pages(t: TableName, build: (q: ReturnType<SupabaseClient['from']>) => unknown, extraCols = ''): Promise<Record<string, unknown>[]> {
     const def = DEFS[t];
-    const rows: Record<string, unknown>[] = [];
-    for (let from = 0; ; from += 1000) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = await withRetry(() => {
-        const q: any = build(this.client.from(def.sql)); // eslint-disable-line @typescript-eslint/no-explicit-any
-        return q.select(def.cols.join(',') + extraCols).order(def.order, { ascending: t === 'searchResults' }).range(from, from + 999);
-      }, def.sql) as { data: unknown[] | null; error: null };
-      rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
-      if (!data || data.length < 1000) break;
+    const PAGE = 1000;
+    const fetchPage = (from: number, count: boolean) =>
+      withRetry(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let q: any = this.client.from(def.sql);
+        q = q.select(def.cols.join(',') + extraCols, count ? { count: 'exact' } : undefined);
+        q = scope(t, build(q));
+        return q.order(def.order, { ascending: t === 'searchResults' }).range(from, from + PAGE - 1);
+      }, def.sql) as Promise<{ data: unknown[] | null; count?: number | null; error: null }>;
+    const first = await fetchPage(0, true);
+    const rows = [...((first.data ?? []) as Record<string, unknown>[])];
+    const total = first.count ?? rows.length;
+    if (rows.length < PAGE || total <= PAGE) return rows;
+    const starts: number[] = [];
+    for (let from = PAGE; from < total; from += PAGE) starts.push(from);
+    // até 6 páginas ao mesmo tempo
+    for (let i = 0; i < starts.length; i += 6) {
+      const got = await Promise.all(starts.slice(i, i + 6).map((from) => fetchPage(from, false)));
+      for (const g of got) rows.push(...((g.data ?? []) as Record<string, unknown>[]));
     }
     return rows;
   }
@@ -251,21 +278,7 @@ export class SupabaseRepository implements Repository {
     const tables = Object.keys(DEFS) as TableName[];
     await Promise.all(
       tables.map(async (t) => {
-        const def = DEFS[t];
-        const rows: Record<string, unknown>[] = [];
-        for (let from = 0; ; from += 1000) {
-          const { data } = await withRetry(
-            () =>
-              this.client
-                .from(def.sql)
-                .select(def.cols.join(','))
-                .order(def.order, { ascending: t === 'searchResults' })
-                .range(from, from + 999),
-            def.sql,
-          );
-          rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
-          if (!data || data.length < 1000) break;
-        }
+        const rows = await this.pages(t, (q) => q);
         (next as unknown as Record<string, unknown[]>)[t] = rows.map((r) => fromRow(t, r));
       }),
     );
