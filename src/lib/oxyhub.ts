@@ -25,7 +25,9 @@ export function goToHubLogin(): boolean {
   } catch {
     /* sem sessionStorage: segue para o hub */
   }
-  window.location.replace(`${HUB_URL}/abrir/lead`);
+  // Volta para a mesma página depois do login (dentro do Hub ou em tela cheia)
+  const here = window.location.pathname + window.location.search;
+  window.location.replace(`${HUB_URL}/abrir/lead${here && here !== '/' ? `?para=${encodeURIComponent(here)}` : ''}`);
   return true;
 }
 

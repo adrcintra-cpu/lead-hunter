@@ -16,6 +16,20 @@
   if (!inFrame) return;
   var root = document.documentElement;
   root.classList.add("oxyhub-embed");
+
+  // Sem sessão neste sistema: a tela de login marcada com data-oxyhub-login pede ao Hub um acesso
+  // (o Hub abre o sistema direto e só gera o acesso quando precisa; ele faz isso uma vez só).
+  var askedLogin = false;
+  function checkLogin() {
+    if (askedLogin) return;
+    var el = document.querySelector("[data-oxyhub-login]");
+    if (!el) return;
+    askedLogin = true;
+    var next = el.getAttribute("data-oxyhub-login") || "/";
+    try { window.parent.postMessage({ type: "oxyhub:need-login", path: next }, "https://hub.oxyhub.com.br"); } catch (err) { /* ignora */ }
+  }
+  setInterval(checkLogin, 400);
+  document.addEventListener("DOMContentLoaded", checkLogin);
   document.addEventListener("click", function (e) {
     var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
     if (!a || a.target) return;
