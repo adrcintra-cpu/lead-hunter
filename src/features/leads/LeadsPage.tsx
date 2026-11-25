@@ -300,12 +300,12 @@ export function LeadsTable({ rows, emptyText }: { rows: LeadRow[]; emptyText?: s
                 <td className="px-3">{c.city}</td>
                 <td className="px-3">{c.state}</td>
                 <td className={cx('max-w-[180px] truncate px-3', !c.website && 'text-ink-faint')}>{c.website ? <a href={/^https?:\/\//i.test(c.website) ? c.website : `https://${c.website}`} target="_blank" rel="noopener noreferrer" className="hover:text-accent hover:underline">{c.website}</a> : '—'}</td>
-                <td className="whitespace-nowrap px-3 font-mono text-[12.5px]">{c.phone ?? '—'}</td>
+                <td className="whitespace-nowrap px-3 font-mono text-[12.5px]" title={c.phone ?? undefined}>{phoneShort(c.phone)}</td>
                 <td className="px-3"><WhatsappBadge status={c.whatsappStatus} hasNumber={!!c.whatsapp} /></td>
                 <td className="px-3"><ScoreBadge score={lead.currentScore} tier={lead.scoreTier} /></td>
                 <td className="whitespace-nowrap px-3">{stageLabel(lead.stage as LeadStage)}</td>
                 <td className="whitespace-nowrap px-3 text-[12.5px] text-ink-soft">{lead.ownerName ?? '—'}</td>
-                <td className="whitespace-nowrap px-3 text-[12.5px] text-ink-soft">{lead.origin}</td>
+                <td className="max-w-[200px] truncate whitespace-nowrap px-3 text-[12.5px] text-ink-soft" title={lead.origin}>{lead.origin}</td>
                 <td className="px-3 font-mono text-[12.5px] text-ink-soft">{formatDate(lead.discoveredAt)}</td>
               </tr>
             ))}
@@ -402,5 +402,17 @@ export function LeadsPage() {
       <LeadsTable rows={scoped} />
       {adding && <AddLeadDialog onClose={() => setAdding(false)} />}
     </div>
+  );
+}
+
+/** Telefone na tabela: só o primeiro número (+N quando o cadastro tem vários); a lista completa fica no title e no perfil. */
+function phoneShort(phone?: string | null) {
+  if (!phone) return '—';
+  const parts = phone.split(/\s*[/;,|]\s*/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length <= 1) return phone;
+  return (
+    <>
+      {parts[0]} <span className="font-sans text-[11.5px] font-semibold text-ink-faint">+{parts.length - 1}</span>
+    </>
   );
 }
