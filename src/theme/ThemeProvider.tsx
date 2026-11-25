@@ -40,7 +40,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // Sempre claro: a linha visual Oxyhub não tem tema escuro (o Mac à noite deixava o sistema escuro).
   void system;
-  const resolved: ResolvedTheme = 'light';
+  const resolved = 'light' as ResolvedTheme;
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', resolved === 'dark');
