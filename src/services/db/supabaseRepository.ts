@@ -152,6 +152,29 @@ const FULL_RELOAD_MS = 15 * 60_000;
 /** Margem para relógio diferente e gravações que terminam durante a leitura. */
 const OVERLAP_MS = 5 * 60_000;
 
+
+/** Mensagem curta para a tela: a resposta cortada no celular vinha com os dados brutos como "erro". */
+function readable(table: string, message: string) {
+  const m = (message || '').trim();
+  if (!m || m.length > 180 || /^[[{]/.test(m)) return `Falha ao carregar ${table}: a conexão caiu no meio da leitura. Confira a internet e tente de novo.`;
+  return `Falha ao carregar ${table}: ${m}`;
+}
+
+/** Lê uma página com até 3 tentativas (rede do celular pode cortar a resposta no meio). */
+async function withRetry<T extends { error: { message: string } | null }>(run: () => PromiseLike<T>, table: string): Promise<T> {
+  let last: T | null = null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      last = await run();
+      if (!last.error) return last;
+    } catch (e) {
+      last = { data: null, error: { message: e instanceof Error ? e.message : String(e) } } as unknown as T;
+    }
+    await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+  }
+  throw new Error(readable(table, last?.error?.message ?? ''));
+}
+
 export class SupabaseRepository implements Repository {
   private state: DbState = emptyDb();
   private listeners = new Set<() => void>();
@@ -211,9 +234,10 @@ export class SupabaseRepository implements Repository {
     const rows: Record<string, unknown>[] = [];
     for (let from = 0; ; from += 1000) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const q: any = build(this.client.from(def.sql));
-      const { data, error } = await q.select(def.cols.join(',') + extraCols).order(def.order, { ascending: t === 'searchResults' }).range(from, from + 999);
-      if (error) throw new Error(`Falha ao carregar ${def.sql}: ${error.message}`);
+      const { data } = await withRetry(() => {
+        const q: any = build(this.client.from(def.sql)); // eslint-disable-line @typescript-eslint/no-explicit-any
+        return q.select(def.cols.join(',') + extraCols).order(def.order, { ascending: t === 'searchResults' }).range(from, from + 999);
+      }, def.sql) as { data: unknown[] | null; error: null };
       rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
       if (!data || data.length < 1000) break;
     }
@@ -230,12 +254,15 @@ export class SupabaseRepository implements Repository {
         const def = DEFS[t];
         const rows: Record<string, unknown>[] = [];
         for (let from = 0; ; from += 1000) {
-          const { data, error } = await this.client
-            .from(def.sql)
-            .select(def.cols.join(','))
-            .order(def.order, { ascending: t === 'searchResults' })
-            .range(from, from + 999);
-          if (error) throw new Error(`Falha ao carregar ${def.sql}: ${error.message}`);
+          const { data } = await withRetry(
+            () =>
+              this.client
+                .from(def.sql)
+                .select(def.cols.join(','))
+                .order(def.order, { ascending: t === 'searchResults' })
+                .range(from, from + 999),
+            def.sql,
+          );
           rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
           if (!data || data.length < 1000) break;
         }

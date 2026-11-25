@@ -28,8 +28,8 @@ export function App() {
       <div className="flex min-h-screen items-center justify-center p-6">
         <div className="card max-w-md p-6">
           <h1 className="text-lg font-extrabold">Não foi possível abrir seus dados</h1>
-          <p className="mt-2 text-sm text-ink-soft">{loadError || 'Tente entrar novamente.'}</p>
-          <p className="mt-2 text-xs text-ink-faint">Confira se a migration do Supabase foi aplicada e se a conexão está ativa.</p>
+          <p className="mt-2 break-words text-sm text-ink-soft">{loadError || 'Tente entrar novamente.'}</p>
+          <p className="mt-2 text-xs text-ink-faint">Confira a conexão com a internet e toque em Tentar de novo.</p>
           <div className="mt-5 flex gap-2">
             <button type="button" className="btn-primary" onClick={() => window.location.reload()}>Tentar de novo</button>
             <button type="button" className="btn-ghost" onClick={signOut}>Sair</button>
