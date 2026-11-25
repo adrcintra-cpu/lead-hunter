@@ -4,7 +4,7 @@ import { useApp, useDb, useService } from '@/store/AppStore';
 import { dataMode, supabase } from '@/lib/supabase';
 import { formatDateTime } from '@/core/utils';
 import { DEFAULT_SEND_WINDOW } from '@/core/types';
-import { ConfirmDialog, Modal, PageHeader, Spinner, ThemeSwitcher, cx } from '@/components/ui';
+import { ConfirmDialog, Modal, PageHeader, Spinner, cx } from '@/components/ui';
 import { CityListInput } from '@/features/search/CityInput';
 import { WhatsAppConnectionCard } from './WhatsAppConnectionCard';
 import { AssistantCard } from './AssistantCard';
@@ -58,11 +58,6 @@ export function SettingsPage() {
           </p>
           <button type="button" className="btn-outline mt-4" onClick={signOut}>Sair</button>
         </section>
-        <section className="card px-5 py-5">
-          <h2 className="text-[15px] font-extrabold">Aparência</h2>
-          <p className="mt-1 text-[13px] text-ink-faint">Claro, escuro ou seguir o sistema operacional.</p>
-          <div className="mt-3"><ThemeSwitcher /></div>
-        </section>
       </div>
     );
   }
@@ -70,12 +65,6 @@ export function SettingsPage() {
   return (
     <div className="mx-auto flex max-w-[900px] flex-col gap-5">
       <PageHeader title="Configurações" />
-
-      <section className="card px-5 py-5">
-        <h2 className="text-[15px] font-extrabold">Aparência</h2>
-        <p className="mt-1 text-[13px] text-ink-faint">Claro, escuro ou seguir o sistema operacional.</p>
-        <div className="mt-3"><ThemeSwitcher /></div>
-      </section>
 
       <section className="card px-5 py-5">
         <h2 className="text-[15px] font-extrabold">Seu perfil e ICP</h2>

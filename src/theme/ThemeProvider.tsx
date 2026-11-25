@@ -38,7 +38,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  const resolved: ResolvedTheme = preference === 'system' ? system : preference;
+  // Sempre claro: a linha visual Oxyhub não tem tema escuro (o Mac à noite deixava o sistema escuro).
+  void system;
+  const resolved: ResolvedTheme = 'light';
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', resolved === 'dark');

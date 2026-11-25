@@ -4,7 +4,7 @@ import { Bookmark, CheckSquare, Kanban, LayoutDashboard, List, LogOut, Megaphone
 import { SimClock } from './SimClock';
 import { useApp, useDb } from '@/store/AppStore';
 import { dataMode } from '@/lib/supabase';
-import { cx, ThemeSwitcher, Toasts } from '@/components/ui';
+import { cx, Toasts } from '@/components/ui';
 import { LeadDrawer } from '@/features/leads/LeadDrawer';
 import { useInstagramMenu } from '@/features/instagram/useInstagramMenu';
 import { OxyhubSwitcherTop, OxyhubSystemsList } from '@/components/OxyhubSwitcher';
@@ -171,10 +171,6 @@ export function AppShell() {
             <OxyhubSystemsList />
           </div>
           <div className="mt-auto flex flex-col gap-3 p-3 pt-6">
-            <div className="flex items-center justify-between gap-2 px-1">
-              <span className="text-xs font-semibold text-ink-faint">Tema</span>
-              <ThemeSwitcher compact />
-            </div>
             {account}
           </div>
         </aside>
@@ -212,7 +208,6 @@ export function AppShell() {
         </NavLink>
         <div className="flex-1" />
         <OxyhubSwitcherTop />
-        <ThemeSwitcher compact />
         <span className="hidden text-sm text-ink-soft lg:inline" title={session?.email}>
           {session?.email?.split('@')[0]}
           {team && team.role !== 'admin' && <span className="ml-1.5 text-[11px] font-semibold text-ink-faint">({team.role === 'vendedor' ? 'Vendedor' : 'Só leitura'})</span>}

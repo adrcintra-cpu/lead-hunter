@@ -17,8 +17,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="theme-color" content="#f3f5f9" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0c111d" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f3f5f9" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -29,9 +28,8 @@
       // Aplica o tema antes do primeiro paint para evitar flash.
       (function () {
         try {
-          var pref = localStorage.getItem('lh-theme') || 'system';
-          var dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          document.documentElement.classList.toggle('dark', dark);
+          // Sempre claro (linha visual Oxyhub).
+          document.documentElement.classList.remove('dark');
         } catch (e) {}
       })();
     </script>
