@@ -263,11 +263,9 @@ export class SupabaseRepository implements Repository {
     if (rows.length < PAGE || total <= PAGE) return rows;
     const starts: number[] = [];
     for (let from = PAGE; from < total; from += PAGE) starts.push(from);
-    // até 6 páginas ao mesmo tempo
-    for (let i = 0; i < starts.length; i += 6) {
-      const got = await Promise.all(starts.slice(i, i + 6).map((from) => fetchPage(from, false)));
-      for (const g of got) rows.push(...((g.data ?? []) as Record<string, unknown>[]));
-    }
+    // todas as páginas restantes de uma vez (HTTP/2 leva tudo na mesma conexão)
+    const got = await Promise.all(starts.map((from) => fetchPage(from, false)));
+    for (const g of got) rows.push(...((g.data ?? []) as Record<string, unknown>[]));
     return rows;
   }
 
@@ -276,18 +274,11 @@ export class SupabaseRepository implements Repository {
     const savedAtStart = this.savedSeq;
     const next = emptyDb();
     const tables = Object.keys(DEFS) as TableName[];
-    await Promise.all(
-      tables.map(async (t) => {
-        const rows = await this.pages(t, (q) => q);
-        (next as unknown as Record<string, unknown[]>)[t] = rows.map((r) => fromRow(t, r));
-      }),
-    );
-    // Memória do Beelie: lida à parte, para o app funcionar mesmo antes da migration.
-    {
+    const beelieRead = (async () => {
       const intel = new Map<string, unknown>();
       this.beelieCol = true;
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await this.client.from('leads').select('id, beelie').range(from, from + 999);
+        const { data, error } = await this.client.from('leads').select('id, beelie').not('beelie', 'is', null).range(from, from + 999);
         if (error) {
           this.beelieCol = false;
           break;
@@ -295,6 +286,17 @@ export class SupabaseRepository implements Repository {
         for (const r of (data ?? []) as { id: string; beelie: unknown }[]) if (r.beelie) intel.set(r.id, r.beelie);
         if (!data || data.length < 1000) break;
       }
+      return intel;
+    })();
+    await Promise.all(
+      tables.map(async (t) => {
+        const rows = await this.pages(t, (q) => q);
+        (next as unknown as Record<string, unknown[]>)[t] = rows.map((r) => fromRow(t, r));
+      }),
+    );
+    // Memória do Beelie: lida à parte (em paralelo com as tabelas), para o app funcionar mesmo antes da migration.
+    {
+      const intel = await beelieRead;
       if (intel.size) next.leads = next.leads.map((l) => (intel.has(l.id) ? { ...l, beelie: intel.get(l.id) as Lead['beelie'] } : l));
     }
     const { data: p, error } = await this.client.from('profiles').select('*').eq('id', this.user.id).maybeSingle();
