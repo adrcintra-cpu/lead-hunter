@@ -416,7 +416,12 @@ export function MetaConfig({ ctx, isAdmin, ownerId }: { ctx: MetaCtx; isAdmin: b
     try {
       const { url } = await metaLeadsApi.startConnect();
       // Dentro do Hub, a autorização da Meta abre na janela inteira (o Facebook não abre em quadro).
-      (window.top ?? window).location.href = url;
+      try {
+        (window.top ?? window).location.href = url;
+      } catch {
+        // Quadro sem permissão para trocar a janela de cima: abre em outra aba.
+        if (!window.open(url, '_blank', 'noopener')) window.location.href = url;
+      }
     } catch (e) {
       toast((e as Error).message);
       setBusy('');
