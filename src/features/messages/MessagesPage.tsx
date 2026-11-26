@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ChevronDown, Mail, MessageCircle, Search, Send } from 'lucide-react';
 import { useDb, useService } from '@/store/AppStore';
 import type { Message } from '@/core/types';
@@ -69,6 +70,14 @@ export function MessagesPage() {
   const [period, setPeriod] = useState<Period>(30);
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const campaign = params.get('campanha') ?? '';
+  const setCampaign = (id: string) => {
+    const next = new URLSearchParams(params);
+    if (id) next.set('campanha', id);
+    else next.delete('campanha');
+    setParams(next, { replace: true });
+  };
   const slots = useWaSlots(channel === 'whatsapp');
 
   const rows = useMemo<Row[]>(() => {
@@ -85,6 +94,7 @@ export function MessagesPage() {
     const out: Row[] = [];
     for (const m of db.messages) {
       if (m.channel !== channel || superseded(m)) continue;
+      if (campaign && m.campaignId !== campaign) continue;
       if (!['queued', 'sent', 'delivered', 'read', 'replied', 'failed'].includes(m.status)) continue;
       const at = m.sentAt ?? m.failedAt ?? m.createdAt;
       if (since && new Date(at).getTime() < since) continue;
@@ -99,7 +109,7 @@ export function MessagesPage() {
       out.push({ m, stage, replyAt: reply?.at ?? m.repliedAt, replySummary: reply?.summary, company: leadCompany.get(m.leadId) ?? 'Lead', leadId: m.leadId });
     }
     return out.sort((a, b) => (b.m.sentAt ?? b.m.createdAt).localeCompare(a.m.sentAt ?? a.m.createdAt));
-  }, [db.messages, db.inbound, db.leads, db.companies, channel, period, service]);
+  }, [db.messages, db.inbound, db.leads, db.companies, channel, period, service, campaign]);
 
   // Funil: quem chegou em cada etapa (um aberto também foi entregue e enviado).
   const reached = (r: Row, s: Stage) => {
@@ -111,6 +121,12 @@ export function MessagesPage() {
   const count = (s: Stage | 'todos') => (s === 'todos' ? rows.length : rows.filter((r) => reached(r, s)).length);
   const sent = count('enviado');
   const tracking = channel !== 'email' || rows.some((r) => r.m.deliveredAt || r.m.readAt);
+
+  // Campanhas que têm envios neste canal (para o filtro).
+  const campaignOptions = useMemo(() => {
+    const used = new Set(db.messages.filter((m) => m.channel === channel && m.campaignId).map((m) => m.campaignId!));
+    return db.campaigns.filter((c) => used.has(c.id) || c.id === campaign).sort((a, b) => a.name.localeCompare(b.name));
+  }, [db.messages, db.campaigns, channel, campaign]);
 
   const needle = q.trim().toLowerCase();
   const shown = rows.filter(
@@ -147,6 +163,13 @@ export function MessagesPage() {
           <option value={7}>Últimos 7 dias</option>
           <option value={30}>Últimos 30 dias</option>
           <option value={0}>Tudo</option>
+        </select>
+        <label htmlFor="env-camp" className="sr-only">Campanha</label>
+        <select id="env-camp" className="input min-h-[38px] w-auto max-w-[280px]" value={campaign} onChange={(e) => setCampaign(e.target.value)}>
+          <option value="">Todas as campanhas</option>
+          {campaignOptions.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
         </select>
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" aria-hidden />
