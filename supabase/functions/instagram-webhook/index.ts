@@ -4,12 +4,14 @@
 // GET: verificação do webhook (hub.verify_token = INSTAGRAM_VERIFY_TOKEN).
 // POST: confere a assinatura X-Hub-Signature-256 (META_APP_SECRET), responde 200 na hora
 // e processa em segundo plano (grava a mensagem e, conforme o modo, o BEELIE sugere a resposta).
+// Também recebe o "leadgen" das Páginas (Meta Leads): busca o lead na Graph API e grava no OxySDR.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { logRun, runTask } from '../_shared/ai/claude.ts';
 import { openToken } from '../_shared/instagram/crypto.ts';
 import { metaConfig } from '../_shared/instagram/graph.ts';
 import { ingest, parseEvents, suggest, verifyAnySignature, type Deps, type ReplyAnalysis } from '../_shared/instagram/inbox.ts';
+import { handleLeadgen, parseLeadgen } from '../_shared/meta/leads.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -56,6 +58,23 @@ Deno.serve(async (req) => {
   const events = parseEvents(body);
   const b = body as { object?: string; entry?: { id?: string; messaging?: unknown[]; changes?: { field?: string }[] }[] };
   console.log('instagram-webhook: recebido', JSON.stringify({ object: b?.object, entries: (b?.entry ?? []).map((e) => ({ id: e.id, messaging: e.messaging?.length ?? 0, changes: (e.changes ?? []).map((c) => c.field) })), mensagens: events.length }));
+  // Meta Leads: formulário de anúncio preenchido (object "page", campo "leadgen").
+  const leadgen = parseLeadgen(body);
+  if (leadgen.length) {
+    const ldb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+    const lwork = (async () => {
+      for (const ev of leadgen) {
+        try {
+          await handleLeadgen(ldb, cfg, ev);
+        } catch (e) {
+          console.error('instagram-webhook: falha no leadgen', (e as Error).message);
+        }
+      }
+    })();
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(lwork);
+    else await lwork;
+    return new Response('ok', { status: 200 });
+  }
   if (!events.length) return new Response('ok', { status: 200 });
 
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });

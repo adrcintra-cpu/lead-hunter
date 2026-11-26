@@ -13,6 +13,7 @@ import { inWindow, nextDayWindow, plan, startOfDayBRT, type Effect, type PlanCon
 import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, looksAutomated, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, cleanPersonName, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
 import { INBOUND_ORIGIN, SITE_ORIGIN, SITE_TOPIC_LABEL, type SiteTopic } from './unknownInbound.ts';
+import { META_ORIGIN, metaFormContext } from '../meta/leads.ts';
 import { EMAIL_CAMPAIGN_DAILY_CAP, feedCampaigns, QR_CAMPAIGN_DAILY_CAP } from './feeder.ts';
 import { huntLeads } from './hunter.ts';
 import { checkAiHealth } from './healthAlert.ts';
@@ -136,6 +137,8 @@ function softOpening(body: string, contact: unknown, company: unknown): string {
  * o restante em leads.beelie.pendingOpening. Sem contato anterior e sem cumprimento na primeira linha, não divide.
  */
 async function splitOpening(db: Db, lead: Row, body: string): Promise<{ greeting: string; rest: string } | null> {
+  // Lead do Meta Leads pediu contato: a mensagem vai inteira, na hora.
+  if (lead.origin === META_ORIGIN) return null;
   const m = /^(ol[áa](?=[\s,!.])[^\n]{0,60}tudo bem\?)\s*\n+([\s\S]+)$/i.exec(body.trim());
   if (!m) return null;
   const { count } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('lead_id', lead.id).not('sent_at', 'is', null);
@@ -286,6 +289,7 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
   let raw: string;
   const conv = await conversationContext(db, lead);
   const facts = priorContactRule(conv.history);
+  const metaForm = lead.origin === META_ORIGIN ? await metaFormContext(db, lead.id).catch(() => null) : null;
   try {
     const run = await runTask<string>('generateApproach', {
       company: companyForAI(c),
@@ -300,7 +304,7 @@ async function compose(db: Db, ownerId: string, lead: Row, c: Row, p: Row, cad: 
         contactName: lead.contact_name,
         contactRole: lead.contact_role,
         stage: conv.history.length ? stage : 'primeira',
-        instructions: [step.template, facts].filter(Boolean).join('\n\n') || undefined,
+        instructions: [step.template, metaForm, facts].filter(Boolean).join('\n\n') || undefined,
         ...conv,
         campaignName,
       },

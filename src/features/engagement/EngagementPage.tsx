@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AtSign, Check, Copy, ExternalLink, Briefcase, Heart, Plus, RefreshCw, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { useApp } from '@/store/AppStore';
 import { EmptyState, ErrorBox, PageHeader, Spinner, cx } from '@/components/ui';
@@ -21,12 +22,93 @@ import {
   type EngSettings,
   type EngTheme,
 } from '@/services/engagement';
+import { AutomationsTab, ConversationsTab, MetaConfig, MetaLeadsTab, ReportsTab, useMetaLeads } from './MetaLeadsTabs';
 
 const today = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
 const KIND_LABEL: Record<EngItem['kind'], string> = { comentario: 'Comentar no post', convite: 'Enviar convite', mensagem: 'Primeira mensagem', resposta: 'Responder comentário no post da Oxycom' };
 
-/** Engajamento social assistido: o OxySDR encontra e escreve; você envia na rede e marca como feito. */
+const TABS = [
+  { id: 'visao', label: 'Visão geral' },
+  { id: 'meta', label: 'Meta Leads' },
+  { id: 'conversas', label: 'Conversas' },
+  { id: 'automacoes', label: 'Automações' },
+  { id: 'relatorios', label: 'Relatórios' },
+  { id: 'config', label: 'Configurações' },
+] as const;
+type Tab = (typeof TABS)[number]['id'];
+
+/** Engajamento social: fila assistida (Visão geral) e Meta Leads (formulários de anúncio do Facebook/Instagram). */
 export function EngagementPage() {
+  const { team, session } = useApp();
+  const [params, setParams] = useSearchParams();
+  const tab = (TABS.some((t) => t.id === params.get('aba')) ? params.get('aba') : 'visao') as Tab;
+  const go = (t: Tab) => {
+    const next = new URLSearchParams(params);
+    if (t === 'visao') next.delete('aba');
+    else next.set('aba', t);
+    setParams(next, { replace: true });
+  };
+  const meta = useMetaLeads();
+  const isAdmin = !team || team.role === 'admin';
+  const ownerId = team?.ownerId ?? session?.userId ?? '';
+  const bar = (
+    <div role="tablist" aria-label="Partes do Engajamento social" className="flex flex-wrap gap-1 border-b border-line">
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={tab === t.id}
+          onClick={() => go(t.id)}
+          className={cx('-mb-px border-b-2 px-3 py-2 text-[13px] font-bold', tab === t.id ? 'border-accent text-ink' : 'border-transparent text-ink-faint hover:text-ink')}
+        >
+          {t.label}
+          {t.id === 'meta' && meta.data && meta.data.leads.length > 0 && <span className="ml-1.5 text-ink-faint">{meta.data.leads.length}</span>}
+        </button>
+      ))}
+    </div>
+  );
+  if (tab === 'visao') return <SocialQueue tabs={bar} />;
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Engajamento social"
+        subtitle="Leads dos formulários de anúncio do Facebook e do Instagram, pela API oficial da Meta, com o Beelie no primeiro contato."
+      />
+      {bar}
+      {meta.error && <ErrorBox>{meta.error}</ErrorBox>}
+      {tab === 'meta' && <MetaLeadsTab ctx={meta} goConfig={() => go('config')} />}
+      {tab === 'conversas' && <ConversationsTab />}
+      {tab === 'automacoes' && <AutomationsTab ctx={meta} goConfig={() => go('config')} />}
+      {tab === 'relatorios' && <ReportsTab ctx={meta} />}
+      {tab === 'config' && (
+        <div className="space-y-6">
+          <MetaConfig ctx={meta} isAdmin={isAdmin} ownerId={ownerId} />
+          <QueueSettings ownerId={ownerId} canWrite={!team || team.role !== 'leitura'} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Ajustes da fila de engajamento (os mesmos do botão Ajustes da Visão geral). */
+function QueueSettings({ ownerId, canWrite }: { ownerId: string; canWrite: boolean }) {
+  const { toast } = useApp();
+  const [settings, setSettings] = useState<EngSettings | null>(null);
+  useEffect(() => {
+    loadSettings().then(setSettings, () => setSettings(null));
+  }, []);
+  if (!settings) return null;
+  return (
+    <div className="space-y-2">
+      <h2 className="text-[15px] font-bold">Fila de engajamento (Instagram e LinkedIn)</h2>
+      <SettingsCard initial={settings} ownerId={ownerId} canWrite={canWrite} onSaved={(s) => { setSettings(s); toast('Ajustes salvos.', 'success'); }} />
+    </div>
+  );
+}
+
+/** Engajamento social assistido: o OxySDR encontra e escreve; você envia na rede e marca como feito. */
+function SocialQueue({ tabs }: { tabs: ReactNode }) {
   const { team, session, toast } = useApp();
   const canWrite = !team || team.role !== 'leitura';
   const ownerId = team?.ownerId ?? session?.userId ?? '';
@@ -90,6 +172,7 @@ export function EngagementPage() {
           </>
         }
       />
+      {tabs}
 
       {error && <ErrorBox>{error}</ErrorBox>}
       {notes.length > 0 && (

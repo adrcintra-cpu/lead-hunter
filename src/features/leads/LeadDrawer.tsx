@@ -17,6 +17,7 @@ import { Fold, PanelTitle, since } from './Fold';
 import { readIntel, stageLabel as beelieStageLabel, TEMPERATURE_LABEL } from '../../../supabase/functions/_shared/automation/beelie.ts';
 import { BeeliePanel } from './BeeliePanel';
 import { MenuNavFold } from './MenuNavFold';
+import { MetaLeadForm } from '@/features/engagement/MetaLeadForm';
 
 export function LeadDrawer({ leadId }: { leadId: string }) {
   const { close } = useLeadDrawer();
@@ -123,6 +124,11 @@ export function LeadProfile({ row, onClose, standalone = false }: { row: LeadRow
             <BeeliePanel lead={lead} />
           </Fold>
           <MenuNavFold leadId={lead.id} />
+          {(lead.origin === 'Meta Leads' || lead.tags?.includes('meta-leads')) && (
+            <Fold leadId={lead.id} id="meta" title="Formulário do anúncio · Meta Leads">
+              <MetaLeadForm leadId={lead.id} />
+            </Fold>
+          )}
           <Fold leadId={lead.id} id="campanha" title="Campanha e cadência" positive={ev.campanha.pos} negative={ev.campanha.neg} summary={ev.campanha.summary}>
             <CadencePanel leadId={lead.id} />
           </Fold>
