@@ -59,3 +59,5 @@ jobs:
         run: supabase functions deploy instagram-webhook --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
       - name: hub
         run: supabase functions deploy hub --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
+      - name: site-chat
+        run: supabase functions deploy site-chat --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
