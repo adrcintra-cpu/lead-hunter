@@ -43,7 +43,7 @@ export function MetaLeadForm({ leadId, item }: { leadId?: string; item?: MetaLea
             <dt className="text-ink-faint">Anúncio</dt>
             <dd>{m.ad_name ?? '—'}</dd>
             <dt className="text-ink-faint">Beelie</dt>
-            <dd>{m.enrolled_at ? `Primeiro contato iniciado em ${formatDateTime(m.enrolled_at)}` : m.skip_reason ? `Sem contato automático: ${m.skip_reason}` : m.imported_via === 'importacao' ? 'Lead antigo: sem contato automático' : '—'}</dd>
+            <dd>{m.enrolled_at ? `Na campanha do Beelie desde ${formatDateTime(m.enrolled_at)}` : m.skip_reason ? `Sem contato automático: ${m.skip_reason}` : m.imported_via === 'importacao' ? 'Lead antigo: sem contato automático' : '—'}</dd>
           </dl>
           <div className="rounded-[14px] bg-ink/[0.03] p-3">
             <div className="mb-1.5 text-[12px] font-bold text-ink-soft">Respostas do formulário</div>

@@ -52,7 +52,7 @@ export function useMetaLeads() {
     }
     const [st, d] = await Promise.allSettled([metaLeadsApi.status(), metaLeadsApi.load()]);
     setStatus(st.status === 'fulfilled' ? st.value : null);
-    setData(d.status === 'fulfilled' ? d.value : { leads: [], stages: {}, replied: new Set(), logs: [], autoFirstContact: true });
+    setData(d.status === 'fulfilled' ? d.value : { leads: [], stages: {}, replied: new Set(), contacted: new Set(), logs: [], autoFirstContact: true });
     const bad = [st, d].find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
     setError(bad ? (bad.reason instanceof Error ? bad.reason.message : String(bad.reason)) : '');
   }, []);
@@ -72,7 +72,8 @@ function kpis(d: MetaLeadsData, from: number) {
   return {
     list,
     total: list.length,
-    contacted: list.filter((l) => l.enrolled_at).length,
+    contacted: ids.filter((id) => d.contacted.has(id)).length,
+    queued: list.filter((l) => l.enrolled_at && !(l.lead_id && d.contacted.has(l.lead_id))).length,
     replied: ids.filter((id) => d.replied.has(id)).length,
     advanced: ids.filter((id) => ADVANCED.has(d.stages[id])).length,
     clients: ids.filter((id) => d.stages[id] === 'cliente').length,
@@ -163,7 +164,7 @@ export function MetaLeadsTab({ ctx, goConfig }: { ctx: MetaCtx; goConfig: () => 
 
       <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Kpi label="Leads recebidos" value={k?.total} hint={`Hoje: ${today ?? '—'}`} />
-        <Kpi label="Contatados pelo Beelie" value={k?.contacted} hint="Primeiro contato automático" />
+        <Kpi label="Contatados pelo Beelie" value={k?.contacted} hint={k ? `Mensagem enviada · ${k.queued} na fila` : undefined} />
         <Kpi label="Responderam" value={k?.replied} hint="Resposta registrada no OxySDR" dot="bg-good" />
         <Kpi label="Reunião ou proposta" value={k ? k.advanced - k.clients : undefined} hint="Estágio no pipeline" />
         <Kpi label="Viraram clientes" value={k?.clients} hint="Estágio Cliente" dot="bg-good" />
@@ -216,8 +217,10 @@ export function MetaLeadsTab({ ctx, goConfig }: { ctx: MetaCtx; goConfig: () => 
                   {stage && <span className="text-[12px] font-semibold text-ink-soft">{stageLabel(stage)}</span>}
                   {l.lead_id && d!.replied.has(l.lead_id) ? (
                     <span className="rounded-full bg-good-soft px-2.5 py-0.5 text-[12px] font-bold text-good">Respondeu</span>
+                  ) : l.lead_id && d!.contacted.has(l.lead_id) ? (
+                    <span className="rounded-full bg-accent-soft px-2.5 py-0.5 text-[12px] font-bold text-accent">Beelie em contato</span>
                   ) : l.enrolled_at ? (
-                    <span className="rounded-full bg-accent-soft px-2.5 py-0.5 text-[12px] font-bold text-accent-ink">Beelie em contato</span>
+                    <span className="rounded-full bg-ink/[0.06] px-2.5 py-0.5 text-[12px] font-bold text-ink-soft">Na fila do Beelie</span>
                   ) : null}
                   <span className="w-[120px] text-right text-[12px] tabular-nums text-ink-faint">{l.created_time ? formatDateTime(l.created_time) : ''}</span>
                 </button>
@@ -345,7 +348,7 @@ export function ReportsTab({ ctx }: { ctx: MetaCtx }) {
         by === 'campanha' ? l.campaign_name ?? 'Sem campanha informada' : by === 'formulario' ? l.form_name ?? l.form_id ?? '—' : by === 'anuncio' ? l.ad_name ?? 'Sem anúncio informado' : (l.platform && PLATFORM_LABEL[l.platform]) || 'Não informado';
       const r = m.get(key) ?? { total: 0, contacted: 0, replied: 0, advanced: 0, clients: 0 };
       r.total++;
-      if (l.enrolled_at) r.contacted++;
+      if (l.lead_id && d.contacted.has(l.lead_id)) r.contacted++;
       if (l.lead_id && d.replied.has(l.lead_id)) r.replied++;
       if (l.lead_id && ADVANCED.has(d.stages[l.lead_id])) r.advanced++;
       if (l.lead_id && d.stages[l.lead_id] === 'cliente') r.clients++;

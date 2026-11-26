@@ -59,6 +59,8 @@ export interface MetaLeadsData {
   leads: MetaLead[];
   stages: Record<string, string>;
   replied: Set<string>;
+  /** Leads com pelo menos uma mensagem realmente enviada (não só na fila). */
+  contacted: Set<string>;
   logs: MetaSyncLog[];
   autoFirstContact: boolean;
 }
@@ -115,16 +117,19 @@ export const metaLeadsApi = {
     const ids = [...new Set(leads.map((x) => x.lead_id).filter(Boolean))] as string[];
     const stages: Record<string, string> = {};
     const replied = new Set<string>();
+    const contacted = new Set<string>();
     for (let i = 0; i < ids.length; i += 200) {
       const part = ids.slice(i, i + 200);
-      const [st, rep] = await Promise.all([
+      const [st, rep, sent] = await Promise.all([
         db.from('leads').select('id, stage').in('id', part),
         db.from('lead_activities').select('lead_id').in('lead_id', part).eq('type', 'reply_received').limit(5000),
+        db.from('messages').select('lead_id').in('lead_id', part).not('sent_at', 'is', null).limit(5000),
       ]);
+      for (const r of sent.data ?? []) contacted.add(r.lead_id as string);
       for (const r of st.data ?? []) stages[r.id as string] = r.stage as string;
       for (const r of rep.data ?? []) replied.add(r.lead_id as string);
     }
-    return { leads, stages, replied, logs: (logs.data ?? []) as MetaSyncLog[], autoFirstContact: s.data?.auto_first_contact ?? true };
+    return { leads, stages, replied, contacted, logs: (logs.data ?? []) as MetaSyncLog[], autoFirstContact: s.data?.auto_first_contact ?? true };
   },
 
   async setAutoFirstContact(ownerId: string, on: boolean) {
