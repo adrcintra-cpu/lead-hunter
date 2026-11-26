@@ -65,6 +65,9 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json(origin, { error: 'Método não permitido' }, 405);
   if (origin && !allowed(origin)) return json(origin, { error: 'Origem não permitida' }, 403);
 
+  // Formulário "Quero minha demonstração" da landing (multipart/form-data)
+  if ((req.headers.get('content-type') ?? '').startsWith('multipart/form-data')) return demoRequest(req, origin);
+
   let body: Row;
   try {
     body = await req.json();
@@ -239,3 +242,69 @@ Deno.serve(async (req) => {
 
   return json(origin, { reply: out.reply, askContact: out.askContact && !c.lead_id });
 });
+
+/** Pedido de demonstração pelo formulário da landing: vira lead "Site Oxyhub" com tarefa para a equipe. */
+async function demoRequest(req: Request, origin: string): Promise<Response> {
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return json(origin, { error: 'Pedido inválido' }, 400);
+  }
+  const name = clean(form.get('name'), 120);
+  const email = clean(form.get('email'), 254).toLowerCase();
+  const company = clean(form.get('company'), 160);
+  const operation = clean(form.get('operation'), 1500);
+  if (!name || !company || !/^\S+@\S+\.\S+$/.test(email)) return json(origin, { error: 'Preencha nome, e-mail e empresa.' }, 400);
+
+  const db = adminClient();
+  const ownerId = await ownerOf(db);
+  if (!ownerId) return json(origin, { error: 'Atendimento indisponível' }, 503);
+  const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'sem-ip';
+  const ipHash = await sha(`${ip}:${ownerId}`);
+  const since = new Date(Date.now() - 864e5).toISOString();
+  const { count } = await db.from('site_chats').select('id', { count: 'exact', head: true }).eq('ip_hash', ipHash).like('session_id', 'form-%').gte('created_at', since);
+  if ((count ?? 0) >= 5) return json(origin, { error: 'Recebemos vários pedidos daqui hoje. Fale com a gente pelo WhatsApp.' }, 429);
+
+  const at = new Date().toISOString();
+  const src = { provider: 'site', fetchedAt: at };
+  const { data: comp, error: e1 } = await db
+    .from('companies')
+    .insert({
+      owner_id: ownerId,
+      legal_name: company,
+      segment: 'A identificar',
+      city: 'A identificar',
+      state: 'SP',
+      field_provenance: { legalName: src },
+      dedupe_key: `site:demo:${email}:${Date.now()}`,
+      created_by: null,
+    })
+    .select('id')
+    .single();
+  if (e1 || !comp) {
+    console.error('site demo company', e1?.message);
+    return json(origin, { error: 'Não consegui registrar agora.' }, 500);
+  }
+  const { data: lead, error: e2 } = await db
+    .from('leads')
+    .insert({ owner_id: ownerId, company_id: comp.id, origin: SITE_ORIGIN, stage: 'interessado', contact_name: name, email, tags: ['site', 'site-form', 'site-demonstracao'], created_by: null })
+    .select('id')
+    .single();
+  if (e2 || !lead) {
+    await db.from('companies').delete().eq('id', comp.id);
+    console.error('site demo lead', e2?.message);
+    return json(origin, { error: 'Não consegui registrar agora.' }, 500);
+  }
+  await log(db, ownerId, lead.id, 'discovered', `Pediu demonstração pelo formulário do site do Oxyhub${operation ? `: ${operation.slice(0, 300)}` : '.'}`, { kind: 'site_form', operation });
+  await db.from('tasks').insert({
+    owner_id: ownerId,
+    lead_id: lead.id,
+    title: `Agendar demonstração com ${name} (${company}) — site`,
+    description: [`E-mail: ${email}`, operation ? `O que mais trava a operação: ${operation}` : ''].filter(Boolean).join('\n'),
+    source: 'resposta',
+    due_at: new Date(Date.now() + 4 * 3600e3).toISOString(),
+  });
+  await db.from('site_chats').insert({ owner_id: ownerId, session_id: `form-${crypto.randomUUID()}`, ip_hash: ipHash, topic: 'demonstracao', lead_id: lead.id, user_messages: 1 });
+  return json(origin, { ok: true });
+}
