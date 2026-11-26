@@ -12,7 +12,7 @@ import { emailProblem } from './emailCheck.ts';
 import { inWindow, nextDayWindow, plan, startOfDayBRT, type Effect, type PlanContext } from './planner.ts';
 import { instagramFromKnowledge, siteFromKnowledge, withSiteInvite, ADVANCED_STAGES, analyzeReplyRules, checkInterest, hasRealInterest, looksAutomated, messageStage, normalizeAnalysis, parseSubject, renderTemplate, replyDecision, withOptOutFooter, type TemplateData } from './replies.ts';
 import { analyzeSignalsRules, beelieBrief, cleanPersonName, combineSignals, mergeIntel, NEED_AREAS, stageLabel, type ConversationSignals } from './beelie.ts';
-import { INBOUND_ORIGIN } from './unknownInbound.ts';
+import { INBOUND_ORIGIN, SITE_ORIGIN, SITE_TOPIC_LABEL, type SiteTopic } from './unknownInbound.ts';
 import { EMAIL_CAMPAIGN_DAILY_CAP, feedCampaigns, QR_CAMPAIGN_DAILY_CAP } from './feeder.ts';
 import { huntLeads } from './hunter.ts';
 import { checkAiHealth } from './healthAlert.ts';
@@ -1071,7 +1071,12 @@ async function suggestReplyDraft(db: Db, ownerId: string, lead: Row, company: Ro
       assistant,
       brief: beelieBrief(lead.beelie, { contactName: lead.contact_name, contactRole: lead.contact_role, email: lead.email }),
       // Lead que chamou sozinho: o Beelie não fez abordagem e ainda não conhece a empresa.
-      inbound: lead.origin === INBOUND_ORIGIN,
+      inbound: lead.origin === INBOUND_ORIGIN || lead.origin === SITE_ORIGIN,
+      // Veio pelo site do Oxyhub: modo atendimento (e o assunto que a pessoa escolheu no site).
+      site:
+        lead.origin === SITE_ORIGIN
+          ? SITE_TOPIC_LABEL[((lead.tags ?? []) as string[]).find((t) => t.startsWith('site-'))?.slice(5) as SiteTopic] ?? SITE_TOPIC_LABEL.contato
+          : undefined,
       // Abertura em duas partes: a continuação preparada vai agora, depois da resposta ao cumprimento.
       pendingOpening: typeof lead.beelie?.pendingOpening === 'string' ? lead.beelie.pendingOpening : undefined,
     });

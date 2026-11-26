@@ -323,6 +323,7 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         assistant?: { name?: string; persona?: string; knowledge?: string; playbooks?: string };
         brief?: string;
         inbound?: boolean;
+        site?: string;
         pendingOpening?: string;
       };
       const cut = (t: string | undefined, n: number) => (t ?? '').trim().slice(0, n);
@@ -336,7 +337,10 @@ note: uma frase para o vendedor sobre o que fazer agora (inclua o que já se sab
         i.sender.offer ? `Oferta (perfil do vendedor): ${i.sender.offer}` : '',
         i.contact?.name ? `Contato no lead: ${i.contact.name}${i.contact.role ? `, ${i.contact.role}` : ''} (use o primeiro nome)` : '',
         i.category ? `Classificação da última resposta: ${i.category}` : '',
-        i.inbound
+        i.site
+          ? `MODO ATENDIMENTO (SITE): a pessoa tocou no botão do WhatsApp no site do Oxyhub e ${i.site}. Não é prospecção: nada de pergunta provocativa nem de procurar "a pessoa certa". Agradeça o contato e apresente-se uma vez. Responda primeiro ao que ela pediu, com base na BASE DE CONHECIMENTO (o Oxyhub reúne os sistemas da Oxycom: OxySDR, OxyPlanning, OxyProposal, OxyGrowth, OxyMeet, OxyStudio e agentes de IA). Para saber o que faz sentido, pergunte com naturalidade o nome, a empresa e o que ela quer organizar ou automatizar primeiro, uma pergunta por vez. Ofereça a demonstração com o especialista cedo, assim que entender a necessidade (se ela já pediu demonstração, peça dois horários que funcionem). Preço, prazo e casos só se estiverem na base; senão, diga que o especialista confirma na demonstração.`
+          : '',
+        i.inbound && !i.site
           ? 'IMPORTANTE: o lead procurou a empresa por conta própria (não houve abordagem antes). Agradeça o contato, apresente-se uma vez e ajude com o que ele pediu. Ainda não se sabe o nome da pessoa nem a empresa dela: descubra com naturalidade, uma pergunta por vez. Não diga que viu algo sobre a empresa dele.'
           : '',
         i.pendingOpening

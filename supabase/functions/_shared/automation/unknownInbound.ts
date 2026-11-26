@@ -10,6 +10,30 @@ type Row = Record<string, any>;
 
 /** Origem dos leads que chegaram sozinhos pelo WhatsApp. */
 export const INBOUND_ORIGIN = 'WhatsApp (chamou a empresa)';
+/** Origem de quem tocou no botão do WhatsApp no site do Oxyhub (a mensagem já vem escrita pelo site). */
+export const SITE_ORIGIN = 'Site Oxyhub';
+
+export type SiteTopic = 'demonstracao' | 'duvida' | 'solucoes' | 'contato';
+export const SITE_TOPIC_LABEL: Record<SiteTopic, string> = {
+  demonstracao: 'quer agendar uma demonstração',
+  duvida: 'tem uma dúvida',
+  solucoes: 'quer conhecer as soluções',
+  contato: 'quer saber mais',
+};
+
+/**
+ * O site abre o WhatsApp com uma frase pronta ("Vim pelo site do Oxyhub e …"). Se a pessoa mantiver a frase,
+ * sabemos a origem e o assunto. Se apagar, cai na triagem normal de quem chama sem ser lead.
+ */
+export function siteTopic(text: string): SiteTopic | null {
+  const t = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (!/pelo site do oxy ?hub/.test(t)) return null;
+  if (/demonstra/.test(t)) return 'demonstracao';
+  if (/duvida/.test(t)) return 'duvida';
+  if (/solu[cç]/.test(t)) return 'solucoes';
+  return 'contato';
+}
+
 /** Limite de leads criados assim por dia (proteção contra spam). */
 export const MAX_INBOUND_LEADS_PER_DAY = 30;
 
@@ -172,11 +196,16 @@ export async function handleUnknown(db: Db, ownerId: string, from: string, text:
     if (l) return { leadId: l.id, created: false };
   }
 
-  const s = await screen(db, ownerId, text);
+  // Veio pelo botão do site: já é contato comercial, sem triagem de IA.
+  const topic = siteTopic(text);
+  const origin = topic ? SITE_ORIGIN : INBOUND_ORIGIN;
+  const s: Screening = topic
+    ? { commercial: true, reason: `veio pelo site do Oxyhub e ${SITE_TOPIC_LABEL[topic]}`, companyName: null, contactName: null, city: null }
+    : await screen(db, ownerId, text);
   if (!s.commercial) return { leadId: null, reason: s.reason };
 
   const since = new Date(Date.now() - 864e5).toISOString();
-  const { count } = await db.from('leads').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId).eq('origin', INBOUND_ORIGIN).gte('created_at', since);
+  const { count } = await db.from('leads').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId).eq('origin', origin).gte('created_at', since);
   if ((count ?? 0) >= MAX_INBOUND_LEADS_PER_DAY) return { leadId: null, reason: 'limite diário de leads novos pelo WhatsApp' };
 
   const at = new Date().toISOString();
@@ -204,7 +233,15 @@ export async function handleUnknown(db: Db, ownerId: string, from: string, text:
   if (e1 || !company) throw new Error(e1?.message ?? 'falha ao criar empresa');
   const { data: lead, error: e2 } = await db
     .from('leads')
-    .insert({ owner_id: ownerId, company_id: company.id, origin: INBOUND_ORIGIN, stage: 'novo', created_by: null, ...(s.contactName ? { contact_name: s.contactName } : {}) })
+    .insert({
+      owner_id: ownerId,
+      company_id: company.id,
+      origin,
+      stage: 'novo',
+      created_by: null,
+      ...(topic ? { tags: ['site', `site-${topic}`] } : {}),
+      ...(s.contactName ? { contact_name: s.contactName } : {}),
+    })
     .select('id')
     .single();
   if (e2 || !lead) {
@@ -215,8 +252,10 @@ export async function handleUnknown(db: Db, ownerId: string, from: string, text:
     owner_id: ownerId,
     lead_id: lead.id,
     type: 'discovered',
-    description: `Chamou no WhatsApp por conta própria: o Beelie criou o lead (${s.reason}).`,
-    payload: { kind: 'inbound_lead', reason: s.reason },
+    description: topic
+      ? `Chamou no WhatsApp pelo site do Oxyhub (${SITE_TOPIC_LABEL[topic]}): o Beelie criou o lead e atende.`
+      : `Chamou no WhatsApp por conta própria: o Beelie criou o lead (${s.reason}).`,
+    payload: { kind: 'inbound_lead', reason: s.reason, ...(topic ? { source: 'site', topic } : {}) },
     actor_id: null,
   });
   return { leadId: lead.id, created: true };
